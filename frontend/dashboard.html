@@ -415,6 +415,43 @@
     box-shadow: 0 0 0 3px var(--accent-glow), inset 2px 2px 4px var(--shadow-dark-subtle);
   }
 
+  /* 日期「按钮」：一个拟态化凸起的 <button>，点它由 JS 唤起原生日期选择器。
+     里面藏一个 <input type="date"> 只用来存值（id=letter-date，sendLetter 读它），
+     不负责点击，也不显示任何原生控件——彻底告别小图标重叠。
+     按钮上的文字由 #letter-date-label 显示「请选择日期」或已选日期。 */
+  .config-row button.date-pill {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    box-sizing: border-box;
+    height: 39px;
+    padding: 0 14px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    text-align: left;
+    color: var(--text);
+    background: var(--bg);
+    box-shadow: 4px 4px 8px var(--shadow-dark-subtle), -4px -4px 8px var(--shadow-light);
+    transition: all 0.2s ease;
+  }
+  .config-row button.date-pill:hover {
+    box-shadow: 5px 5px 10px var(--shadow-dark), -5px -5px 10px var(--shadow-light);
+  }
+  .config-row button.date-pill:active {
+    box-shadow: inset 3px 3px 6px var(--shadow-dark-subtle), inset -3px -3px 6px var(--shadow-light);
+  }
+  .config-row button.date-pill:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--accent-glow), 4px 4px 8px var(--shadow-dark-subtle), -4px -4px 8px var(--shadow-light);
+  }
+  #letter-date-label {
+    pointer-events: none;
+    color: var(--text-dim);
+  }
+
   .btn-primary {
     padding: 12px 28px;
     background: var(--accent);
@@ -2038,8 +2075,12 @@
           <option value="user">user</option>
           <option value="ai">AI</option>
         </select>
-        <input type="text" id="letter-username" placeholder="user_name（可选）" />
-        <input type="date" id="letter-date" style="flex:0 0 180px;" />
+        <input type="text" id="letter-username" placeholder="署名 name（可选）" />
+        <button type="button" class="date-pill" style="flex:0 0 180px;" onclick="openDatePicker()">
+          <span id="letter-date-label">请选择日期</span>
+          <input type="date" id="letter-date" onchange="syncDateLabel()" oninput="syncDateLabel()"
+                 style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;left:14px;bottom:0;" />
+        </button>
       </div>
       <div class="config-row">
         <label>标题</label>
@@ -5817,22 +5858,11 @@ async function _runBackfillSilent() {
   });
 }
 
-// AI 一方的显示名，由 /api/config 注入（取自环境变量 AI_NAME，回退 "AI"）。
-// 面向用户的文案统一引用它，不再硬编码具体模型名。
-var AI_NAME = 'AI';
-
-function _applyAiName() {
-  // 写信身份下拉里 AI 选项的显示标签跟随 AI_NAME。
-  var opt = document.querySelector('#letter-author option[value="ai"]');
-  if (opt) opt.textContent = AI_NAME;
-}
-
 async function loadConfig() {
   try {
     var res = await authFetch('/api/config');
     if (!res) return;
     var cfg = await res.json();
-    if (cfg.ai_name) { AI_NAME = cfg.ai_name; _applyAiName(); }
     document.getElementById('cfg-dehy-model').value = cfg.dehydration.model || '';
     document.getElementById('cfg-dehy-url').value = cfg.dehydration.base_url || '';
     var fmtEl = document.getElementById('cfg-dehy-format');
@@ -6711,13 +6741,18 @@ async function loadLogs() {
     const r = await fetch(BASE + '/api/logs?level=' + encodeURIComponent(level) + '&limit=' + limit);
     const d = await r.json();
     if (d.error) { out.textContent = '加载失败: ' + d.error; return; }
+    // 界面只显示文件名（如 server.log），完整路径放 title 悬停提示里——
+    // 既干净，也不把本机用户名/目录结构暴露在界面上。
+    const fullPath = d.log_file || '';
+    const fileName = fullPath.split(/[\\/]/).pop() || fullPath;
+    meta.title = fullPath;
     if (!d.lines || !d.lines.length) {
       out.textContent = d.note || '(无符合条件的日志)';
-      meta.textContent = d.log_file || '';
+      meta.textContent = fileName;
       return;
     }
     out.textContent = d.lines.join('\n');
-    meta.textContent = (d.log_file || '') + ' · ' + d.count + ' 行';
+    meta.textContent = fileName + ' · ' + d.count + ' 行';
     out.scrollTop = out.scrollHeight;
   } catch (e) { out.textContent = '加载失败: ' + e.message; }
 }
@@ -7380,6 +7415,26 @@ function _renderLetter(l) {
   </article>`;
 }
 
+// 日期「按钮」：点按钮 → 主动唤起浏览器原生日期选择器。
+// showPicker() 是专门干这事的 API（Chrome/Edge/Safari 支持）；
+// 不支持时退回 focus+click，再不行就让隐藏 input 临时可见聚焦。
+function openDatePicker() {
+  const inp = document.getElementById('letter-date');
+  if (!inp) return;
+  try {
+    if (typeof inp.showPicker === 'function') { inp.showPicker(); return; }
+  } catch (e) { /* 某些浏览器在非用户手势下会抛错，下面兜底 */ }
+  inp.focus();
+  inp.click();
+}
+
+// 选完日期后，把按钮上的文字更新成所选日期（没选则回到提示）。
+function syncDateLabel() {
+  const inp = document.getElementById('letter-date');
+  const lbl = document.getElementById('letter-date-label');
+  if (inp && lbl) lbl.textContent = inp.value || '请选择日期';
+}
+
 async function sendLetter() {
   const status = document.getElementById('letter-status');
   status.style.color = 'var(--text-dim)';
@@ -7835,7 +7890,7 @@ async function executePurge() {
     closePurgeModal();
     exitPurgeMode();
     await loadBuckets();
-    var msg = '已永久删除 ' + data.deleted + ' 条记忆桶。' + AI_NAME + ' 将在下次工具调用时收到通知。';
+    var msg = '已永久删除 ' + data.deleted + ' 条记忆桶。AI 将在下次工具调用时收到通知。';
     if (data.failed && data.failed.length) msg += '\n未能删除：' + data.failed.join(', ');
     alert(msg);
   } catch (e) {

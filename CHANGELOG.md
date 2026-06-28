@@ -22,11 +22,19 @@
 ### 变更 / Changed
 
 - **全局去除面向用户文本与注释中的 "Claude" 硬编码。** 面向用户的文案（OAuth 授权页、
-  Dashboard 删除确认/提示、配置项说明）改为引用 AI 显示名（前端经 `/api/config` 注入
-  `ai_name`，回退 `"AI"`）；代码注释中的 "Claude" 统一改为 "AI"/"LLM"。
-  保留第三方服务/格式/文件的固有名（如 `Claude Desktop`、`claude.ai`、
+  Dashboard 删除确认/提示、配置项说明）改为中性的 "AI"；代码注释中的 "Claude" 统一改为
+  "AI"/"LLM"。保留第三方服务/格式/文件的固有名（如 `Claude Desktop`、`claude.ai`、
   `claude_desktop_config.json`、Claude/ChatGPT 导出格式、Anthropic 模型 ID），以及 letter
   存储层对历史 `"claude"` 署名的向后兼容判断。
+  - 写信表单「身份」下拉固定为 `user` / `AI`（对面是 AI 这点不必纠结具体模型名）；
+    具体署名由用户在旁边的「署名」框自行填写。
+
+### 前端 / Frontend
+
+- 写信表单的日期选择改造成拟态化「按钮」：点击主动唤起原生日期选择器（`showPicker()`
+  + 兜底），选定后按钮显示所选日期；去掉了原生小日历图标与提示文字重叠的问题。
+- 「服务日志」页右上角的日志文件路径只显示文件名（如 `server.log`），完整路径移到鼠标
+  悬停提示，界面更干净、也不在页面上暴露本机绝对路径。
 
 ### 维护 / Chores
 

@@ -26,6 +26,11 @@ from starlette.responses import Response
 
 from . import _shared as sh
 
+try:
+    from utils import get_ai_name as _get_ai_name  # type: ignore
+except ImportError:  # pragma: no cover
+    from ..utils import get_ai_name as _get_ai_name  # type: ignore
+
 logger = sh.logger
 
 
@@ -136,6 +141,9 @@ def register(mcp) -> None:
             # 部署信息：数据目录 + 端口 + 是否容器内。前端「系统」区展示，端口可改。
             "host_port": sh.config.get("host_port"),
             "in_docker": sh.in_docker(),
+            # AI 一方的显示名（取自环境变量 AI_NAME，回退 "AI"）。前端只读，用于
+            # 面向用户的文案（如删除确认、信件署名占位）。
+            "ai_name": _get_ai_name(),
         })
 
 

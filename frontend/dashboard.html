@@ -2036,7 +2036,7 @@
         <label>身份</label>
         <select id="letter-author" style="flex:0 0 140px;">
           <option value="user">user</option>
-          <option value="claude">claude</option>
+          <option value="ai">AI</option>
         </select>
         <input type="text" id="letter-username" placeholder="user_name（可选）" />
         <input type="date" id="letter-date" style="flex:0 0 180px;" />
@@ -2062,7 +2062,7 @@
         <select id="letter-filter" onchange="loadLetters()" style="flex:0 0 200px;">
           <option value="">全部</option>
           <option value="user">仅 YOU</option>
-          <option value="claude">仅 AI</option>
+          <option value="ai">仅 AI</option>
         </select>
         <button class="btn-secondary" onclick="loadLetters()" title="刷新" style="padding:8px 14px;font-size:12px;"><i data-lucide="refresh-cw"></i></button>
         <span id="letter-count" style="font-size:11px;color:var(--text-dim);margin-left:auto;"></span>
@@ -2552,7 +2552,7 @@
         <div class="config-row"><label>合并阈值</label><input type="number" id="cfg-merge" min="0" max="100" /></div>
         <div style="margin-top:-4px;padding-left:122px;font-size:11px;color:var(--text-light);">0-100，越高越难合并相似桶</div>
         <div class="config-row"><label>breath 默认桶数</label><input type="number" id="cfg-sf-breath-results" min="1" max="50" /></div>
-        <div style="margin-top:-4px;padding-left:122px;font-size:11px;color:var(--text-light);">1-50。Claude 调用 breath() 不指定 max_results 时使用此默认值</div>
+        <div style="margin-top:-4px;padding-left:122px;font-size:11px;color:var(--text-light);">1-50。AI 调用 breath() 不指定 max_results 时使用此默认值</div>
         <div class="config-row"><label>breath 默认 token</label><input type="number" id="cfg-sf-breath-tokens" min="500" max="20000" step="500" /></div>
         <div style="margin-top:-4px;padding-left:122px;font-size:11px;color:var(--text-light);">500-20000。breath 单次返回总 token 上限</div>
         <div class="config-row"><label>feel 历史 token</label><input type="number" id="cfg-sf-feel-tokens" min="500" max="20000" step="500" /></div>
@@ -2857,7 +2857,7 @@
         <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;line-height:1.6;">
           用于批量彻底删除记忆桶（物理删除，不可恢复）。<br>
           <strong>仅用于清理批量导入时分析出错产生的垃圾记忆。</strong><br>
-          Claude 无法触发此操作；删除后 Claude 下次任意工具调用时会收到一次性通知。
+          AI 无法触发此操作；删除后 AI 下次任意工具调用时会收到一次性通知。
         </div>
         <button class="btn-danger" onclick="enterPurgeMode()" style="padding:6px 18px;font-size:12px;">
           进入清理模式（批量永久删除）
@@ -5817,11 +5817,22 @@ async function _runBackfillSilent() {
   });
 }
 
+// AI 一方的显示名，由 /api/config 注入（取自环境变量 AI_NAME，回退 "AI"）。
+// 面向用户的文案统一引用它，不再硬编码具体模型名。
+var AI_NAME = 'AI';
+
+function _applyAiName() {
+  // 写信身份下拉里 AI 选项的显示标签跟随 AI_NAME。
+  var opt = document.querySelector('#letter-author option[value="ai"]');
+  if (opt) opt.textContent = AI_NAME;
+}
+
 async function loadConfig() {
   try {
     var res = await authFetch('/api/config');
     if (!res) return;
     var cfg = await res.json();
+    if (cfg.ai_name) { AI_NAME = cfg.ai_name; _applyAiName(); }
     document.getElementById('cfg-dehy-model').value = cfg.dehydration.model || '';
     document.getElementById('cfg-dehy-url').value = cfg.dehydration.base_url || '';
     var fmtEl = document.getElementById('cfg-dehy-format');
@@ -7353,8 +7364,9 @@ async function loadLetters() {
 }
 
 function _renderLetter(l) {
-  const who = l.author === 'user' ? (l.user_name || 'user') : 'claude';
-  const accentColor = l.author === 'claude' ? 'var(--accent)' : 'var(--text-dim)';
+  // 用户侧显示 user_name；AI 侧（及任意自定义署名）原样显示存储的 author 值。
+  const who = l.author === 'user' ? (l.user_name || 'user') : (l.author || 'AI');
+  const accentColor = l.author !== 'user' ? 'var(--accent)' : 'var(--text-dim)';
   return `<article style="background:var(--surface);border:1px solid var(--border);border-radius:2px;padding:18px 22px;box-shadow:4px 4px 10px var(--shadow-dark-subtle), -4px -4px 10px var(--shadow-light);" data-id="${l.id}">
     <div style="font-size:11px;color:var(--text-dim);letter-spacing:0.15em;display:flex;justify-content:space-between;margin-bottom:8px;">
       <span style="color:${accentColor};font-weight:600;">${esc(who)}</span><span>${esc(l.date || '')}</span>
@@ -7577,7 +7589,7 @@ function copyFeedback() {
 </div>
 <!-- ============================================================
      批量硬删确认 Modal（3 步确认）
-     仅用户操作，Claude 无法触发；删除后向 Claude 发送一次性通知
+     仅用户操作，AI 无法触发；删除后向 AI 发送一次性通知
      全程展示待删除桶列表
      ============================================================ -->
 <div id="purge-modal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(44,42,38,0.6);backdrop-filter:blur(4px);align-items:flex-start;justify-content:center;padding-top:40px;overflow-y:auto;">
@@ -7597,7 +7609,7 @@ function copyFeedback() {
       <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:13px;color:var(--text);line-height:1.7;">
         <input type="checkbox" id="purge-chk-confirm" onchange="purgeCheckStep1()"
           style="accent-color:var(--accent);margin-top:3px;flex-shrink:0;">
-        <span>我知道这是<strong>永久删除</strong>，文件将从磁盘上完全移除，任何人包括 Claude 都无法恢复。</span>
+        <span>我知道这是<strong>永久删除</strong>，文件将从磁盘上完全移除，任何人包括 AI 都无法恢复。</span>
       </label>
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px;">
         <button onclick="closePurgeModal()" style="background:none;border:1px solid var(--border);color:var(--text-dim);border-radius:2px;padding:6px 16px;font-size:12px;cursor:pointer;">取消</button>
@@ -7823,7 +7835,7 @@ async function executePurge() {
     closePurgeModal();
     exitPurgeMode();
     await loadBuckets();
-    var msg = '已永久删除 ' + data.deleted + ' 条记忆桶。Claude 将在下次工具调用时收到通知。';
+    var msg = '已永久删除 ' + data.deleted + ' 条记忆桶。' + AI_NAME + ' 将在下次工具调用时收到通知。';
     if (data.failed && data.failed.length) msg += '\n未能删除：' + data.failed.join(', ');
     alert(msg);
   } catch (e) {

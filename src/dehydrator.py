@@ -573,10 +573,10 @@ class Dehydrator:
     async def dehydrate(self, content: str, metadata: Optional[dict] = None) -> str:
         """
         Dehydrate/compress memory content.
-        Returns formatted summary string ready for Claude context injection.
+        Returns formatted summary string ready for LLM context injection.
         Uses SQLite cache to avoid redundant API calls.
         对记忆内容做脱水压缩。
-        返回格式化的摘要字符串，可直接注入 Claude 上下文。
+        返回格式化的摘要字符串，可直接注入 LLM 上下文。
         使用 SQLite 缓存避免重复调用 API。
         """
         if not content or not content.strip():

@@ -559,15 +559,15 @@ async def check_plan_resolution(new_event_text: str, source_bucket_id: str = "")
 
 
 # ============================================================
-# 显式 plan→bucket 联动（人工/Claude 路径）
+# 显式 plan→bucket 联动（人工/AI 路径）
 # ------------------------------------------------------------
-# 当 plan 桶被「人工或 Claude 显式」标为 resolved 时，把它指向的
+# 当 plan 桶被「人工或 AI 显式」标为 resolved 时，把它指向的
 # related_bucket / resolved_by 两个普通桶也同步标 resolved=True。
 # 这是 rule.md §1 哲学落地：plan 是承诺，承诺被放下，承载这条承诺
 # 的事件桶也不该再浮上来。
 #
 # 不联动的路径：check_plan_resolution（LLM 自动二判）—— 自动判定
-# 的可信度低于人工/Claude 显式动作，避免把活的事件桶意外打沉。
+# 的可信度低于人工/AI 显式动作，避免把活的事件桶意外打沉。
 #
 # 反向不做：bucket trace(resolved=1) 不联动 plan（plan 是独立承诺，
 # 单条事件结束不等于承诺达成）。

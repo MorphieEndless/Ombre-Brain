@@ -370,9 +370,9 @@ from web._shared import _mark_op  # noqa: F401  (injected into tools._runtime be
 
 # =============================================================
 # 仪表板硬删除通知队列（Dashboard Hard Purge Notification）
-# 她/他从仪表板彻底删除记忆后，下次 Claude 调用任何工具时一次性通知。
+# 她/他从仪表板彻底删除记忆后，下次 AI 调用任何工具时一次性通知。
 # 通知文件存于 buckets_dir/_pending_deletions.json，消费后立即删除。
-# Claude 无法触发此通知（它不是 MCP 工具，只能由仪表板 HTTP 端点写入）。
+# AI 无法触发此通知（它不是 MCP 工具，只能由仪表板 HTTP 端点写入）。
 # =============================================================
 
 def _deletion_notice_path() -> str:
@@ -380,7 +380,7 @@ def _deletion_notice_path() -> str:
 
 
 def _write_deletion_notice(names: list) -> None:
-    """追加待发送删除通知。多次删除批次会合并入同一文件直至 Claude 读取。"""
+    """追加待发送删除通知。多次删除批次会合并入同一文件直至 AI 读取。"""
     path = _deletion_notice_path()
     try:
         existing: list = []
@@ -718,17 +718,19 @@ async def letter_write(
     user_name: Optional[str] = "",
     title: Optional[str] = "",
     date: Optional[str] = "",
+    ai_name: Optional[str] = "",
 ) -> str:
-    """写入一封信。author 必填:\"user\"=用户一方写的,\"claude\"=助手一方写的;user_name 可选;title/date 可选。信件原文永久保存,不压缩/不合并/不衰减,仅建向量索引;普通 breath 不返回,SessionStart 钩子会带上双方各最新一封。"""
+    """写入一封信。author 必填:\"user\"=用户一方写的,\"ai\"(或等于 ai_name)=AI 一方写的,也可直接传任意署名字符串;user_name 可选;ai_name 可选(默认取环境变量 AI_NAME,回退 \"AI\");title/date 可选。信件原文永久保存,不压缩/不合并/不衰减,仅建向量索引;普通 breath 不返回,SessionStart 钩子会带上双方各最新一封。"""
     return await _with_notice(
         _t_plan.letter_write(
             author=author, content=content, user_name=user_name,
-            title=title, date=date,
+            title=title, date=date, ai_name=ai_name,
         ),
         op="letter_write",
         args={
             "author": author, "content_len": len(content or ""),
             "user_name": user_name, "title": title, "date": date,
+            "ai_name": ai_name,
         },
     )
 
@@ -741,7 +743,7 @@ async def letter_read(
     date_from: Optional[str] = "",
     date_to: Optional[str] = "",
 ) -> str:
-    """检索历史信件。query=语义检索(可选);author=\"user\"/\"claude\" 按方向过滤;date_from/date_to=ISO 日期范围(可选)。无 query 时按时间倒序返回最近 limit 封。返回完整原文,不压缩。"""
+    """检索历史信件。query=语义检索(可选);author 按署名过滤(\"user\"=用户侧,\"ai\"=AI 侧,也可传具体署名字符串);date_from/date_to=ISO 日期范围(可选)。无 query 时按时间倒序返回最近 limit 封。返回完整原文,不压缩。"""
     return await _with_notice(
         _t_plan.letter_read(
             query=query, limit=limit, author=author,

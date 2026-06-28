@@ -25,9 +25,9 @@ from . import _shared as sh
 logger = sh.logger
 
 try:
-    from utils import strip_wikilinks, count_tokens_approx  # type: ignore
+    from utils import strip_wikilinks, count_tokens_approx, get_ai_name  # type: ignore
 except ImportError:  # pragma: no cover
-    from ..utils import strip_wikilinks, count_tokens_approx  # type: ignore
+    from ..utils import strip_wikilinks, count_tokens_approx, get_ai_name  # type: ignore
 
 
 def _truthy(value) -> bool:
@@ -138,16 +138,18 @@ def register(mcp) -> None:
             try:
                 letters = [b for b in all_buckets if b["metadata"].get("type") == "letter"]
                 if letters:
-                    def _latest(author: str) -> dict | None:
-                        pool = [letter for letter in letters if letter["metadata"].get("author") == author]
+                    def _latest(*authors: str) -> dict | None:
+                        wanted = set(authors)
+                        pool = [letter for letter in letters if letter["metadata"].get("author") in wanted]
                         if not pool:
                             return None
                         pool.sort(key=lambda b: b["metadata"].get("letter_date") or b["metadata"].get("created", ""), reverse=True)
                         return pool[0]
                     latest_user = _latest("user")
-                    latest_claude = _latest("claude")
+                    # AI 侧：新署名 ai_name + 历史遗留的 "claude"
+                    latest_ai = _latest(get_ai_name(), "claude")
                     letter_lines = []
-                    for tag, letter in (("user→你", latest_user), ("你→user", latest_claude)):
+                    for tag, letter in (("user→你", latest_user), ("你→user", latest_ai)):
                         if letter is None:
                             continue
                         d = letter["metadata"].get("letter_date") or letter["metadata"].get("created", "")[:10]

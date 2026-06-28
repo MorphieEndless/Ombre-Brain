@@ -3,7 +3,7 @@
 web/oauth.py — MCP 远程鉴权（OAuth 2.1 + PKCE）
 ========================================
 
-Claude.ai 网页版 / Claude Code 通过 HTTPS 连接 MCP 时走的 OAuth 流程：
+MCP 客户端通过 HTTPS 连接 MCP 时走的 OAuth 流程：
 动态注册 → 授权页（输 Dashboard 密码）→ 换 code → 换 Bearer token。
 token 落盘 <buckets_dir>/.dashboard_mcp_tokens.json，100 年有效（实际永久），
 Docker 重启不强制重新授权。
@@ -122,6 +122,11 @@ def _validate_authorize_redirect(client_id: str, redirect_uri: str) -> tuple[boo
 def _oauth_authorize_html(client_id: str, redirect_uri: str, state: str,
                            code_challenge: str, error: str = "") -> str:
     e = _html_escape.escape
+    try:
+        from utils import get_ai_name  # type: ignore
+    except ImportError:  # pragma: no cover
+        from ..utils import get_ai_name  # type: ignore
+    ai_name = e(get_ai_name())
     err_html = f'<p style="color:#ff6b6b;font-size:13px;margin-top:12px;">{e(error)}</p>' if error else ""
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -143,7 +148,7 @@ button:hover{{background:#d4b87a}}
 </style></head>
 <body><div class="card">
 <h2>◐ Ombre Brain</h2>
-<p class="sub">授权 Claude Code 连接 MCP</p>
+<p class="sub">授权 {ai_name} 连接 MCP</p>
 <form method="POST">
 <input type="hidden" name="client_id" value="{e(client_id)}">
 <input type="hidden" name="redirect_uri" value="{e(redirect_uri)}">
@@ -153,7 +158,7 @@ button:hover{{background:#d4b87a}}
 <button type="submit">授权并连接</button>
 </form>
 {err_html}
-<p class="note">授权后 Claude Code 将可使用 MCP 工具读写记忆。<br>Token 永久有效，无需重复授权。<br>若工具调用失败，请在客户端断开重连，再重新点击此页授权即可。</p>
+<p class="note">授权后 {ai_name} 将可使用 MCP 工具读写记忆。<br>Token 永久有效，无需重复授权。<br>若工具调用失败，请在客户端断开重连，再重新点击此页授权即可。</p>
 </div></body></html>"""
 
 

@@ -2,6 +2,36 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.3.21
+
+### 新增 / Added
+
+- **letter 署名支持自定义 AI 名称。** `letter_write` 的 `author` 不再限定
+  `"user"`/`"claude"`，改为接受任意字符串署名：
+  - `"user"` → 用户侧（`user_name` 逻辑不变）；
+  - `"ai"`、等于 `ai_name` 的值、或历史遗留的 `"claude"` → 统一存为 `ai_name` 的值；
+  - 其它任意字符串 → 原样作为署名。
+  新增可选参数 `ai_name`（显式传入优先），默认取环境变量 `AI_NAME`，回退 `"AI"`。
+  `letter_read` 原样返回存储的署名、不做转换；按 `author` 过滤时 `"ai"` 会同时
+  命中新署名与历史 `"claude"` 信件。Dashboard 写信/筛选、SessionStart 钩子的「最近的信」
+  同步适配。（`src/tools/plan/core.py`、`src/web/letters.py`、`src/web/hooks.py`、
+  `src/server.py`、`frontend/dashboard.html`；回归测试 `tests/test_letter_author_regression.py`）
+- 新增共享 helper `utils.get_ai_name()`：统一从环境变量 `AI_NAME` 读取 AI 显示名（回退 `"AI"`）。
+- `.env.example` 新增 `AI_NAME=` 条目及说明。
+
+### 变更 / Changed
+
+- **全局去除面向用户文本与注释中的 "Claude" 硬编码。** 面向用户的文案（OAuth 授权页、
+  Dashboard 删除确认/提示、配置项说明）改为引用 AI 显示名（前端经 `/api/config` 注入
+  `ai_name`，回退 `"AI"`）；代码注释中的 "Claude" 统一改为 "AI"/"LLM"。
+  保留第三方服务/格式/文件的固有名（如 `Claude Desktop`、`claude.ai`、
+  `claude_desktop_config.json`、Claude/ChatGPT 导出格式、Anthropic 模型 ID），以及 letter
+  存储层对历史 `"claude"` 署名的向后兼容判断。
+
+### 维护 / Chores
+
+- 同步 bump `src/VERSION`（热更新读取的副本）与根 `VERSION` 至 2.3.21。
+
 ## 2.3.20
 
 ### 修复 / Fixed

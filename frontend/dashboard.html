@@ -6772,7 +6772,7 @@ function renderV3DebugDecision(record, index) {
   const allowed = summary.policy_allowed;
   const badgeColor = ok && allowed ? 'var(--positive)' : (allowed ? 'var(--warning)' : 'var(--negative)');
   const surfaces = (summary.projection_surfaces || []).join(', ') || '-';
-  return '<button onclick="replayV3Decision(\\'' + esc(record.id) + '\\')" ' +
+  return '<button onclick="replayV3Decision(\'' + esc(record.id) + '\')" ' +
     'style="text-align:left;background:var(--surface-solid);border:1px solid var(--border);border-radius:4px;padding:10px 12px;cursor:pointer;color:var(--text);">' +
     '<div style="display:flex;align-items:center;gap:8px;font-size:12px;">' +
       '<span style="width:7px;height:7px;border-radius:50%;background:' + badgeColor + ';display:inline-block;flex-shrink:0;"></span>' +

@@ -1,3 +1,4 @@
+import os
 from unittest.mock import MagicMock
 
 import frontmatter
@@ -124,7 +125,7 @@ async def test_decay_cycle_preserves_explicit_permanent_bucket_without_pinned_fl
 
     assert stats["demoted_orphans"] == 0
     assert bucket["metadata"]["type"] == "permanent"
-    assert "\\permanent\\" in bucket["path"]
+    assert f"{os.sep}permanent{os.sep}" in bucket["path"]
 
 
 @pytest.mark.asyncio
@@ -137,14 +138,14 @@ async def test_direct_pinned_create_writes_permanent_type_and_unpin_moves_to_dyn
     pinned = await bucket_mgr.get(bucket_id)
     assert pinned["metadata"]["type"] == "permanent"
     assert pinned["metadata"]["pinned"] is True
-    assert "\\permanent\\" in pinned["path"]
+    assert f"{os.sep}permanent{os.sep}" in pinned["path"]
 
     await bucket_mgr.update(bucket_id, pinned=False)
     unpinned = await bucket_mgr.get(bucket_id)
 
     assert unpinned["metadata"]["type"] == "dynamic"
     assert unpinned["metadata"]["pinned"] is False
-    assert "\\dynamic\\" in unpinned["path"]
+    assert f"{os.sep}dynamic{os.sep}" in unpinned["path"]
 
 
 @pytest.mark.asyncio
@@ -183,7 +184,7 @@ async def test_repair_pinned_desync_does_not_demote_explicit_permanent_bucket(bu
     assert preview["orphans"] == []
     assert applied["demoted"] == 0
     assert bucket["metadata"]["type"] == "permanent"
-    assert "\\permanent\\" in bucket["path"]
+    assert f"{os.sep}permanent{os.sep}" in bucket["path"]
 
 
 @pytest.mark.asyncio
@@ -200,4 +201,4 @@ async def test_idempotent_unpinned_update_preserves_explicit_permanent_bucket(bu
 
     assert bucket["metadata"]["type"] == "permanent"
     assert bucket["metadata"].get("pinned") is False
-    assert "\\permanent\\" in bucket["path"]
+    assert f"{os.sep}permanent{os.sep}" in bucket["path"]

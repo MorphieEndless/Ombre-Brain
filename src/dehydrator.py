@@ -37,6 +37,14 @@ from openai import AsyncOpenAI
 
 from utils import count_tokens_approx
 
+try:
+    from provider_detect import is_gemini_native_host, strip_native_resource_prefix
+except ImportError:  # pragma: no cover
+    from .provider_detect import (  # type: ignore
+        is_gemini_native_host,
+        strip_native_resource_prefix,
+    )
+
 logger = logging.getLogger("ombre_brain.dehydrator")
 
 
@@ -267,7 +275,7 @@ class Dehydrator:
         if (
             self.api_format == "openai_compat"
             and self.api_key.startswith("AQ.")
-            and "generativelanguage.googleapis.com" in (self.base_url or "")
+            and is_gemini_native_host(self.base_url)
         ):
             self.api_format = "gemini"
             logger.info("AQ.* key + generativelanguage.googleapis.com detected — auto-switching to native Gemini API")
@@ -474,7 +482,7 @@ class Dehydrator:
             return ""
         import httpx
         # Strip any accidental "models/" prefix — Google rejects double-prefix in the URL
-        model_id = self.model.removeprefix("models/").strip()
+        model_id = strip_native_resource_prefix(self.model)
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent"
         payload: dict = {
             "system_instruction": {"parts": [{"text": system}]},

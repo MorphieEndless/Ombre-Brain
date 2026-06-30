@@ -56,12 +56,16 @@ async def test_default_breath_surfaces_type_permanent_bucket_without_pinned_flag
 
 
 @pytest.mark.asyncio
-async def test_search_breath_falls_back_to_raw_permanent_content_when_dehydrate_fails(
+async def test_search_breath_rejects_when_embedding_unavailable_even_if_dehydrate_fails(
     bucket_mgr,
     decay_eng,
     monkeypatch,
 ):
-    bucket_id = await bucket_mgr.create(
+    """embedding 是 breath(query=...) 的强制依赖：未启用时直接拒绝整个检索，
+    不再像旧版那样靠 dehydrate 失败回退原文继续返回结果（rule.md §1.5 的
+    「不静默」现在延伸为「不降级」，见 bucket_manager._require_embedding_available）。
+    """
+    await bucket_mgr.create(
         content="Candlelit protocol belongs to the permanent rules.",
         bucket_type="permanent",
         importance=10,
@@ -72,18 +76,17 @@ async def test_search_breath_falls_back_to_raw_permanent_content_when_dehydrate_
     import tools.breath.search as search_mod
 
     monkeypatch.setattr(search_mod.random, "random", lambda: 1.0)
-    result = await surface_search(
-        query="Candlelit protocol",
-        max_results=10,
-        max_tokens=10000,
-        domain="",
-        valence=-1,
-        arousal=-1,
-        tag_filter=[],
-    )
 
-    assert bucket_id in result
-    assert "Candlelit protocol" in result
+    with pytest.raises(RuntimeError, match="embedding"):
+        await surface_search(
+            query="Candlelit protocol",
+            max_results=10,
+            max_tokens=10000,
+            domain="",
+            valence=-1,
+            arousal=-1,
+            tag_filter=[],
+        )
 
 
 @pytest.mark.asyncio

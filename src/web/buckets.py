@@ -26,6 +26,11 @@ try:
 except ImportError:  # pragma: no cover
     from ..utils import strip_wikilinks  # type: ignore
 
+try:
+    from tools._common import check_pinned_quota as _check_pinned_quota  # type: ignore
+except ImportError:  # pragma: no cover
+    from ..tools._common import check_pinned_quota as _check_pinned_quota  # type: ignore
+
 
 async def rename_human_in_buckets(old: str, new: str) -> dict:
     """把所有桶里字面量 `old` 正则替换成 `new`（name / content / why_remembered /
@@ -187,6 +192,9 @@ def register(mcp) -> None:
         update_kwargs: dict[str, object] = {"pinned": new_pinned}
         # Pinning: importance jumps to 10 + type→permanent. Unpin reverts type→dynamic.
         if new_pinned:
+            quota_err = await _check_pinned_quota()
+            if quota_err:
+                return JSONResponse({"error": quota_err}, status_code=400)
             update_kwargs["importance"] = 10
             update_kwargs["type"] = "permanent"
         else:

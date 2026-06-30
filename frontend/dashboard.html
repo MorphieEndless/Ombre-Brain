@@ -1787,7 +1787,12 @@
   <div class="tab" data-tab="import"><span>导入</span><span class="tab-en">Import</span></div>
   <div class="tab" data-tab="logs"><span>日志</span><span class="tab-en">Logs</span></div>
   <div class="tab" data-tab="settings"><span>设置</span><span class="tab-en">Settings</span></div>
+  <!-- v3-debug tab 暂时隐藏：后端 /api/v3/debug/* 路由已就位（只读、不写数据），
+       但 v3_runtime 尚未接入（src/ombrebrain/ 架构核心未挂载到 server.py），
+       现在打开只会看到空列表，不报错但没数据。见 docs/TODO_V3_DEBUG_SYNC.md。
+       v3_runtime 接入后，取消下一行注释即可恢复入口。
   <div class="tab" data-tab="v3-debug"><span>2.4.0 Debug</span><span class="tab-en">Replay</span></div>
+  -->
   <div class="tab-spacer"></div>
   <div class="tab" data-tab="about"><span>关于</span><span class="tab-en">About</span></div>
 </div>

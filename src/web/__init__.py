@@ -29,6 +29,7 @@ from . import github
 from . import embedding
 from . import ollama_local
 from . import config_api
+from . import v3_debug
 
 
 def register_all(mcp) -> None:
@@ -49,3 +50,8 @@ def register_all(mcp) -> None:
     embedding.register(mcp)
     ollama_local.register(mcp)
     config_api.register(mcp)
+    # v3_debug：只读 Decision Ledger/Replay 路由。依赖 web/_shared.py 的
+    # v3_runtime（src/ 树尚未接入，对应仓库根目录那套未上线的 v2.4.0
+    # 接入层/ombrebrain 包）；在此之前所有请求降级返回 available:False，
+    # 不会报错也不会暴露假数据。见 docs/ 待办：v3_debug 同步说明。
+    v3_debug.register(mcp)

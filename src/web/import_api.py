@@ -246,7 +246,20 @@ def register(mcp) -> None:
                 if action == "important":
                     await sh.bucket_mgr.update(bid, importance=9)
                 elif action == "pin":
-                    await sh.bucket_mgr.update(bid, pinned=True)
+                    bucket = await sh.bucket_mgr.get(bid)
+                    if not bucket:
+                        errors += 1
+                        continue
+                    if not bucket.get("metadata", {}).get("pinned"):
+                        quota_err = await _check_pinned_quota()
+                        if quota_err:
+                            logger.warning(f"Review pin rejected for {bid}: {quota_err}")
+                            errors += 1
+                            continue
+                    ok = await sh.bucket_mgr.update(bid, pinned=True)
+                    if ok is False:
+                        errors += 1
+                        continue
                 elif action == "noise":
                     await sh.bucket_mgr.update(bid, resolved=True, importance=1)
                 elif action == "delete":

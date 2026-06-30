@@ -6354,16 +6354,27 @@ loadVersionBadge();
         if (vl) vl.textContent = 'v' + _obLocalVersion;
       }
 
-      // 从 raw GitHub 读 VERSION 文件，不依赖是否发布过 Release。
-      // 破缓存：raw 走 Fastly CDN（max-age=300），且 fetch 默认会进浏览器 HTTP 缓存——
-      // 用户若在 CDN 还缓存着旧版的 5 分钟窗口内点过检查，浏览器会把旧 VERSION 缓存住，
-      // 之后再点直接读本地缓存 → 永远「已是最新」。加时间戳 + no-store 双保险，每次都拿真新值。
-      const rRaw = await fetch(
-        'https://raw.githubusercontent.com/P0luz/Ombre-Brain/main/VERSION?t=' + Date.now(),
-        { cache: 'no-store' }
-      );
-      if (!rRaw.ok) throw new Error('无法读取 GitHub VERSION 文件（' + rRaw.status + '）');
-      const latestTag = (await rRaw.text()).trim().replace(/^v/, '');
+      // raw.githubusercontent.com 的 main 分支会走 Fastly CDN，push 后可能继续命中旧 VERSION。
+      // 先走 GitHub Contents API 取真实 HEAD 内容；API 不可用时再回退 raw。
+      let latestText = '';
+      try {
+        const rApi = await fetch(
+          'https://api.github.com/repos/P0luz/Ombre-Brain/contents/VERSION?ref=main',
+          { cache: 'no-store', headers: { 'Accept': 'application/vnd.github.raw' } }
+        );
+        if (rApi.ok) latestText = await rApi.text();
+      } catch (_) {}
+
+      if (!latestText.trim()) {
+        const rRaw = await fetch(
+          'https://raw.githubusercontent.com/P0luz/Ombre-Brain/main/VERSION?t=' + Date.now(),
+          { cache: 'no-store' }
+        );
+        if (!rRaw.ok) throw new Error('无法读取 GitHub VERSION 文件（' + rRaw.status + '）');
+        latestText = await rRaw.text();
+      }
+
+      const latestTag = latestText.trim().replace(/^v/, '');
       if (!latestTag) throw new Error('GitHub VERSION 文件为空');
 
       // 尝试读 Release 说明（无 Release 时静默忽略）

@@ -45,6 +45,11 @@ import httpx
 from openai import AsyncOpenAI
 
 try:
+    from utils import positive_float
+except ImportError:  # pragma: no cover
+    from .utils import positive_float  # type: ignore
+
+try:
     from provider_detect import (
         normalize_model_for_endpoint,
         strip_native_resource_prefix,
@@ -63,6 +68,7 @@ logger = logging.getLogger("ombre_brain.embedding")
 # ============================================================
 
 _GEMINI_DEFAULT_DIM = 3072
+_API_TIMEOUT_SECONDS = 30.0
 
 # 输入截断长度
 _MAX_INPUT_CHARS = 2000
@@ -152,9 +158,11 @@ class APIEmbeddingEngine(BaseEmbeddingEngine):
         base_url: str,
         model: str,
         dim: int = _GEMINI_DEFAULT_DIM,
+        timeout_seconds: float = _API_TIMEOUT_SECONDS,
     ):
         self.api_key = api_key
         self.base_url = base_url
+        self.timeout_seconds = positive_float(timeout_seconds, _API_TIMEOUT_SECONDS)
         # Google's OpenAI-compatible endpoint wants OpenAI-style bare model IDs.
         # Native REST uses the "models/" resource prefix, so normalize pasted
         # native IDs here before calling embeddings.create().
@@ -171,7 +179,7 @@ class APIEmbeddingEngine(BaseEmbeddingEngine):
         self._client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
-            http_client=httpx.AsyncClient(timeout=30.0, trust_env=not _is_local_host),
+            http_client=httpx.AsyncClient(timeout=self.timeout_seconds, trust_env=not _is_local_host),
         )
 
     def model_name(self) -> str:
@@ -240,10 +248,17 @@ class GeminiNativeEmbeddingEngine(BaseEmbeddingEngine):
     端点：POST .../v1beta/models/{model}:embedContent?key={api_key}
     """
 
-    def __init__(self, api_key: str, model: str, dim: int = _GEMINI_DEFAULT_DIM):
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        dim: int = _GEMINI_DEFAULT_DIM,
+        timeout_seconds: float = _API_TIMEOUT_SECONDS,
+    ):
         self.api_key = api_key
         self.model = model
         self._dim = dim
+        self.timeout_seconds = positive_float(timeout_seconds, _API_TIMEOUT_SECONDS)
 
     def model_name(self) -> str:
         return self.model
@@ -266,7 +281,7 @@ class GeminiNativeEmbeddingEngine(BaseEmbeddingEngine):
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:embedContent"
         payload = {"content": {"parts": [{"text": text[:_MAX_INPUT_CHARS]}]}}
         try:
-            async with httpx.AsyncClient(timeout=30.0) as c:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as c:
                 r = await c.post(url, params={"key": self.api_key}, json=payload)
                 r.raise_for_status()
             values = r.json().get("embedding", {}).get("values", [])
@@ -306,6 +321,7 @@ class EmbeddingEngine:
     def __init__(self, config: dict):
         self.v3_runtime = None
         embed_cfg = config.get("embedding", {}) or {}
+        timeout_seconds = positive_float(embed_cfg.get("timeout_seconds"), _API_TIMEOUT_SECONDS)
 
         # 解析 backend：env > config > 默认 api
         self.backend = "api"
@@ -371,10 +387,20 @@ class EmbeddingEngine:
                 dim = int(embed_cfg.get("dim") or 1024)
             except (TypeError, ValueError):
                 dim = 1024
-            self._backend = APIEmbeddingEngine(api_key=api_key, base_url=base_url, model=model, dim=dim)
+            self._backend = APIEmbeddingEngine(
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+                dim=dim,
+                timeout_seconds=timeout_seconds,
+            )
         elif api_format == "gemini":
             model = embed_cfg.get("model") or "gemini-embedding-001"
-            self._backend = GeminiNativeEmbeddingEngine(api_key=api_key, model=model)
+            self._backend = GeminiNativeEmbeddingEngine(
+                api_key=api_key,
+                model=model,
+                timeout_seconds=timeout_seconds,
+            )
         else:
             model = embed_cfg.get("model") or "gemini-embedding-001"
             base_url = (
@@ -390,7 +416,13 @@ class EmbeddingEngine:
                 dim = int(embed_cfg.get("dim") or _GEMINI_DEFAULT_DIM)
             except (TypeError, ValueError):
                 dim = _GEMINI_DEFAULT_DIM
-            self._backend = APIEmbeddingEngine(api_key=api_key, base_url=base_url, model=model, dim=dim)
+            self._backend = APIEmbeddingEngine(
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+                dim=dim,
+                timeout_seconds=timeout_seconds,
+            )
 
         self.model = self._backend.model_name()
         self.enabled = True

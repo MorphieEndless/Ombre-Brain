@@ -2660,6 +2660,7 @@
             <option value="anthropic">Anthropic 原生</option>
           </select>
         </div>
+        <div class="form-row"><label>Timeout</label><input type="number" id="env-compress-timeout" min="1" step="1" placeholder="120" style="font-family:monospace;" /></div>
       </div>
 
       <div style="margin-bottom:18px;">
@@ -2667,6 +2668,7 @@
         <div class="form-row"><label>API Key</label><input type="password" id="env-embed-key" placeholder="留空 = 不修改" autocomplete="new-password" style="font-family:monospace;" /></div>
         <div class="form-row"><label>Base URL</label><input type="text" id="env-embed-base" placeholder="例：https://generativelanguage.googleapis.com/v1beta/openai/" style="font-family:monospace;" /></div>
         <div class="form-row"><label>Model</label><input type="text" id="env-embed-model" placeholder="例：gemini-embedding-001" style="font-family:monospace;" /></div>
+        <div class="form-row"><label>Timeout</label><input type="number" id="env-embed-timeout" min="1" step="1" placeholder="120" style="font-family:monospace;" /></div>
       </div>
 
       <div style="margin-bottom:18px;">
@@ -5963,6 +5965,8 @@ async function refreshEnvConfig() {
     if (el) el.value = (f['OMBRE_COMPRESS_MODEL'] || {}).value || '';
     el = document.getElementById('env-compress-format');
     if (el) el.value = (f['OMBRE_COMPRESS_FORMAT'] || {}).value || 'openai_compat';
+    el = document.getElementById('env-compress-timeout');
+    if (el) el.value = (f['OMBRE_COMPRESS_TIMEOUT_SECONDS'] || {}).value || '';
     // Embed
     el = document.getElementById('env-embed-key');
     if (el) { el.placeholder = f['OMBRE_EMBED_API_KEY'] && f['OMBRE_EMBED_API_KEY'].is_set ? '当前：' + (f['OMBRE_EMBED_API_KEY'].value || '***') + '（留空 = 不修改）' : '未设置'; el.value = ''; }
@@ -5982,6 +5986,8 @@ async function refreshEnvConfig() {
     }
     el = document.getElementById('env-embed-model');
     if (el) el.value = (f['OMBRE_EMBED_MODEL'] || {}).value || '';
+    el = document.getElementById('env-embed-timeout');
+    if (el) el.value = (f['OMBRE_EMBED_TIMEOUT_SECONDS'] || {}).value || '';
     // Webhook
     el = document.getElementById('env-hook-url');
     if (el) el.value = (f['OMBRE_HOOK_URL'] || {}).value || '';
@@ -6014,9 +6020,11 @@ async function refreshEnvShadowWarning() {
     OMBRE_COMPRESS_BASE_URL: '压缩 Base URL',
     OMBRE_COMPRESS_MODEL: '压缩 Model',
     OMBRE_COMPRESS_API_KEY: '压缩 API Key',
+    OMBRE_COMPRESS_TIMEOUT_SECONDS: '压缩 Timeout',
     OMBRE_EMBED_BASE_URL: '向量化 Base URL',
     OMBRE_EMBED_MODEL: '向量化 Model',
     OMBRE_EMBED_API_KEY: '向量化 API Key',
+    OMBRE_EMBED_TIMEOUT_SECONDS: '向量化 Timeout',
     OMBRE_MCP_REQUIRE_AUTH: 'MCP OAuth 开关',
   };
   try {
@@ -6055,6 +6063,8 @@ async function saveEnvConfig() {
   if (model !== undefined) updates['OMBRE_COMPRESS_MODEL'] = model;
   var fmt = (document.getElementById('env-compress-format') || {value:''}).value;
   if (fmt) updates['OMBRE_COMPRESS_FORMAT'] = fmt;
+  var timeout = (document.getElementById('env-compress-timeout') || {value:''}).value.trim();
+  updates['OMBRE_COMPRESS_TIMEOUT_SECONDS'] = timeout;
   // Embed
   var ekey = document.getElementById('env-embed-key').value.trim();
   if (ekey) updates['OMBRE_EMBED_API_KEY'] = ekey;
@@ -6062,6 +6072,8 @@ async function saveEnvConfig() {
   if (ebase !== undefined) updates['OMBRE_EMBED_BASE_URL'] = ebase;
   var emodel = document.getElementById('env-embed-model').value.trim();
   if (emodel !== undefined) updates['OMBRE_EMBED_MODEL'] = emodel;
+  var etimeout = (document.getElementById('env-embed-timeout') || {value:''}).value.trim();
+  updates['OMBRE_EMBED_TIMEOUT_SECONDS'] = etimeout;
   // Webhook
   var hookUrl = document.getElementById('env-hook-url').value.trim();
   updates['OMBRE_HOOK_URL'] = hookUrl;

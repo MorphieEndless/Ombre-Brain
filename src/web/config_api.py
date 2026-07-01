@@ -27,9 +27,9 @@ from starlette.responses import Response
 from . import _shared as sh
 
 try:
-    from utils import get_ai_name as _get_ai_name  # type: ignore
+    from utils import get_ai_name as _get_ai_name, positive_float as _positive_float  # type: ignore
 except ImportError:  # pragma: no cover
-    from ..utils import get_ai_name as _get_ai_name  # type: ignore
+    from ..utils import get_ai_name as _get_ai_name, positive_float as _positive_float  # type: ignore
 
 logger = sh.logger
 
@@ -73,10 +73,12 @@ def register(mcp) -> None:
             {"name": "OMBRE_COMPRESS_API_KEY", "group": "llm", "label": "压缩 LLM API Key", "sensitive": True, **_masked("OMBRE_COMPRESS_API_KEY")},
             {"name": "OMBRE_COMPRESS_BASE_URL", "group": "llm", "label": "压缩 LLM Base URL", "sensitive": False, **_plain("OMBRE_COMPRESS_BASE_URL")},
             {"name": "OMBRE_COMPRESS_MODEL", "group": "llm", "label": "压缩 LLM 模型", "sensitive": False, **_plain("OMBRE_COMPRESS_MODEL")},
+            {"name": "OMBRE_COMPRESS_TIMEOUT_SECONDS", "group": "llm", "label": "压缩 LLM 超时秒数", "sensitive": False, **_plain("OMBRE_COMPRESS_TIMEOUT_SECONDS")},
             # Embedding 组
             {"name": "OMBRE_EMBED_API_KEY", "group": "embed", "label": "向量化 API Key", "sensitive": True, **_masked("OMBRE_EMBED_API_KEY")},
             {"name": "OMBRE_EMBED_BASE_URL", "group": "embed", "label": "向量化 Base URL", "sensitive": False, **_plain("OMBRE_EMBED_BASE_URL")},
             {"name": "OMBRE_EMBED_MODEL", "group": "embed", "label": "向量化模型", "sensitive": False, **_plain("OMBRE_EMBED_MODEL")},
+            {"name": "OMBRE_EMBED_TIMEOUT_SECONDS", "group": "embed", "label": "向量化超时秒数", "sensitive": False, **_plain("OMBRE_EMBED_TIMEOUT_SECONDS")},
             # 服务配置组
             {"name": "OMBRE_TRANSPORT", "group": "system", "label": "传输模式", "sensitive": False, **_plain("OMBRE_TRANSPORT")},
             {"name": "OMBRE_PORT", "group": "system", "label": "服务端口", "sensitive": False, **_plain("OMBRE_PORT")},
@@ -119,11 +121,13 @@ def register(mcp) -> None:
                 "max_tokens": dehy.get("max_tokens", 1024),
                 "temperature": dehy.get("temperature", 0.1),
                 "api_format": dehy.get("api_format", "openai_compat"),
+                "timeout_seconds": dehy.get("timeout_seconds", 60),
             },
             "embedding": {
                 "enabled": emb.get("enabled", False),
                 "model": emb.get("model", ""),
                 "api_format": emb.get("api_format", "openai_compat"),
+                "timeout_seconds": emb.get("timeout_seconds", 30),
                 "backend": "api",
                 "backend_options": [
                     {"value": "api", "label": "Gemini API（云端）", "note": "需填 OMBRE_EMBED_API_KEY，3072 维质量最高，需联网；客户端几乎不占额外内存"},
@@ -167,7 +171,7 @@ def register(mcp) -> None:
         if "dehydration" in body:
             d = body["dehydration"]
             dehy = sh.config.setdefault("dehydration", {})
-            for key in ("model", "base_url", "max_tokens", "temperature", "api_format"):
+            for key in ("model", "base_url", "max_tokens", "temperature", "api_format", "timeout_seconds"):
                 if key in d:
                     dehy[key] = d[key]
                     updated.append(f"dehydration.{key}")
@@ -179,6 +183,7 @@ def register(mcp) -> None:
             sh.dehydrator.base_url = dehy.get("base_url", sh.dehydrator.base_url)
             sh.dehydrator.max_tokens = int(dehy.get("max_tokens") or sh.dehydrator.max_tokens)
             sh.dehydrator.temperature = float(dehy.get("temperature") or sh.dehydrator.temperature)
+            sh.dehydrator.timeout_seconds = _positive_float(dehy.get("timeout_seconds"), sh.dehydrator.timeout_seconds)
             sh.dehydrator.api_format = dehy.get("api_format", getattr(sh.dehydrator, "api_format", "openai_compat"))
             if "api_key" in d and d["api_key"]:
                 sh.dehydrator.api_key = dehy["api_key"]
@@ -189,7 +194,7 @@ def register(mcp) -> None:
                 sh.dehydrator.client = AsyncOpenAI(
                     api_key=sh.dehydrator.api_key,
                     base_url=sh.dehydrator.base_url,
-                    timeout=60.0,
+                    timeout=sh.dehydrator.timeout_seconds,
                 )
             else:
                 sh.dehydrator.client = None
@@ -208,6 +213,22 @@ def register(mcp) -> None:
                 if sh.embedding_engine._backend:
                     sh.embedding_engine._backend.model = emb["model"]  # type: ignore[attr-defined]
                 updated.append("embedding.model")
+            if "timeout_seconds" in e:
+                emb["timeout_seconds"] = e["timeout_seconds"]
+                try:
+                    from embedding_engine import EmbeddingEngine as _EE
+                except ImportError:
+                    from ..embedding_engine import EmbeddingEngine as _EE
+                sh.embedding_engine = _EE(sh.config)
+                try:
+                    sh.bucket_mgr.embedding_engine = sh.embedding_engine
+                except Exception:
+                    pass
+                try:
+                    sh.import_engine.embedding_engine = sh.embedding_engine
+                except Exception:
+                    pass
+                updated.append("embedding.timeout_seconds")
             if "api_format" in e:
                 emb["api_format"] = str(e["api_format"]).strip()
                 # 重建后端以应用新格式
@@ -290,7 +311,7 @@ def register(mcp) -> None:
                     if not isinstance(sc_dehy, dict):
                         sc_dehy = {}
                         save_config["dehydration"] = sc_dehy
-                    for key in ("model", "base_url", "max_tokens", "temperature", "api_format"):
+                    for key in ("model", "base_url", "max_tokens", "temperature", "api_format", "timeout_seconds"):
                         if key in body["dehydration"]:
                             sc_dehy[key] = body["dehydration"][key]
                     # Never persist api_key to yaml (use env var)
@@ -300,7 +321,7 @@ def register(mcp) -> None:
                     if not isinstance(sc_emb, dict):
                         sc_emb = {}
                         save_config["embedding"] = sc_emb
-                    for key in ("enabled", "model", "api_format"):
+                    for key in ("enabled", "model", "api_format", "timeout_seconds"):
                         if key in body["embedding"]:
                             sc_emb[key] = body["embedding"][key]
 
@@ -511,11 +532,13 @@ def register(mcp) -> None:
         "OMBRE_COMPRESS_BASE_URL": {"group": "compress", "sensitive": False, "in_memory": ("dehydration", "base_url")},
         "OMBRE_COMPRESS_MODEL":    {"group": "compress", "sensitive": False, "in_memory": ("dehydration", "model")},
         "OMBRE_COMPRESS_FORMAT":   {"group": "compress", "sensitive": False, "in_memory": ("dehydration", "api_format")},
+        "OMBRE_COMPRESS_TIMEOUT_SECONDS": {"group": "compress", "sensitive": False, "in_memory": ("dehydration", "timeout_seconds")},
         # Embed / 向量化（backend 切换走 /api/embedding/migrate）
         "OMBRE_EMBED_API_KEY":     {"group": "embed",    "sensitive": True,  "in_memory": ("embedding", "api_key")},
         "OMBRE_EMBED_BASE_URL":    {"group": "embed",    "sensitive": False, "in_memory": ("embedding", "base_url")},
         "OMBRE_EMBED_MODEL":       {"group": "embed",    "sensitive": False, "in_memory": ("embedding", "model")},
         "OMBRE_EMBED_FORMAT":      {"group": "embed",    "sensitive": False, "in_memory": ("embedding", "api_format")},
+        "OMBRE_EMBED_TIMEOUT_SECONDS": {"group": "embed", "sensitive": False, "in_memory": ("embedding", "timeout_seconds")},
         # Webhook
         "OMBRE_HOOK_URL":          {"group": "webhook",  "sensitive": False, "in_memory": None},
         "OMBRE_HOOK_SKIP":         {"group": "webhook",  "sensitive": False, "in_memory": None},
@@ -670,12 +693,13 @@ def register(mcp) -> None:
 
 
             # 5. Compress 配置变更 → 同步到 dehydrator 实例，重建 client
-            if var in ("OMBRE_COMPRESS_API_KEY", "OMBRE_COMPRESS_BASE_URL", "OMBRE_COMPRESS_MODEL", "OMBRE_COMPRESS_FORMAT"):
+            if var in ("OMBRE_COMPRESS_API_KEY", "OMBRE_COMPRESS_BASE_URL", "OMBRE_COMPRESS_MODEL", "OMBRE_COMPRESS_FORMAT", "OMBRE_COMPRESS_TIMEOUT_SECONDS"):
                 try:
                     dehy_cfg = sh.config.get("dehydration", {})
                     sh.dehydrator.api_key = dehy_cfg.get("api_key", sh.dehydrator.api_key)  # type: ignore[attr-defined]
                     sh.dehydrator.base_url = dehy_cfg.get("base_url", sh.dehydrator.base_url)  # type: ignore[attr-defined]
                     sh.dehydrator.model = dehy_cfg.get("model", sh.dehydrator.model)  # type: ignore[attr-defined]
+                    sh.dehydrator.timeout_seconds = _positive_float(dehy_cfg.get("timeout_seconds"), getattr(sh.dehydrator, "timeout_seconds", 60.0))  # type: ignore[attr-defined]
                     sh.dehydrator.api_format = dehy_cfg.get("api_format", getattr(sh.dehydrator, "api_format", "openai_compat"))  # type: ignore[attr-defined]
                     sh.dehydrator.api_available = bool(sh.dehydrator.api_key)  # type: ignore[attr-defined]
                     if sh.dehydrator.api_available and sh.dehydrator.api_format == "openai_compat":  # type: ignore[attr-defined]
@@ -683,7 +707,7 @@ def register(mcp) -> None:
                         sh.dehydrator.client = _OAI_DH(  # type: ignore[attr-defined]
                             api_key=sh.dehydrator.api_key,
                             base_url=sh.dehydrator.base_url,
-                            timeout=60.0,
+                            timeout=sh.dehydrator.timeout_seconds,
                         )
                     else:
                         sh.dehydrator.client = None  # type: ignore[attr-defined]
@@ -691,7 +715,7 @@ def register(mcp) -> None:
                     pass
 
             # 6. Embed 配置变更 → 完整重建 embedding_engine
-            if var in ("OMBRE_EMBED_API_KEY", "OMBRE_EMBED_BASE_URL", "OMBRE_EMBED_MODEL", "OMBRE_EMBED_FORMAT"):
+            if var in ("OMBRE_EMBED_API_KEY", "OMBRE_EMBED_BASE_URL", "OMBRE_EMBED_MODEL", "OMBRE_EMBED_FORMAT", "OMBRE_EMBED_TIMEOUT_SECONDS"):
                 try:
                     sh.config.setdefault("embedding", {})
                     # key 被清空 → 禁用

@@ -35,7 +35,7 @@ from typing import Optional
 
 from openai import AsyncOpenAI
 
-from utils import count_tokens_approx
+from utils import count_tokens_approx, positive_float
 
 try:
     from provider_detect import is_gemini_native_host, strip_native_resource_prefix
@@ -267,6 +267,7 @@ class Dehydrator:
         self.base_url = dehy_cfg.get("base_url", _DEFAULT_BASE_URL)
         self.max_tokens = dehy_cfg.get("max_tokens", _DEFAULT_MAX_TOKENS)
         self.temperature = dehy_cfg.get("temperature", _DEFAULT_TEMPERATURE)
+        self.timeout_seconds = positive_float(dehy_cfg.get("timeout_seconds"), _API_TIMEOUT_SECONDS)
         # api_format: "openai_compat" (default) | "gemini" | "anthropic"
         self.api_format = dehy_cfg.get("api_format", "openai_compat")
         # Auto-detect new Google AI Studio key format (AQ.*): these keys are not accepted
@@ -302,7 +303,7 @@ class Dehydrator:
             self.client = AsyncOpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url,
-                timeout=_API_TIMEOUT_SECONDS,
+                timeout=self.timeout_seconds,
             )
 
         # --- SQLite dehydration cache ---
@@ -495,7 +496,7 @@ class Dehydrator:
         # 关闭/限制思考预算（见 __init__ 的 thinking_budget 说明）。
         if self.thinking_budget is not None:
             payload["generationConfig"]["thinkingConfig"] = {"thinkingBudget": self.thinking_budget}
-        async with httpx.AsyncClient(timeout=_API_TIMEOUT_SECONDS) as client:
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             r = await client.post(url, params={"key": self.api_key}, json=payload)
             r.raise_for_status()
         data = r.json()
@@ -531,7 +532,7 @@ class Dehydrator:
             "messages": [{"role": "user", "content": user}],
             "temperature": temperature if temperature is not None else self.temperature,
         }
-        async with httpx.AsyncClient(timeout=_API_TIMEOUT_SECONDS) as client:
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             r = await client.post(url, headers=headers, json=payload)
             r.raise_for_status()
         data = r.json()

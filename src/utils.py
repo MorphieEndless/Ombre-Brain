@@ -120,6 +120,7 @@ def load_config(config_path: Optional[str] = None) -> dict:
             "api_key": "",
             "max_tokens": 4096,
             "temperature": 0.1,
+            "timeout_seconds": 60,
         },
         "decay": {
             "lambda": 0.05,
@@ -173,12 +174,14 @@ def load_config(config_path: Optional[str] = None) -> dict:
     # Accept both names: OMBRE_COMPRESS_FORMAT (dashboard) and OMBRE_COMPRESS_API_FORMAT (legacy)
     _apply_env_override(config, "OMBRE_COMPRESS_FORMAT", "dehydration", "api_format")
     _apply_env_override(config, "OMBRE_COMPRESS_API_FORMAT", "dehydration", "api_format")
+    _apply_env_float_override(config, "OMBRE_COMPRESS_TIMEOUT_SECONDS", "dehydration", "timeout_seconds")
 
     # 向量化组（embedding）—— 写到 config["embedding"][*]
     _apply_env_override(config, "OMBRE_EMBED_API_KEY", "embedding", "api_key")
     _apply_env_override(config, "OMBRE_EMBED_BASE_URL", "embedding", "base_url")
     _apply_env_override(config, "OMBRE_EMBED_MODEL", "embedding", "model")
     _apply_env_override(config, "OMBRE_EMBED_FORMAT", "embedding", "api_format")
+    _apply_env_float_override(config, "OMBRE_EMBED_TIMEOUT_SECONDS", "embedding", "timeout_seconds")
 
     # 顶层运行时
     _apply_env_override(config, "OMBRE_TRANSPORT", "transport")
@@ -273,6 +276,33 @@ def _apply_env_override(config: dict, env_name: str, *path: str) -> None:
     for key in path[:-1]:
         cursor = cursor.setdefault(key, {})
     cursor[path[-1]] = value
+
+
+def positive_float(value, default: float) -> float:
+    """Parse a positive numeric config value, falling back to default."""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    if parsed <= 0:
+        return float(default)
+    return parsed
+
+
+def _apply_env_float_override(config: dict, env_name: str, *path: str) -> None:
+    value = os.environ.get(env_name, "").strip()
+    if not value or not path:
+        return
+    try:
+        parsed = float(value)
+    except ValueError:
+        return
+    if parsed <= 0:
+        return
+    cursor = config
+    for key in path[:-1]:
+        cursor = cursor.setdefault(key, {})
+    cursor[path[-1]] = int(parsed) if parsed.is_integer() else parsed
 
 
 def _resolve_log_dir(explicit: str | None) -> str:

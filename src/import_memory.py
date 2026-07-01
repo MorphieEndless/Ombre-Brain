@@ -29,7 +29,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from utils import count_tokens_approx, now_iso
+from utils import clean_llm_json, count_tokens_approx, now_iso
 
 logger = logging.getLogger("ombre_brain.import")
 
@@ -106,11 +106,8 @@ def _clamp_importance(meta: dict) -> int:
 
 
 def _strip_md_fence(raw: str) -> str:
-    """剥掉 LLM 偊尔会包的 ```...``` 代码块外壳（与 dehydrator 内部同款）。"""
-    cleaned = raw.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
-    return cleaned
+    """Backwards-compatible wrapper for tolerant LLM JSON extraction."""
+    return clean_llm_json(raw)
 
 
 # ============================================================

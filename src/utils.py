@@ -27,6 +27,7 @@ import os
 import re
 import sys
 import uuid
+import json
 import yaml
 import logging
 from pathlib import Path
@@ -303,6 +304,29 @@ def _apply_env_float_override(config: dict, env_name: str, *path: str) -> None:
     for key in path[:-1]:
         cursor = cursor.setdefault(key, {})
     cursor[path[-1]] = int(parsed) if parsed.is_integer() else parsed
+
+
+def clean_llm_json(raw: str) -> str:
+    """Return the first complete JSON value from an LLM response.
+
+    Models sometimes wrap JSON in Markdown fences or add a short sentence before
+    or after it. Keep strict JSON validation in callers, but make the extraction
+    step tolerant enough to recover the balanced array/object.
+    """
+    cleaned = (raw or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+
+    decoder = json.JSONDecoder()
+    for idx, ch in enumerate(cleaned):
+        if ch not in "[{":
+            continue
+        try:
+            _value, end = decoder.raw_decode(cleaned[idx:])
+        except json.JSONDecodeError:
+            continue
+        return cleaned[idx:idx + end].strip()
+    return cleaned
 
 
 def _resolve_log_dir(explicit: str | None) -> str:

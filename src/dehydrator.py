@@ -35,7 +35,7 @@ from typing import Optional
 
 from openai import AsyncOpenAI
 
-from utils import count_tokens_approx, positive_float
+from utils import clean_llm_json, count_tokens_approx, positive_float
 
 try:
     from provider_detect import is_gemini_native_host, strip_native_resource_prefix
@@ -544,16 +544,8 @@ class Dehydrator:
 
     @staticmethod
     def _strip_md_fence(raw: str) -> str:
-        """剥掉 LLM 偶尔会包的 ```...``` 代码块外壳。
-
-        DeepSeek / Gemini 在被要求"返回纯 JSON"时仍偶尔把 JSON 包进
-        ```json\n{...}\n``` 里。三处 JSON 解析都得做这层剥离，
-        所以统一抽到这里。原始字符串不含围栏时原样返回。
-        """
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0]
-        return cleaned
+        """Backwards-compatible wrapper for tolerant LLM JSON extraction."""
+        return clean_llm_json(raw)
 
     @staticmethod
     def _clamp_va(

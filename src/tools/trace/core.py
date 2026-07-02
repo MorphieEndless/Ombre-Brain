@@ -65,6 +65,24 @@ async def trace_core(
     if why_remembered is None: why_remembered = ""
     if rt.mark_op:
         rt.mark_op("trace")
+    rt.record_v3_tool_event("trace", {
+        "bucket_id": bucket_id,
+        "name": name,
+        "domain": domain,
+        "valence": valence,
+        "arousal": arousal,
+        "importance": importance,
+        "tags": tags,
+        "resolved": resolved,
+        "pinned": pinned,
+        "digested": digested,
+        "content_length": len(content or ""),
+        "delete": delete,
+        "status": status,
+        "weight": weight,
+        "dont_surface": dont_surface,
+        "why_remembered_length": len(why_remembered or ""),
+    })
 
     if not bucket_id or not bucket_id.strip():
         return "请提供有效的 bucket_id。"

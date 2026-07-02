@@ -2,6 +2,23 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.4.11
+
+### 修复 / Fixed
+
+- MCP OAuth 支持 `refresh_token` grant：授权码换 token 时会同时返回 refresh token，headless 服务器环境下 access token 失效后可直接刷新，不再必须重新打开浏览器授权页。
+- OAuth discovery 与动态客户端注册现在声明 `refresh_token`，并兼容旧版 `.dashboard_mcp_tokens.json` access token 存储格式。
+- 修复 v3 legacy 桥接层缺失的 runtime/web/bucket side-channel API，恢复工具调用、Web 路由注册、更新策略评估和 bucket 生命周期事件的只读旁路记录。
+
+### 测试 / Tests
+
+- 新增 `tests/test_oauth_refresh_token.py` 覆盖 refresh token 元数据声明、授权码换 refresh token、刷新 access token、未知 refresh token 拒绝。
+- 修复并恢复 `tests/test_v3_legacy_*` 桥接回归，测试用例显式注入 fake embedding，避免绕开当前“写入必须有向量化”的生产约束。
+
+### 维护 / Chores
+
+- VERSION + `src/VERSION` -> 2.4.11。
+
 ## 2.4.10
 
 ### 新增 / Added

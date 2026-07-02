@@ -1,5 +1,6 @@
 import httpx
 import pytest
+import json as json_lib
 
 from github_sync import GitHubSync
 
@@ -28,14 +29,16 @@ async def test_batch_commit_bootstraps_zero_commit_repository(monkeypatch):
             return _json_response(method, url, 409, {"message": "Git Repository is empty."})
         if method == "POST" and url.endswith("/git/trees"):
             assert "base_tree" not in json
-            assert json["tree"] == [
-                {
-                    "path": "ombre/dynamic/first.md",
-                    "mode": "100644",
-                    "type": "blob",
-                    "content": "first memory",
-                }
-            ]
+            by_path = {entry["path"]: entry for entry in json["tree"]}
+            assert by_path["ombre/dynamic/first.md"] == {
+                "path": "ombre/dynamic/first.md",
+                "mode": "100644",
+                "type": "blob",
+                "content": "first memory",
+            }
+            manifest = json_lib.loads(by_path["ombre/_ombre_backup_manifest.json"]["content"])
+            assert manifest["file_count"] == 1
+            assert manifest["files"][0]["path"] == "dynamic/first.md"
             return _json_response(method, url, 201, {"sha": "tree-zero"})
         if method == "POST" and url.endswith("/git/commits"):
             assert json["tree"] == "tree-zero"

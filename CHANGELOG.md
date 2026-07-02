@@ -2,6 +2,22 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.4.10
+
+### 新增 / Added
+
+- GitHub 同步现在会在同一次 commit 中写入 `_ombre_backup_manifest.json`，记录备份生成时间、文件数、总字节数、每个 bucket markdown 的大小和 sha256。
+- 从 GitHub 导入/恢复时会读取 manifest 摘要并返回给调用方，后续可用于恢复前校验和备份选择。
+
+### 测试 / Tests
+
+- 新增 `tests/test_github_backup_manifest.py` 覆盖 manifest 生成、同步写入和恢复读回。
+- 更新 zero-commit 空仓库同步测试，确认首次提交也包含 manifest。
+
+### 维护 / Chores
+
+- VERSION + `src/VERSION` -> 2.4.10。
+
 ## 2.4.9
 
 ### 新增 / Added

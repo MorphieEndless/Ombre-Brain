@@ -2,6 +2,23 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.4.9
+
+### 新增 / Added
+
+- Dashboard 历史对话导入新增上传前预检：选中文件后先显示识别格式、轮次、分块数、预计 API 调用、文件大小、首个分块预览和警告，再由用户确认开始导入。
+- 新增 `POST /api/import/preflight`，复用导入解析/分块逻辑做只读预检，不写 bucket、不启动后台任务。
+- 新增 `preview_import()` 纯函数，便于后续把导入体验继续拆成更明确的预检查项。
+
+### 测试 / Tests
+
+- 新增 `tests/test_import_preflight.py` 覆盖导入预检纯函数和 API 路由。
+- 新增 `tests/test_dashboard_import_preflight.py` 覆盖 Dashboard 预检入口。
+
+### 维护 / Chores
+
+- VERSION + `src/VERSION` -> 2.4.9。
+
 ## 2.4.8
 
 ### 新增 / Added

@@ -2359,6 +2359,19 @@
       </div>
 
       <div style="margin-bottom:18px;">
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">系统体检</div>
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;line-height:1.6;">
+          快速检查本地配置、数据目录、向量化、GitHub 备份和访问控制，不会主动请求外部 API。
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+          <button onclick="loadSystemDiagnostics()" title="运行体检" style="font-size:12px;padding:0 12px;height:32px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="activity"></i> 一键体检</button>
+          <span id="system-diagnostics-summary" style="font-size:12px;color:var(--text-dim);">尚未运行</span>
+          <span id="system-diagnostics-updated" style="font-size:11px;color:var(--text-light);"></span>
+        </div>
+        <div id="system-diagnostics-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+      </div>
+
+      <div style="margin-bottom:18px;">
         <div style="font-weight:600;font-size:13px;margin-bottom:6px;">修复钉选计数</div>
         <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;line-height:1.6;">
           若「永久桶计数」明显大于面板里实际的钉选数（取消钉选后计数不减、钉新桶老报上限），
@@ -3422,6 +3435,67 @@ async function loadSettingsStatus() {
   await loadTunnelStatus();
 }
 
+function diagnosticStatusLabel(status) {
+  if (status === 'ok') return '正常';
+  if (status === 'warning') return '提醒';
+  if (status === 'error') return '需处理';
+  return status || '未知';
+}
+
+function diagnosticStatusColor(status) {
+  if (status === 'ok') return 'var(--positive,#87A987)';
+  if (status === 'warning') return 'var(--warning,#B89762)';
+  if (status === 'error') return 'var(--negative,#BE5A41)';
+  return 'var(--text-dim)';
+}
+
+function renderDiagnosticCheck(check) {
+  const color = diagnosticStatusColor(check.status);
+  const details = check.details || {};
+  const detailText = Object.keys(details).map(function (key) {
+    const val = details[key];
+    if (val === null || val === undefined || val === '') return '';
+    return '<span><b>' + esc(key) + '</b>: ' + esc(String(val)) + '</span>';
+  }).filter(Boolean).join(' · ');
+  return '<div style="border-left:3px solid ' + color + ';padding:9px 11px;background:var(--surface-solid);border-radius:8px;font-size:12px;line-height:1.6;box-shadow:inset 1px 1px 3px var(--shadow-dark-subtle),inset -1px -1px 3px var(--shadow-light);">'
+    + '<div style="display:flex;align-items:center;gap:8px;justify-content:space-between;flex-wrap:wrap;">'
+    + '<strong style="font-size:13px;color:var(--text);">' + esc(check.label || check.id || '检查项') + '</strong>'
+    + '<span style="color:' + color + ';font-weight:600;">' + diagnosticStatusLabel(check.status) + '</span>'
+    + '</div>'
+    + '<div style="color:var(--text-dim);margin-top:3px;">' + esc(check.message || '') + '</div>'
+    + (check.action ? '<div style="color:var(--accent);margin-top:3px;">建议：' + esc(check.action) + '</div>' : '')
+    + (detailText ? '<div style="color:var(--text-light);margin-top:4px;word-break:break-all;">' + detailText + '</div>' : '')
+    + '</div>';
+}
+
+async function loadSystemDiagnostics() {
+  const summaryEl = document.getElementById('system-diagnostics-summary');
+  const listEl = document.getElementById('system-diagnostics-list');
+  const updatedEl = document.getElementById('system-diagnostics-updated');
+  if (!summaryEl || !listEl) return;
+  summaryEl.style.color = 'var(--text-dim)';
+  summaryEl.textContent = '体检中…';
+  listEl.innerHTML = '';
+  try {
+    const resp = await authFetch('/api/system/diagnostics');
+    if (!resp) return;
+    const d = await readJsonSafe(resp);
+    const s = d.summary || {};
+    const checks = d.checks || [];
+    const ok = d.ok !== false;
+    summaryEl.style.color = ok ? 'var(--positive,#87A987)' : 'var(--negative,#BE5A41)';
+    summaryEl.innerHTML = (ok ? _SV.ok + ' ' : _SV.warn + ' ')
+      + '正常 ' + (s.ok || 0) + ' · 提醒 ' + (s.warning || 0) + ' · 需处理 ' + (s.error || 0);
+    listEl.innerHTML = checks.length
+      ? checks.map(renderDiagnosticCheck).join('')
+      : '<div style="font-size:12px;color:var(--text-dim);">没有返回体检项。</div>';
+    if (updatedEl) updatedEl.textContent = '刚刚刷新 ' + new Date().toLocaleTimeString();
+  } catch(e) {
+    summaryEl.style.color = 'var(--negative)';
+    summaryEl.textContent = '体检失败：' + (e && e.message ? e.message : e);
+  }
+}
+
 // 修复钉选计数：先 GET 预演拿孤儿数 → 确认 → POST 实际降级。
 async function fixPinnedDesync() {
   const msgEl = document.getElementById('fix-pinned-msg');
@@ -3819,6 +3893,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (target === 'settings') {
       // 任务D：合并 config + settings 后，切换到「设置」时一次性加载所有面板数据
       loadSettingsStatus();
+      loadSystemDiagnostics();
       loadHumanName();
       loadConfig();
       refreshEnvConfig();

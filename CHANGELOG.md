@@ -2,6 +2,22 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.4.8
+
+### 新增 / Added
+
+- Dashboard 设置页新增“系统体检”面板，可一键查看数据目录、记忆桶统计、脱水/打标 LLM、向量化、GitHub 备份、访问控制和运行时状态。
+- 新增 `GET /api/system/diagnostics` 只读接口，返回结构化 `ok` / `warning` / `error` 检查项；体检不主动请求外部 API，避免设置页被慢网络卡住。
+
+### 测试 / Tests
+
+- 新增 `tests/test_system_diagnostics.py` 覆盖诊断接口和缺配置告警。
+- 新增 `tests/test_dashboard_diagnostics_panel.py` 覆盖 Dashboard 体检入口。
+
+### 维护 / Chores
+
+- VERSION + `src/VERSION` -> 2.4.8。
+
 ## 2.4.7
 
 ### 修复 / Fixed

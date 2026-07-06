@@ -86,6 +86,12 @@ from bucket_scoring import (
     calc_time_score,
     calc_touch_score,
 )
+from ledger_mirror import LedgerMirror
+from ledger_replay import LedgerReplayValidator
+from projection_mirror import TraceCatalogProjection
+from projection_sqlite import TraceSQLiteProjection
+from projection_vector import TraceVectorProjectionManifest
+from ombrebrain.policy.formal_invariants import FormalInvariantChecker
 
 try:
     from bm25_index import BM25Index as _BM25Index
@@ -206,6 +212,10 @@ class BucketManager:
 
         # --- Optional embedding engine for pre-filtering / 可选 embedding 引擎，用于预筛候选集 ---
         self.embedding_engine = embedding_engine
+        ledger_path = config.get("ledger_path") or os.path.join(
+            self.base_dir, "_ledger", "events.jsonl"
+        )
+        self.ledger_mirror = LedgerMirror(ledger_path)
 
         # BM25 稀疏索引（写操作后脏标记，search() 时懒重建）
         self._bm25: "_BM25Index | None" = _BM25Index() if _BM25Index is not None else None
@@ -236,6 +246,89 @@ class BucketManager:
             )
         except Exception as exc:
             logger.warning(f"v3 bucket event record failed for {action}:{bucket_id}: {exc}")
+
+    def _record_ledger_event(
+        self,
+        event_type: str,
+        bucket_id: str,
+        bucket_type: str,
+        content: str,
+        metadata: dict | None,
+        extra_payload: dict | None = None,
+    ) -> None:
+        payload = dict(metadata or {})
+        if extra_payload:
+            payload.update(extra_payload)
+        try:
+            self.ledger_mirror.append_event(
+                event_type=event_type,
+                trace_id=bucket_id,
+                trace_kind=bucket_type,
+                payload=payload,
+                body=content,
+            )
+        except Exception as exc:
+            logger.warning(f"ledger mirror record failed for {event_type}:{bucket_id}: {exc}")
+
+    def ledger_integrity_report(self) -> dict:
+        """Return a read-only integrity report for the Phase 1 ledger mirror."""
+        report = self.ledger_mirror.verify_integrity()
+        events = list(self.ledger_mirror.iter_events())
+        projection = TraceCatalogProjection()
+        projection.rebuild(events)
+        report["trace_catalog_projection"] = projection.to_report(
+            source_latest_seq=int(report.get("latest_seq", 0) or 0)
+        )
+        sqlite_projection_path = os.path.join(
+            self.base_dir, "_ledger", "projections", "trace_catalog.sqlite3"
+        )
+        try:
+            sqlite_projection = TraceSQLiteProjection(sqlite_projection_path)
+            sqlite_projection.rebuild(events)
+            report["sqlite_projection"] = sqlite_projection.to_report(
+                source_latest_seq=int(report.get("latest_seq", 0) or 0)
+            )
+        except Exception as exc:
+            report["sqlite_projection"] = {
+                "projection_name": "trace_catalog_sqlite",
+                "projection_role": "shadow",
+                "canonical": False,
+                "path": sqlite_projection_path,
+                "ok": False,
+                "error_type": type(exc).__name__,
+                "error_message": str(exc)[:240],
+            }
+        vector_projection_path = getattr(
+            self.embedding_engine,
+            "db_path",
+            os.path.join(self.base_dir, "embeddings.db"),
+        )
+        try:
+            vector_projection = TraceVectorProjectionManifest(vector_projection_path)
+            report["vector_projection"] = vector_projection.rebuild(events)
+        except Exception as exc:
+            report["vector_projection"] = {
+                "projection_name": "trace_vector_manifest",
+                "projection_role": "shadow",
+                "canonical": False,
+                "path": str(vector_projection_path),
+                "ok": False,
+                "error_type": type(exc).__name__,
+                "error_message": str(exc)[:240],
+            }
+        try:
+            report["formal_invariants"] = FormalInvariantChecker.default().evaluate_ledger(events).to_dict()
+        except Exception as exc:
+            report["formal_invariants"] = {
+                "projection_name": "formal_invariants",
+                "projection_role": "shadow",
+                "canonical": False,
+                "ok": False,
+                "error_type": type(exc).__name__,
+                "error_message": str(exc)[:240],
+            }
+        report["replay"] = LedgerReplayValidator.default().validate(events)
+        return report
 
     # ---------------------------------------------------------
     # Internal helpers【代码多复用、不作为公共 API】
@@ -534,6 +627,13 @@ class BucketManager:
             linked_content,
             metadata,
         )
+        self._record_ledger_event(
+            "TraceCreated",
+            bucket_id,
+            str(metadata.get("type") or bucket_type),
+            linked_content,
+            metadata,
+        )
 
         return bucket_id
 
@@ -746,6 +846,14 @@ class BucketManager:
             post.content or "",
             dict(post.metadata),
         )
+        self._record_ledger_event(
+            "TraceUpdated",
+            bucket_id,
+            str(post.get("type") or "dynamic"),
+            post.content or "",
+            dict(post.metadata),
+            {"changed_fields": sorted(str(k) for k in kwargs.keys())},
+        )
 
         return True
 
@@ -777,7 +885,11 @@ class BucketManager:
         # --- 读取文件，写入 deleted_at，移入 archive/ ---
         try:
             post = frontmatter.load(file_path)
-            post["deleted_at"] = now_iso()
+            tombstone_at = now_iso()
+            post["deleted_at"] = tombstone_at
+            post["tombstone"] = True
+            post["tombstoned_at"] = tombstone_at
+            post["erasure_mode"] = "tombstone_only"
             os.makedirs(self.archive_dir, exist_ok=True)
             dest = os.path.join(self.archive_dir, os.path.basename(file_path))
             # 若 archive/ 里已有同名文件（极罕见），追加 bucket_id 后缀避免覆盖
@@ -805,6 +917,13 @@ class BucketManager:
         logger.info(f"Soft-deleted bucket (moved to archive) / 软删除记忆桶: {bucket_id}")
         self._record_v3_bucket_event(
             "delete",
+            bucket_id,
+            str(post.get("type") or "dynamic"),
+            post.content or "",
+            dict(post.metadata),
+        )
+        self._record_ledger_event(
+            "TraceDeletedToArchive",
             bucket_id,
             str(post.get("type") or "dynamic"),
             post.content or "",
@@ -841,6 +960,13 @@ class BucketManager:
             # --- 时间涟漪：±48小时内的记忆轻微唤醒 ---
             current_time = datetime.fromisoformat(str(post.get("created", post.get("last_active", ""))))
             await self._time_ripple(bucket_id, current_time)
+            self._record_ledger_event(
+                "TraceTouched",
+                bucket_id,
+                str(post.get("type") or "dynamic"),
+                post.content or "",
+                dict(post.metadata),
+            )
         except Exception as e:
             logger.warning(f"Failed to touch bucket / 触碰桶失败: {bucket_id}: {e}")
 
@@ -1285,6 +1411,13 @@ class BucketManager:
         logger.info(f"Archived bucket / 归档记忆桶: {bucket_id} → archive/{primary_domain}/")
         self._record_v3_bucket_event(
             "archive",
+            bucket_id,
+            str(post.get("type") or "archived"),
+            post.content or "",
+            dict(post.metadata),
+        )
+        self._record_ledger_event(
+            "TraceArchived",
             bucket_id,
             str(post.get("type") or "archived"),
             post.content or "",

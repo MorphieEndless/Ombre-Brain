@@ -27,6 +27,7 @@ import random
 import time
 from datetime import datetime, timezone, timedelta
 
+from ombrebrain.policy.surfacing import SurfacePolicyVM
 from .. import _runtime as rt
 from utils import strip_wikilinks, count_tokens_approx
 
@@ -35,6 +36,7 @@ from utils import strip_wikilinks, count_tokens_approx
 # 才打一次，并附带本窗口被压制的次数（首次为 0）。
 _FALLBACK_LOG_INTERVAL_SEC = 300
 _fallback_log_state = {"last_ts": 0.0, "suppressed": 0}
+_SURFACE_POLICY = SurfacePolicyVM.default()
 
 
 def _bucket_has_tags(meta: dict, tag_filter: list) -> bool:
@@ -42,6 +44,10 @@ def _bucket_has_tags(meta: dict, tag_filter: list) -> bool:
         return True
     bucket_tags = set(meta.get("tags", []) or [])
     return all(t in bucket_tags for t in tag_filter)
+
+
+def _can_surface(bucket: dict) -> bool:
+    return _SURFACE_POLICY.evaluate_bucket(bucket, mode="spontaneous").allowed
 
 
 def _raw_core_fallback(content: str) -> str:
@@ -67,6 +73,7 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
             or b["metadata"].get("protected")
             or b["metadata"].get("type") == "permanent"
         )
+        and _can_surface(b)
         and b["metadata"].get("type") != "letter"
         and not b["metadata"].get("anchor", False)  # 防御：anchor 是坐标系，永不主动浮现，即使 pinned
     ]
@@ -92,7 +99,8 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
     # --- 未解决桶 ---
     unresolved = [
         b for b in all_buckets_non_anchor
-        if not b["metadata"].get("resolved", False)
+        if _can_surface(b)
+        and not b["metadata"].get("resolved", False)
         and b["metadata"].get("type") not in ("permanent", "feel", "plan", "letter", "self", "i")
         and not b["metadata"].get("pinned", False)
         and not b["metadata"].get("protected", False)
@@ -277,7 +285,8 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
             shown_ids = {b["id"] for b in candidates}
             resolved_pool = [
                 b for b in all_buckets
-                if b["metadata"].get("resolved", False)
+                if _can_surface(b)
+                and b["metadata"].get("resolved", False)
                 and b["id"] not in shown_ids
                 and b["metadata"].get("type") not in ("feel", "plan", "letter")
                 and not b["metadata"].get("pinned")

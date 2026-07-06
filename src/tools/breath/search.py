@@ -27,8 +27,11 @@ embedding_engine 向量近邻，结果合并去重，逐条 dehydrate 后塞 tok
 
 import random
 
+from ombrebrain.policy.surfacing import SurfacePolicyVM
 from .. import _runtime as rt
 from utils import strip_wikilinks, count_tokens_approx
+
+_SURFACE_POLICY = SurfacePolicyVM.default()
 
 
 def _bucket_has_tags(meta: dict, tag_filter: list) -> bool:
@@ -36,6 +39,10 @@ def _bucket_has_tags(meta: dict, tag_filter: list) -> bool:
         return True
     bucket_tags = set(meta.get("tags", []) or [])
     return all(t in bucket_tags for t in tag_filter)
+
+
+def _can_surface_search(bucket: dict) -> bool:
+    return _SURFACE_POLICY.evaluate_bucket(bucket, mode="search").allowed
 
 
 def _raw_core_fallback(content: str) -> str:
@@ -73,7 +80,11 @@ async def surface_search(
         rt.logger.error(f"Search failed / 检索失败: {e}")
         return "检索过程出错，请稍后重试。"
 
-    matches = [b for b in matches if b["metadata"].get("type") not in ("feel", "plan", "letter")]
+    matches = [
+        b for b in matches
+        if _can_surface_search(b)
+        and b["metadata"].get("type") not in ("feel", "plan", "letter")
+    ]
     matches = [b for b in matches if _bucket_has_tags(b["metadata"], tag_filter)]
 
     # --- 向量通道（强制依赖，失败不降级，异常向上抛由调用方报错） ---
@@ -84,7 +95,8 @@ async def surface_search(
             bucket = await rt.bucket_mgr.get(bucket_id)
             if (
                 bucket
-                and bucket["metadata"].get("type") not in ("feel", "plan", "letter", "archived")
+                and _can_surface_search(bucket)
+                and bucket["metadata"].get("type") not in ("feel", "plan", "letter")
                 and _bucket_has_tags(bucket["metadata"], tag_filter)
             ):
                 bucket["score"] = round(sim_score * 100, 2)

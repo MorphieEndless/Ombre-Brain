@@ -15,9 +15,11 @@ web/search.py — 检索 / 重复 / 概念网络 / breath 调试
 from starlette.requests import Request
 from starlette.responses import Response
 
+from ombrebrain.policy.surfacing import SurfacePolicyVM
 from . import _shared as sh
 
 logger = sh.logger
+_SURFACE_POLICY = SurfacePolicyVM.default()
 
 try:
     from utils import strip_wikilinks, extract_wikilinks  # type: ignore
@@ -41,6 +43,8 @@ def register(mcp) -> None:
             matches = await sh.bucket_mgr.search(query, limit=10)
             result = []
             for b in matches:
+                if not _SURFACE_POLICY.evaluate_bucket(b, mode="search").allowed:
+                    continue
                 meta = b.get("metadata", {})
                 result.append({
                     "id": b["id"],
@@ -245,6 +249,8 @@ def register(mcp) -> None:
             all_buckets = await sh.bucket_mgr.list_all(include_archive=False)
             results = []
             for bucket in all_buckets:
+                if not _SURFACE_POLICY.evaluate_bucket(bucket, mode="spontaneous").allowed:
+                    continue
                 meta = bucket.get("metadata", {})
                 score = sh.decay_engine.calculate_score(meta)
                 if meta.get("resolved"):

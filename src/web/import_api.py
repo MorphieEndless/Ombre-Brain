@@ -72,30 +72,59 @@ def register(mcp) -> None:
 
     @mcp.custom_route("/api/host-vault", methods=["GET"])
     async def api_host_vault_get(request: Request) -> Response:
-        """Read the current OMBRE_HOST_VAULT_DIR (process env > project .env)."""
+        """Read the host-side vault path without pretending a container can change its mount."""
         from starlette.responses import JSONResponse
         err = sh._require_auth(request)
         if err:
             return err
-        value = sh._read_env_var("OMBRE_HOST_VAULT_DIR")
+        compose_managed = sh.in_docker()
+        if compose_managed:
+            # A container-local .env cannot affect the host-side volume source used
+            # before this container starts. Only report the value Compose injected.
+            value = os.environ.get("OMBRE_HOST_VAULT_DIR", "").strip()
+            source = "env" if value else ""
+            env_file = None
+        else:
+            value = sh._read_env_var("OMBRE_HOST_VAULT_DIR")
+            source = "env" if os.environ.get("OMBRE_HOST_VAULT_DIR", "").strip() else ("file" if value else "")
+            env_file = sh._project_env_path()
         return JSONResponse({
             "value": value,
-            "source": "env" if os.environ.get("OMBRE_HOST_VAULT_DIR", "").strip() else ("file" if value else ""),
-            "env_file": sh._project_env_path(),
+            "source": source,
+            "env_file": env_file,
+            "compose_managed": compose_managed,
+            "message": (
+                "该挂载由宿主机 Compose 管理。请在 compose 文件旁的 .env 设置 "
+                "OMBRE_HOST_VAULT_DIR，然后执行 docker compose up -d --force-recreate。"
+                if compose_managed else ""
+            ),
         })
 
 
     @mcp.custom_route("/api/host-vault", methods=["POST"])
     async def api_host_vault_set(request: Request) -> Response:
         """
-        Persist OMBRE_HOST_VAULT_DIR to the project .env file.
+        Persist OMBRE_HOST_VAULT_DIR for non-container deployments.
         Body: {"value": "/path/to/vault"}  (empty string clears the entry)
-        Note: container restart is required for docker-compose to pick up the new mount.
+
+        Docker mounts are resolved by Compose before the container starts. Writing
+        /app/src/.env from inside that container cannot change the host mount, so
+        Docker callers receive an explicit host-managed response instead.
         """
         from starlette.responses import JSONResponse
         err = sh._require_auth(request)
         if err:
             return err
+        if sh.in_docker():
+            return JSONResponse({
+                "error": (
+                    "容器无法修改宿主机的 Compose 挂载。请在 compose 文件旁的 .env 设置 "
+                    "OMBRE_HOST_VAULT_DIR，然后执行 docker compose up -d --force-recreate。"
+                ),
+                "compose_managed": True,
+                "restart_required": True,
+                "env_var": "OMBRE_HOST_VAULT_DIR",
+            }, status_code=409)
         try:
             body = await request.json()
         except Exception:

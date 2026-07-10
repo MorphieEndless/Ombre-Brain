@@ -2,6 +2,29 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.5.1
+
+### 修复 / Fixed
+
+- Cloudflare Tunnel 在 Compose 部署下默认使用双 `v2` region edge 和 HTTP/2，绕过部分 VPN DNS
+  无法解析 `_v2-origintunneld._tcp.argotunnel.com` SRV 记录导致的启动失败。
+- 单实例 Compose 统一通过 `OMBRE_HOST_VAULT_DIR` 将宿主机目录 bind mount 到
+  `/app/buckets`，并改用兼容 Windows 盘符的长语法；记忆、`config.yaml` 和 Tunnel token
+  在 `--force-recreate` 后继续保留。
+- 多实例 Compose 支持为每个 owner 单独设置宿主机持久目录，同时保留数据隔离。
+- Dashboard 在 Docker 内不再把容器自己的 `.env` 误报为宿主机挂载配置；宿主机目录改为
+  Compose 只读状态，并明确提示修改 compose 同目录 `.env` 后重建容器。
+- 修正文档和环境变量示例中遗留的 `/data` 路径，统一为 `/app/buckets`。
+
+### 测试 / Tests
+
+- 新增 Compose Tunnel/DNS、Windows bind mount、owner 隔离和 Tunnel token 持久化回归测试。
+- 完整测试通过：602 passed，7 skipped。
+
+### 维护 / Chores
+
+- VERSION + `src/VERSION` -> 2.5.1。
+
 ## 2.4.13
 
 ### 修复 / Fixed

@@ -422,8 +422,8 @@ feel 桶自身：
 | `/api/breath-debug?q=&valence=&arousal=` | GET | 🔒 | 评分调试（每桶四维分解） |
 | `/api/config` | GET | 🔒 | 配置查看（API key 脱敏） |
 | `/api/config` | POST | 🔒 | 热更新配置（dehydration / embedding / merge_threshold；可选持久化到 yaml） |
-| `/api/host-vault` | GET | 🔒 | 读 `OMBRE_HOST_VAULT_DIR`（process env → .env 文件 fallback） |
-| `/api/host-vault` | POST | 🔒 | 写入项目根目录的 `.env`，需重启 docker compose 生效 |
+| `/api/host-vault` | GET | 🔒 | 读 `OMBRE_HOST_VAULT_DIR`；Docker 内只报告 Compose 注入值并标记 `compose_managed` |
+| `/api/host-vault` | POST | 🔒 | 裸机可写项目 `.env`；Docker 内返回 409，避免假装容器能修改宿主机挂载 |
 | `/api/status` | GET | 🔒 | Dashboard 设置页用：版本号 + 桶数 + embedding/decay 状态 + 是否环境变量密码 |
 | `/api/import/upload` | POST | 🔒 | 上传对话历史并启动导入 |
 | `/api/import/status` | GET | 🔒 | 导入进度 |
@@ -700,7 +700,9 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 | `OMBRE_HOOK_URL` | — | Webhook 推送地址；空则不推送 |
 | `OMBRE_HOOK_SKIP` | `false` | `1`/`true`/`yes` 跳过推送 |
 | `OMBRE_DASHBOARD_PASSWORD` | — | 预设 Dashboard 密码（覆盖文件密码，UI 改密码功能禁用） |
-| `OMBRE_HOST_VAULT_DIR` | — | docker-compose 用：宿主机 vault 路径，写入项目根 `.env` 后 `docker compose down/up` 生效 |
+| `OMBRE_HOST_VAULT_DIR` | `./buckets` | docker-compose 用：宿主机持久目录；源码版写 `deploy/.env`，独立用户版写 compose 同目录 `.env`，挂载到 `/app/buckets` |
+| `TUNNEL_EDGE` | 双 global region | Compose 默认 `region1.v2.argotunnel.com:7844,region2.v2.argotunnel.com:7844`，绕过不支持 SRV 的 VPN DNS；显式留空恢复原生 edge discovery |
+| `TUNNEL_TRANSPORT_PROTOCOL` | `http2`（Compose） | Tunnel 到 edge 的传输协议；特殊 VPN 默认 TCP/HTTP2，设 `auto` 恢复 cloudflared 自动选择 |
 
 优先级：**环境变量 > config.yaml > 内置默认值**。读取入口都在 `utils.load_config()`（`OMBRE_EMBED_BACKEND` 例外，直接在 `embedding_engine.py` 读取）。新增 env 变量必须在那里注入到 config dict。
 
@@ -868,8 +870,8 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 | Dashboard 401 | `web/_shared.py` + `web/auth.py` | 会话鉴权 helper；检查 cookie `ombre_session`；`OMBRE_DASHBOARD_PASSWORD` 是否正确 |
 | 改密码报「环境变量密码」错误 | `web/auth.py` | `auth_change_password` 检测 `OMBRE_DASHBOARD_PASSWORD` 设置时禁用 |
 | HTTP 模式下 Claude.ai 连不上 | `server.py` | `__main__` CORS 中间件；`_app = mcp.streamable_http_app()`（单连接器，工具已回灌进 `mcp`）；URL 末尾必须 `/mcp` |
-| docker compose 重启后桶丢失 | — | volume 必须挂载到 `OMBRE_BUCKETS_DIR`（默认 `/data` 或 `/app/buckets`） |
-| Dashboard 改 host vault 不生效 | `web/config_api.py` | `_write_env_var`；写入 `.env` 后必须 `docker compose down/up` 重新挂载 |
+| docker compose 重启后桶丢失 | — | 使用 `OMBRE_HOST_VAULT_DIR` 将宿主机目录 bind mount 到 `/app/buckets`；该目录同时持久化桶、配置和 Tunnel token |
+| Dashboard 改 host vault 不生效 | `web/import_api.py` | 容器无法修改启动前确定的宿主机挂载；Docker 内界面只读，必须编辑宿主机 compose 同目录 `.env` 后 `--force-recreate` |
 | keepalive 失败 | `server.py` | `_keepalive_loop`；检查 `OMBRE_PORT` 实际监听端口 |
 | Webhook 不推送 | `server.py` | `_fire_webhook`；检查 `OMBRE_HOOK_URL` 和 `OMBRE_HOOK_SKIP` |
 | 配置热更新 dehydrator 没生效 | `web/config_api.py` | `api_config_update` 中 dehydrator 字段直接赋值 + 重建 `AsyncOpenAI` 客户端 |
@@ -898,7 +900,7 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 
 5. **dream feel 历史折叠已实现**。iter 2.0 后 dream 末尾的 feel 历史段按 `surfacing.feel_max_tokens`（默认 6000）做 token 预算，超出的老 feel 折叠为 60 字符单行摘要。原记录「dream 全量返回 feel 历史不限数量」问题已闭合。
 
-6. **`OMBRE_HOST_VAULT_DIR` 写入 .env 后已提示需要重启**。POST 返回 `restart_required/message`，Dashboard 保存成功后直接显示这句提示。
+6. **`OMBRE_HOST_VAULT_DIR` 的 Docker 挂载改由宿主机 Compose 明确管理**。容器内 Dashboard 只读并给出 `.env` + `--force-recreate` 指令，避免把容器内 `src/.env` 的假保存误认为挂载已改变。
 
 7. **wikilink 配置项已废弃并从 `config.example.yaml` 移除 active stanza**。example 只保留 deprecated 说明，旧配置残留仍会被忽略。
 

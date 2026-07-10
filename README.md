@@ -144,7 +144,9 @@ docker compose -f docker-compose.user.yml up -d
 > ```bash
 > echo "OMBRE_COMPRESS_API_KEY=your-key-here" > .env
 > echo "OMBRE_EMBED_API_KEY=your-embed-key" >> .env
+> echo "OMBRE_HOST_VAULT_DIR=D:/Ombre-Brain/buckets-data" >> .env
 > ```
+> `OMBRE_HOST_VAULT_DIR` 指向宿主机持久目录，其中同时保存记忆、`config.yaml` 和 Tunnel token；重建容器不会清空。
 
 **推荐免费方案：Google AI Studio**
 
@@ -597,13 +599,13 @@ docker compose -f deploy/docker-compose.yml up -d
 
 ## 把记忆挂到 Obsidian
 
-打开 `docker-compose.user.yml`，把 `./buckets:/data` 改成你的 Vault 路径：
+在 `docker-compose.user.yml` 同目录的 `.env` 中设置 Vault 路径，无需修改 compose 文件：
 
-```yaml
-- /Users/你的用户名/Documents/Obsidian Vault/Ombre Brain:/data
+```env
+OMBRE_HOST_VAULT_DIR=/Users/你的用户名/Documents/Obsidian Vault/Ombre Brain
 ```
 
-重启后每条记忆就是 Vault 里一个 Markdown 文件，可在 Obsidian 直接浏览编辑。
+然后执行 `docker compose -f docker-compose.user.yml up -d --force-recreate`。每条记忆会作为 Markdown 文件写入该目录，配置和 Tunnel token 也会一起持久化。
 
 ---
 
@@ -657,7 +659,7 @@ docker compose -f deploy/docker-compose.yml up -d
 | 重启后**记忆丢失**（退回旧版本 / 空库） | 数据目录没挂到持久盘：容器重建就把记忆连同代码一起丢了。匿名卷也会被 `docker compose down -v` 等操作清掉 | 把 `/app/buckets` 挂到**命名卷或宿主机目录**（`-v ./buckets:/app/buckets`）。**判断标准：能在宿主机文件夹里看到那些 `.md` 文件，就是安全的。** Dashboard → 设置 → 系统诊断 会直接告诉你「数据目录是否持久」 |
 | Docker **构建**（`docker build`）在 `pip install` 处失败：`SSL EOF` / 连不上 pypi.org / `No matching distribution` | 宿主机网络/代理（Clash、V2Ray 等）在构建时把连 PyPI 的连接掐断了 | 用**预构建镜像**（「快速开始」的 `docker compose` 直接拉 Docker Hub 镜像，无需本地构建）；若必须本地构建，临时关掉代理或给 Docker 配一个稳定的 PyPI 镜像源后重试 |
 | 记忆库涨到几百桶后 `breath` 很慢 / 超时被切断 | 旧版检索热路径有全库重读等开销 | **v2.5.0 已优化**（内存缓存 + touch 移出响应路径 + 并发脱水 + BM25 后台重建）；升级到 v2.5.0+ 即可 |
-| Tunnel 状态红色 / 连接失败 | Token 无效或 cloudflared 报错 | 展开 Dashboard 红色错误框查看 cloudflared 输出；重新从 Cloudflare Zero Trust 获取 token |
+| Tunnel 状态红色 / 连接失败 | Token 无效；或 VPN DNS 不支持 `_v2-origintunneld._tcp.argotunnel.com` 的 SRV 查询 | 新版 compose 默认以双 region + HTTP/2 绕过 SRV；旧部署请更新 compose 后 `--force-recreate`。仍失败时展开 Dashboard 错误框并检查 token 与 TCP 7844 出站连接 |
 | 隧道连接偶尔断 | Cloudflare Free 闲置超时 | 内置 keepalive 已缓解；可在 Cloudflare Tunnel 设置里调整超时 |
 
 ---

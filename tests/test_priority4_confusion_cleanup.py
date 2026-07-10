@@ -118,6 +118,7 @@ async def test_grow_shortpath_explains_hold_style_single_memory(monkeypatch):
 @pytest.mark.asyncio
 async def test_host_vault_set_returns_restart_required_message(monkeypatch, tmp_path):
     monkeypatch.setattr(import_api.sh, "_require_auth", lambda _request: None)
+    monkeypatch.setattr(import_api.sh, "in_docker", lambda: False)
     monkeypatch.setattr(import_api.sh, "_project_env_path", lambda: str(tmp_path / ".env"))
     monkeypatch.setattr(import_api.sh, "_write_env_var", lambda _key, _value: None)
 
@@ -132,6 +133,52 @@ async def test_host_vault_set_returns_restart_required_message(monkeypatch, tmp_
     assert payload["ok"] is True
     assert payload["restart_required"] is True
     assert "重启" in payload["message"]
+
+
+@pytest.mark.asyncio
+async def test_host_vault_set_rejects_container_local_fake_save(monkeypatch):
+    writes = []
+    monkeypatch.setattr(import_api.sh, "_require_auth", lambda _request: None)
+    monkeypatch.setattr(import_api.sh, "in_docker", lambda: True)
+    monkeypatch.setattr(import_api.sh, "_write_env_var", lambda key, value: writes.append((key, value)))
+
+    mcp = FakeMCP()
+    import_api.register(mcp)
+
+    response = await mcp.routes[("POST", "/api/host-vault")](
+        JsonRequest({"value": "D:/Vault/Ombre"})
+    )
+    payload = _json(response)
+
+    assert response.status_code == 409
+    assert payload["compose_managed"] is True
+    assert payload["restart_required"] is True
+    assert "compose" in payload["error"].lower()
+    assert writes == []
+
+
+@pytest.mark.asyncio
+async def test_host_vault_get_reports_compose_injected_value_in_container(monkeypatch):
+    monkeypatch.setattr(import_api.sh, "_require_auth", lambda _request: None)
+    monkeypatch.setattr(import_api.sh, "in_docker", lambda: True)
+    monkeypatch.setenv("OMBRE_HOST_VAULT_DIR", "D:/Vault/Ombre")
+    monkeypatch.setattr(
+        import_api.sh,
+        "_read_env_var",
+        lambda _name: pytest.fail("container must not read its local .env for a host mount"),
+    )
+
+    mcp = FakeMCP()
+    import_api.register(mcp)
+
+    response = await mcp.routes[("GET", "/api/host-vault")](JsonRequest())
+    payload = _json(response)
+
+    assert response.status_code == 200
+    assert payload["value"] == "D:/Vault/Ombre"
+    assert payload["source"] == "env"
+    assert payload["env_file"] is None
+    assert payload["compose_managed"] is True
 
 
 @pytest.mark.asyncio

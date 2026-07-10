@@ -1819,21 +1819,6 @@
   </details>
 </div>
 
-<!-- purge-toolbar：进入 purge 模式后浮在 list-view 上方 -->
-<div id="purge-toolbar" style="display:none;position:sticky;top:56px;z-index:40;margin:0;padding:10px 40px;background:rgba(253,248,243,0.96);backdrop-filter:blur(8px);border-bottom:1px solid rgba(184,92,60,0.3);align-items:center;gap:10px;flex-wrap:wrap;">
-  <label style="font-size:12px;color:var(--text-dim);cursor:pointer;display:flex;align-items:center;gap:6px;">
-    <input type="checkbox" id="purge-select-all" onchange="purgeToggleAll(this.checked)" style="accent-color:var(--accent);"> 全选
-  </label>
-  <span id="purge-count-label" style="font-size:12px;color:var(--accent);min-width:60px;">已选 0 条</span>
-  <span style="font-size:11px;color:var(--text-dim);flex:1;">点击行选中；仅对当前显示的桶生效</span>
-  <button class="btn-danger" onclick="openPurgeConfirm()" id="purge-exec-btn" disabled
-    style="padding:5px 16px;font-size:12px;opacity:0.4;transition:opacity 0.2s;">
-    彻底清除所选
-  </button>
-  <button onclick="exitPurgeMode()" title="退出清理模式" style="background:none;border:1px solid var(--border);color:var(--text-dim);border-radius:2px;padding:5px 9px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="x-circle"></i> 退出</button>
-</div>
-
-
 <div class="content" id="breath-view" style="display:none">
   <div class="breath-flow" id="breath-flow">
     <div class="flow-step" id="fs-input">① 输入<br><small>query / valence / arousal</small></div>
@@ -2956,17 +2941,6 @@
         </div>
       </div>
 
-      <div>
-        <div style="font-weight:600;font-size:13px;margin-bottom:6px;color:var(--accent);">清理错误导入</div>
-        <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;line-height:1.6;">
-          用于批量彻底删除记忆桶（物理删除，不可恢复）。<br>
-          <strong>仅用于清理批量导入时分析出错产生的垃圾记忆。</strong><br>
-          AI 无法触发此操作；删除后 AI 下次任意工具调用时会收到一次性通知。
-        </div>
-        <button class="btn-danger" onclick="enterPurgeMode()" style="padding:6px 18px;font-size:12px;">
-          进入清理模式（批量永久删除）
-        </button>
-      </div>
     </div>
 
   </div>
@@ -4048,18 +4022,13 @@ function renderBuckets(buckets) {
     var stale = !b.pinned && !b.anchor && !b.dont_surface && daysSince(b.last_active || b.created) >= 45;
     var rowCls = 'bucket-row' + (stale ? ' faded' : '');
     var inlineStyle = b.dont_surface ? 'opacity:0.45;' : '';
-    // purge mode: prepend checkbox
-    var purgeChk = _purgeMode
-      ? '<input type="checkbox" class="purge-chk" data-id="' + b.id + '" data-name="' + esc(b.name) + '" onchange="purgeUpdateCount()" onclick="event.stopPropagation()" style="accent-color:var(--accent);margin-right:4px;flex-shrink:0;">'
-      : '';
-    var rowClick = _purgeMode ? 'onclick="purgeToggleRow(this)"' : 'onclick="showDetail(\'' + b.id + '\')"';
+    var rowClick = 'onclick="showDetail(\'' + b.id + '\')"';
     var domainHtml = (b.domain || []).length
       ? '<span class="domain-pill">' + esc((b.domain || []).join(', ')) + '</span>'
       : '';
     var emotionHtml = '<span class="emotion" style="display:inline-flex;align-items:center;gap:3px;"><span class="v-bar"><span class="v-dot" style="left:' + vPos + '%"></span></span>' + modelV + '</span>';
     return '<div class="' + rowCls + '" data-id="' + esc(b.id) + '" ' + rowClick + ' style="cursor:pointer;' + inlineStyle + '">' +
       '<div class="bucket-row-top">' +
-        purgeChk +
         '<span class="' + iconCls + '">' + iconHtml + '</span>' +
         '<span class="name" title="' + esc(b.name) + '">' + esc(b.name) + firstBadge + '</span>' +
         '<div class="bucket-row-tags">' +
@@ -4257,7 +4226,6 @@ async function bucketArchive(id) {
 
 async function bucketDelete(id) {
   if (!confirm('这会把此记忆桶移入删除档案，并从日常界面隐藏；文件仍保留在 archive/ 中。继续？')) return;
-  if (!confirm('再次确认：这不是物理抹除。彻底删除请使用清理模式。')) return;
   try {
     var res = await fetch(BASE + '/api/bucket/' + id + '?confirm=true', { method: 'DELETE' });
     if (!res.ok) throw new Error(await res.text());
@@ -8028,267 +7996,7 @@ function copyFeedback() {
     </div>
   </div>
 </div>
-<!-- ============================================================
-     批量硬删确认 Modal（3 步确认）
-     仅用户操作，AI 无法触发；删除后向 AI 发送一次性通知
-     全程展示待删除桶列表
-     ============================================================ -->
-<div id="purge-modal" style="display:none;position:fixed;inset:0;z-index:200;background:rgba(44,42,38,0.6);backdrop-filter:blur(4px);align-items:flex-start;justify-content:center;padding-top:40px;overflow-y:auto;">
-  <div style="background:var(--surface);border-radius:22px;max-width:520px;width:92%;padding:28px 28px 22px;box-shadow:0 20px 60px rgba(0,0,0,0.32), inset 0 1px 0 rgba(255,255,255,0.6), inset 0 0 0 2px rgba(190,90,65,0.35);margin-bottom:40px;">
-
-    <!-- 待删除列表（全程显示） -->
-    <div style="margin-bottom:18px;">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;letter-spacing:0.3px;">即将永久删除以下记忆桶（<span id="purge-modal-count">0</span> 条）：</div>
-      <div id="purge-modal-list"
-        style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:2px;padding:8px 10px;background:var(--bg);font-size:12px;line-height:1.9;color:var(--text);">
-      </div>
-    </div>
-
-    <!-- Step 1：勾选确认 -->
-    <div id="purge-step1">
-      <div style="font-size:13px;font-weight:600;color:var(--accent);margin-bottom:10px;">第 1 步 / 3 &nbsp;·&nbsp; 勾选确认</div>
-      <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:13px;color:var(--text);line-height:1.7;">
-        <input type="checkbox" id="purge-chk-confirm" onchange="purgeCheckStep1()"
-          style="accent-color:var(--accent);margin-top:3px;flex-shrink:0;">
-        <span>我知道这是<strong>永久删除</strong>，文件将从磁盘上完全移除，任何人包括 AI 都无法恢复。</span>
-      </label>
-      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px;">
-        <button onclick="closePurgeModal()" style="background:none;border:1px solid var(--border);color:var(--text-dim);border-radius:2px;padding:6px 16px;font-size:12px;cursor:pointer;">取消</button>
-        <button id="purge-next1" onclick="purgeGoStep2()" disabled
-          style="background:var(--accent);border:none;color:#fff;border-radius:2px;padding:6px 18px;font-size:12px;cursor:pointer;opacity:0.35;transition:opacity 0.2s;">下一步</button>
-      </div>
-    </div>
-
-    <!-- Step 2：手动输入 -->
-    <div id="purge-step2" style="display:none;">
-      <div style="font-size:13px;font-weight:600;color:var(--accent);margin-bottom:10px;">第 2 步 / 3 &nbsp;·&nbsp; 输入确认词</div>
-      <p style="font-size:12px;color:var(--text-dim);margin-bottom:8px;line-height:1.6;">
-        在下方输入框中输入 <code style="background:var(--bg);padding:1px 6px;border-radius:2px;font-size:12px;">永久删除</code> 以继续：
-      </p>
-      <input id="purge-input2" type="text" autocomplete="off" placeholder="永久删除"
-        style="width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:2px;font-size:13px;font-family:inherit;margin-bottom:4px;"
-        oninput="purgeCheckStep2()">
-      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:14px;">
-        <button onclick="closePurgeModal()" style="background:none;border:1px solid var(--border);color:var(--text-dim);border-radius:2px;padding:6px 16px;font-size:12px;cursor:pointer;">取消</button>
-        <button id="purge-next2" onclick="purgeGoStep3()" disabled
-          style="background:var(--accent);border:none;color:#fff;border-radius:2px;padding:6px 18px;font-size:12px;cursor:pointer;opacity:0.35;transition:opacity 0.2s;">下一步</button>
-      </div>
-    </div>
-
-    <!-- Step 3：长按解锁（交互阻尼，阻断误触） -->
-    <div id="purge-step3" style="display:none;">
-      <div style="font-size:13px;font-weight:600;color:var(--negative);margin-bottom:10px;">第 3 步 / 3 &nbsp;·&nbsp; 长按抹除</div>
-      <p style="font-size:12px;color:var(--text-dim);margin-bottom:16px;line-height:1.6;">
-        此操作将立即开始，无法中断。<strong>按住下方按键 1.5 秒不松手</strong>，待进度条充满后才会执行；中途松手则取消。
-      </p>
-      <button id="purge-final-btn" class="danger-hold-btn"
-        onmousedown="purgeHoldStart(event)" onmouseup="purgeHoldEnd()" onmouseleave="purgeHoldEnd()"
-        ontouchstart="purgeHoldStart(event)" ontouchend="purgeHoldEnd()">
-        <span class="fill" id="purge-hold-fill"></span>
-        <span class="lbl" id="purge-countdown-label">按住以确认抹除全部记忆</span>
-      </button>
-      <button class="danger-cancel" onclick="closePurgeModal()">取消</button>
-    </div>
-
-  </div>
-</div>
-
 <script>
-// ============================================================
-// Purge mode — 批量硬删（物理删除），仅用户可触发
-// ============================================================
-var _purgeMode = false;
-var _purgeCountdownTimer = null;
-
-function enterPurgeMode() {
-  // 切到记忆桶 tab，然后进入 purge 模式
-  var listTab = document.querySelector('.tab[data-tab="list"]');
-  if (listTab && !listTab.classList.contains('active')) listTab.click();
-  _purgeMode = true;
-  var tb = document.getElementById('purge-toolbar');
-  if (tb) { tb.style.display = 'flex'; }
-  renderBuckets(allBuckets || []);
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-function exitPurgeMode() {
-  _purgeMode = false;
-  var tb = document.getElementById('purge-toolbar');
-  if (tb) { tb.style.display = 'none'; }
-  renderBuckets(allBuckets || []);
-}
-
-function purgeToggleRow(row) {
-  var chk = row.querySelector('.purge-chk');
-  if (chk) { chk.checked = !chk.checked; purgeUpdateCount(); }
-}
-
-function purgeUpdateCount() {
-  var chks = document.querySelectorAll('.purge-chk:checked');
-  var n = chks.length;
-  var lbl = document.getElementById('purge-count-label');
-  var btn = document.getElementById('purge-exec-btn');
-  if (lbl) lbl.textContent = '已选 ' + n + ' 条';
-  if (btn) { btn.disabled = n === 0; btn.style.opacity = n > 0 ? '1' : '0.4'; }
-  var allChks = document.querySelectorAll('.purge-chk');
-  var sa = document.getElementById('purge-select-all');
-  if (sa && allChks.length > 0) sa.indeterminate = (n > 0 && n < allChks.length);
-  if (sa && allChks.length > 0) sa.checked = (n === allChks.length);
-}
-
-function purgeToggleAll(checked) {
-  document.querySelectorAll('.purge-chk').forEach(function(c) { c.checked = checked; });
-  purgeUpdateCount();
-}
-
-function getPurgeSelectedIds() {
-  var chks = document.querySelectorAll('.purge-chk:checked');
-  return Array.from(chks).map(function(c) { return c.getAttribute('data-id'); });
-}
-
-function getPurgeSelectedNames() {
-  var chks = document.querySelectorAll('.purge-chk:checked');
-  return Array.from(chks).map(function(c) {
-    return c.getAttribute('data-name') || c.getAttribute('data-id');
-  });
-}
-
-function openPurgeConfirm() {
-  var ids = getPurgeSelectedIds();
-  if (!ids.length) return;
-  var names = getPurgeSelectedNames();
-
-  // 更新 modal 内列表
-  document.getElementById('purge-modal-count').textContent = ids.length;
-  var listEl = document.getElementById('purge-modal-list');
-  listEl.innerHTML = names.map(function(n, i) {
-    return '<div style="padding:2px 0;border-bottom:1px solid var(--border);">' +
-      '<span style="color:var(--text-dim);margin-right:8px;">' + (i + 1) + '.</span>' +
-      esc(n) + '</div>';
-  }).join('');
-
-  // 重置步骤状态
-  document.getElementById('purge-chk-confirm').checked = false;
-  document.getElementById('purge-input2').value = '';
-  document.getElementById('purge-next1').disabled = true;
-  document.getElementById('purge-next1').style.opacity = '0.35';
-  document.getElementById('purge-next2').disabled = true;
-  document.getElementById('purge-next2').style.opacity = '0.35';
-  document.getElementById('purge-step1').style.display = '';
-  document.getElementById('purge-step2').style.display = 'none';
-  document.getElementById('purge-step3').style.display = 'none';
-
-  if (_purgeCountdownTimer) { clearInterval(_purgeCountdownTimer); _purgeCountdownTimer = null; }
-
-  var modal = document.getElementById('purge-modal');
-  modal.style.display = 'flex';
-}
-
-function closePurgeModal() {
-  if (_purgeCountdownTimer) { clearInterval(_purgeCountdownTimer); _purgeCountdownTimer = null; }
-  document.getElementById('purge-modal').style.display = 'none';
-}
-
-// Step 1: checkbox
-function purgeCheckStep1() {
-  var ok = document.getElementById('purge-chk-confirm').checked;
-  var btn = document.getElementById('purge-next1');
-  btn.disabled = !ok;
-  btn.style.opacity = ok ? '1' : '0.35';
-}
-
-function purgeGoStep2() {
-  document.getElementById('purge-step1').style.display = 'none';
-  document.getElementById('purge-step2').style.display = '';
-  setTimeout(function() { document.getElementById('purge-input2').focus(); }, 80);
-}
-
-// Step 2: type "永久删除"
-function purgeCheckStep2() {
-  var v = document.getElementById('purge-input2').value.trim();
-  var ok = (v === '永久删除');
-  var btn = document.getElementById('purge-next2');
-  btn.disabled = !ok;
-  btn.style.opacity = ok ? '1' : '0.35';
-}
-
-function purgeGoStep3() {
-  document.getElementById('purge-step2').style.display = 'none';
-  document.getElementById('purge-step3').style.display = '';
-  purgeHoldEnd(); // reset
-}
-
-// —— 长按解锁：按住 1.5s 进度充满才触发，中途松手取消 ——
-var _purgeHoldTimer = null;
-var _purgeHoldStart = 0;
-var HOLD_MS = 1500;
-function purgeHoldStart(e) {
-  if (e && e.preventDefault) e.preventDefault();
-  var btn = document.getElementById('purge-final-btn');
-  var fill = document.getElementById('purge-hold-fill');
-  var label = document.getElementById('purge-countdown-label');
-  if (!btn || btn.classList.contains('done')) return;
-  btn.classList.add('armed');
-  _purgeHoldStart = Date.now();
-  if (_purgeHoldTimer) cancelAnimationFrame(_purgeHoldTimer);
-  (function tick() {
-    var pct = Math.min(100, (Date.now() - _purgeHoldStart) / HOLD_MS * 100);
-    fill.style.width = pct + '%';
-    if (pct >= 100) {
-      btn.classList.add('done');
-      label.textContent = '正在抹除…';
-      executePurge();
-      return;
-    }
-    label.textContent = '继续按住…';
-    _purgeHoldTimer = requestAnimationFrame(tick);
-  })();
-}
-function purgeHoldEnd() {
-  if (_purgeHoldTimer) { cancelAnimationFrame(_purgeHoldTimer); _purgeHoldTimer = null; }
-  var btn = document.getElementById('purge-final-btn');
-  var fill = document.getElementById('purge-hold-fill');
-  var label = document.getElementById('purge-countdown-label');
-  if (btn && btn.classList.contains('done')) return;
-  if (btn) btn.classList.remove('armed');
-  if (fill) fill.style.width = '0%';
-  if (label) label.textContent = '按住以确认抹除全部记忆';
-}
-
-async function executePurge() {
-  var ids = getPurgeSelectedIds();
-  if (!ids.length) { closePurgeModal(); return; }
-  var btn = document.getElementById('purge-final-btn');
-  var label = document.getElementById('purge-countdown-label');
-  label.textContent = '删除中…';
-  btn.disabled = true;
-  try {
-    var res = await fetch(BASE + '/api/buckets/purge', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Purge-Confirm': 'dashboard-purge-v1',
-      },
-      body: JSON.stringify({ ids: ids }),
-    });
-    var data = await res.json();
-    if (!res.ok) throw new Error(data.error || res.statusText);
-    closePurgeModal();
-    exitPurgeMode();
-    await loadBuckets();
-    var msg = '已永久删除 ' + data.deleted + ' 条记忆桶。AI 将在下次工具调用时收到通知。';
-    if (data.failed && data.failed.length) msg += '\n未能删除：' + data.failed.join(', ');
-    alert(msg);
-  } catch (e) {
-    btn.disabled = false;
-    btn.classList.remove('done', 'armed');
-    var fill = document.getElementById('purge-hold-fill');
-    if (fill) fill.style.width = '0%';
-    label.textContent = '按住以确认抹除全部记忆';
-    alert('删除失败：' + e.message);
-  }
-}
-
 // ============================================================
 // Human name setting
 // ============================================================

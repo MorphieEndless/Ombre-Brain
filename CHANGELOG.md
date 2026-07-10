@@ -2,6 +2,29 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.5.2
+
+### 修复 / Fixed
+
+- MCP OAuth 补齐 resource binding、反向代理公网地址规范化、PKCE 与 token 续期边界，避免授权页已弹出却无法完成连接。
+- `hold` 在打标或 embedding API 不可用时仍原样保存正文；合并只追加原文，绝不调用 LLM 压缩。
+- 脱水缓存键加入 API 格式、端点和模型；切换到 Haiku 等新模型后，长桶下次首次浮现会真正调用新模型，不复用旧模型摘要。
+- 移除 Dashboard 物理删除入口；旧 `/api/buckets/purge` 改为只读拒绝端点，保留 API 兼容但不会抹除记忆。
+
+### 优化 / Improved
+
+- 收紧 `hold` / `grow` / `trace` 工具描述，要求客户端只在有明确记忆意图时发起写操作，降低模型过度调用。
+
+### 测试 / Tests
+
+- 新增 OAuth 授权码 + PKCE + resource + refresh token 端到端回归，并以真实本地 HTTP 服务验证 401 discovery 链。
+- 新增 `hold` 打标/向量降级、原文合并、模型级脱水缓存、OAuth 开关持久化和 purge 禁用回归。
+- 完整测试通过：613 passed，7 skipped。
+
+### 维护 / Chores
+
+- VERSION + `src/VERSION` -> 2.5.2。
+
 ## 2.5.1
 
 ### 修复 / Fixed

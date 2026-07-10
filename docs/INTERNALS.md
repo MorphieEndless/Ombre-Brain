@@ -166,7 +166,7 @@ src/web/
 ├── plans.py        # /api/plans(+/{id}/action) 看板
 ├── letters.py      # /api/letters / /api/letter 信件
 ├── hooks.py        # /breath-hook / /dream-hook（SessionStart 等 HTTP 钩子）+ Webhook
-├── buckets.py      # /api/buckets(+ pin/resolve/archive/forget/anchor/purge/edit/DELETE)
+├── buckets.py      # /api/buckets(+ pin/resolve/archive/forget/anchor/edit/DELETE；保留已退役 purge 拒绝端点)
 ├── import_api.py   # /api/import/*（上传 / 进度 / 暂停 / 规律 / 审阅）
 ├── github.py       # /api/github/*（GitHub 备份同步，封装 github_sync.py）
 ├── embedding.py    # /api/embedding/*（info / migrate / local 模型管理）
@@ -288,7 +288,7 @@ feel 桶自身：
 两种路径：
 
 - **Feel 模式** (`feel=True`)：跳过 LLM 分析，自动注入 `__feel__` 标签，写入 `feel/沉淀物/`。`source_bucket` 提供时把源桶标记为 `digested=True` 并写 `model_valence`。返回 `🫧feel→{id}`。
-- **普通模式**：`analyze()` → 用户传入的 `valence`/`arousal` 优先于 LLM 结果（B-09 修复）→ `_merge_or_create()`（相似度 > `merge_threshold` 合并，否则新建）→ 写 embedding → 异步触发 `_check_plan_resolution()` 扫 active plans。返回 `合并→{name}` 或 `新建→{name}`。
+- **普通模式**：`analyze()` → 用户传入的 `valence`/`arousal` 优先于 LLM 结果（B-09 修复）→ `_merge_or_create(raw_merge=True)`（相似度 > `merge_threshold` 时以分隔线追加原文，否则新建）→ 写 embedding → 异步触发 `_check_plan_resolution()` 扫 active plans。返回 `合并→{name}` 或 `新建→{name}`。`analyze()` 或 embedding 不可用时只降级元数据/向量索引，正文仍原样落盘；**hold 永远不调 `dehydrate()`/`merge()` 压缩正文**。
 
 (改动注意：`pinned=True` 走单独分支直接创建到 `permanent/`，importance 强制锁 10，不走合并；用户显式传 valence/arousal=0.0 也算「有效」，必须走 `0 <= v <= 1` 判定，不能用 `if valence` 否则 0.0 会被忽略——这就是 B-09。)
 
@@ -306,7 +306,7 @@ feel 桶自身：
 
 签名：`trace(bucket_id, name="", domain="", valence=-1, arousal=-1, importance=-1, tags="", resolved=-1, pinned=-1, digested=-1, content="", delete=False, status="", weight=-1, dont_surface=-1, why_remembered="")`
 
-- `delete=True` → `bucket_mgr.delete()` + `embedding_engine.delete_embedding()`。
+- `delete=True` → `bucket_mgr.delete()`：写入 `deleted_at` 并将 Markdown 移入 `archive/`；只清理可重建的 embedding 索引，不抹除记忆文件。
 - 其它字段：仅收集传入的（用 `-1`/空串作为「未传」哨兵）批量更新 frontmatter。
 - `pinned=1` 自动锁 importance=10 + 触发 `_move_bucket(permanent_dir)`。
 - `resolved=1` **不**自动归档（B-01 修复）；只更新 frontmatter，由 decay 引擎自然衰减。
@@ -407,7 +407,7 @@ feel 桶自身：
 | `/api/settings/sampling` | GET / POST | 🔒 | iter 1.9：dashboard 的加权采样面板。GET 返回当前 `surfacing.sampling.{enabled,top_k,sample_k,temperature}`；POST 校验范围后热更新到内存 config（不写回 yaml） |
 | `/api/anchors` | GET | 🔒 | iter 2.0：列出所有 anchor 桶（按 `created` 升序），返回 `{ok, count, limit, anchors:[...]}` |
 | `/api/bucket/{id}/anchor` | POST | 🔒 | iter 2.0：toggle anchor 标记。Body 可传 `{value: bool}` 强制设置；不传则切换。已满 24 时返回 **409** + `{error, count, limit}` |
-| `/api/bucket/{id}` | DELETE | 🔒 | 删除到档案：移入 `archive/` 并写 `deleted_at`，需 `?confirm=true`；物理删除只走 `/api/buckets/purge` |
+| `/api/bucket/{id}` | DELETE | 🔒 | 删除到档案：移入 `archive/` 并写 `deleted_at`，需 `?confirm=true`；不做物理抹除 |
 | `/api/letters` | GET | 🔒 | 信件列表，支持 `?author=user\|claude` |
 | `/api/letter` | POST | 🔒 | Dashboard 写信入口 |
 | `/api/search?q=` | GET | 🔒 | 搜索 |
@@ -446,7 +446,7 @@ feel 桶自身：
 | `/api/embedding/migrate` | POST | 🔒 | 触发后端切换 + 全量重算 embeddings（异步） |
 | `/api/embedding/migrate/status` | GET | 🔒 | 重算进度（done/total） |
 | `/api/settings/human` | GET / POST | 🔒 | 系统通知称呼（`OMBRE_HUMAN_NAME`），dashboard「① 我」面板 |
-| `/api/buckets/purge` | POST | 🔒 | 危险区批量物理删除（不可恢复，仅 dashboard 进入「清理模式」后可调） |
+| `/api/buckets/purge` | POST | 🔒 | 已退役的兼容端点：固定返回 `410 physical_deletion_forbidden`，不读写任何记忆 |
 | `/api/letter/{letter_id}` | PATCH | 🔒 | 改信件元数据（read_at 等） |
 | `/api/letter/{letter_id}` | DELETE | 🔒 | 删信件（移入 archive） |
 | `/api/env-vars` | GET | 🔒 | dashboard 设置页「⑤ 环境变量」只读区：当前进程读到的所有 `OMBRE_*`，敏感字段脱敏 |
@@ -906,7 +906,7 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 
 8. **`trace(resolved=1)` 与 `/api/bucket/{id}/resolve` 提示已统一**。两边共用 `resolved_hint()`，REST 返回 `message`，Dashboard 直接展示。
 
-9. **Dashboard 已区分「归档」「删除到档案」「永久删除」**。单桶 DELETE 是移入 `archive/` 并写 `deleted_at`；真正物理删除只在清理模式的 `/api/buckets/purge` 中出现。
+9. **Dashboard 只提供「主动遗忘」「归档」和「删除到档案」**。单桶 DELETE 会移入 `archive/` 并写 `deleted_at`；物理删除 UI 已移除，旧 `/api/buckets/purge` 仅返回 410。
 
 10. **冷启动检测最多 2 个**。`importance >= 8` 的新桶超过 2 个时，第 3 个开始按普通衰减分排队，可能被压在 top-20 后随机洗牌。如果用户一次性钉选 5 条核心准则后又新建 3 个 importance=10 的事件桶，会感到「我刚建的核心事件没浮现」。
 

@@ -330,13 +330,16 @@ class Dehydrator:
         return conn
 
     def _content_key(self, content: str) -> str:
-        """缓存键 = hash(prompt 版本 + 人名 + 原文)。
+        """缓存键 = hash(prompt 版本 + 人名 + 模型配置 + 原文)。
 
         缓存原本只按 content_hash 存，导致脱水 prompt 改了、人名改了，旧的
         third-person 摘要仍会命中缓存返回——视角修复对存量内容不生效。把
-        _PROMPT_VERSION 与 self.human 混进 key，prompt 一升级就自然绕过旧缓存，
-        无需手工删 dehydration_cache.db。"""
-        keyed = f"{_PROMPT_VERSION}|{self.human}|{content}"
+        prompt 版本、人名、api_format、base_url 和 model 混进 key，换模型或端点后
+        下次 breath 会用新配置重新脱水，不会复用旧模型的摘要。"""
+        keyed = (
+            f"{_PROMPT_VERSION}|{self.human}|{self.api_format}|"
+            f"{self.base_url.rstrip('/')}|{self.model}|{content}"
+        )
         return hashlib.sha256(keyed.encode()).hexdigest()
 
     def _get_cached_summary(self, content: str) -> str | None:

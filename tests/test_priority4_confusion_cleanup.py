@@ -2,9 +2,12 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 import web.buckets as buckets_web
+import web.config_api as config_api
 import web.import_api as import_api
+import utils
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -230,4 +233,60 @@ def test_dashboard_single_bucket_delete_is_not_labeled_as_hard_delete():
         assert "彻底删除这封信" not in text
         assert "你真的要永久删除这封信吗" not in text
         assert 'title="彻底删除"' not in text
-        assert "物理删除，不可恢复" in text
+        assert "/api/buckets/purge" not in text
+        assert "进入清理模式" not in text
+        assert "批量永久删除" not in text
+
+
+def test_dashboard_exposes_oauth_authentication_switch():
+    for rel in ("dashboard.html", "frontend/dashboard.html"):
+        text = (ROOT / rel).read_text(encoding="utf-8")
+
+        assert 'id="cfg-mcp-auth"' in text
+        assert "开启 OAuth（Claude.ai 网页版 / Claude Code 远程需要）" in text
+        assert "saveMcpAuth()" in text
+        assert "mcp_require_auth: val" in text
+
+
+@pytest.mark.asyncio
+async def test_dashboard_oauth_switch_persists_to_config(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setattr(config_api.sh, "_require_auth", lambda _request: None)
+    monkeypatch.setattr(config_api.sh, "config", {"mcp_require_auth": True})
+    monkeypatch.setattr(utils, "config_file_path", lambda: str(config_path))
+    mcp = FakeMCP()
+    config_api.register(mcp)
+
+    response = await mcp.routes[("POST", "/api/config")](
+        JsonRequest({"mcp_require_auth": False, "persist": True})
+    )
+    payload = _json(response)
+    persisted = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert config_api.sh.config["mcp_require_auth"] is False
+    assert persisted["mcp_require_auth"] is False
+
+
+@pytest.mark.asyncio
+async def test_retired_purge_endpoint_never_deletes_memory(monkeypatch):
+    class ExplodingBucketManager:
+        def __getattr__(self, name):
+            raise AssertionError(f"retired purge endpoint touched bucket manager: {name}")
+
+    monkeypatch.setattr(buckets_web.sh, "_require_auth", lambda _request: None)
+    monkeypatch.setattr(
+        buckets_web.sh, "bucket_mgr", ExplodingBucketManager(), raising=False
+    )
+    mcp = FakeMCP()
+    buckets_web.register(mcp)
+
+    response = await mcp.routes[("POST", "/api/buckets/purge")](
+        JsonRequest({"ids": ["memory-1"]})
+    )
+    payload = _json(response)
+
+    assert response.status_code == 410
+    assert payload["error"] == "physical_deletion_forbidden"
+    assert "Markdown 文件会继续保留" in payload["message"]

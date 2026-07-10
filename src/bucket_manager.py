@@ -11,8 +11,8 @@ bucket_manager.py — 记忆桶的增删改查与多维索引
 - 创建/读取/更新/删除/搬家（move）都在这里
 - 检索 = 先按 domain 预筛，再按情感坐标 + 文本相似度加权排序
 - 情感坐标是 Russell 环形模型的连续值：valence 0~1（消极→积极），arousal 0~1（平静→激动）
-- create()/update(content=...)/delete() 自动同步 embedding 索引（iter 2.1+），
-  避免「文件存在但向量缺失」的孤儿桶导致 breath 检索数对不上 pulse
+- create()/update(content=...)/delete() 自动同步 embedding 索引（iter 2.1+）；
+  一般写入仍严格要求向量化，`hold` 则允许索引失败后保留原文待后补
 - iter 2.0：create() 接受 ``bucket_id_override``（feel 用分钟级可读 id），
   以及 ``source_tool`` / ``grow_batch_id`` 用于来源追踪
 
@@ -310,9 +310,9 @@ class BucketManager:
     def _require_embedding_available(self) -> None:
         """create()/update(content=...) 落盘前的硬性前置校验。
 
-        embedding 是记忆系统的强制依赖，不再允许「文件已存在但向量缺失」的
-        降级状态：未配置 / 未启用直接拒绝整个写操作，调用方（hold/grow/trace）
-        据此向 MCP 客户端和 Dashboard 报错，不静默、不留孤儿桶。
+        默认写入严格要求 embedding；未配置 / 未启用时直接拒绝。
+        `hold` 会显式传入 allow_embedding_fallback=True，以“正文不丢”为更高优先级，
+        允许 Markdown 先落盘、向量稍后补齐。
         """
         if not self.embedding_engine or not getattr(self.embedding_engine, "enabled", False):
             raise RuntimeError(
@@ -395,6 +395,7 @@ class BucketManager:
         source_tool: str = "",
         grow_batch_id: str = "",
         bucket_id_override: str = "",
+        allow_embedding_fallback: bool = False,
     ) -> str:
         """
         Create a new memory bucket, return bucket ID.
@@ -413,9 +414,10 @@ class BucketManager:
           ``feel_202605011423_V085``）。如果与已有桶冲突，自动追加秒级后缀。
           为空 → 走默认 ``generate_bucket_id()``（12 位 hex）。
         """
-        # 写文件之前先校验 embedding 可用——fail-fast，不留「文件已存在但
-        # 向量缺失」的孤儿桶（rule.md §1.5 的「不静默」现在延伸为「不降级」）。
-        self._require_embedding_available()
+        # 默认写入仍要求 embedding 可用。hold 明确选择 fallback 时，正文优先落盘，
+        # 缺失向量由 backfill 后补；这条例外不扩散到 grow/trace。
+        if not allow_embedding_fallback:
+            self._require_embedding_available()
 
         # F-04: 清洗 content / tags / name 中的危险控制字符和双向覆写符
         content = self._sanitize_text(content)
@@ -587,12 +589,17 @@ class BucketManager:
         # 文件已经写盘，異常向上抛由调用方决定是否清理半成品文件。
         try:
             await self._sync_embedding(bucket_id, linked_content)
-        except Exception:
-            try:
-                os.remove(file_path)
-            except OSError:
-                pass
-            raise
+        except Exception as exc:
+            if not allow_embedding_fallback:
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    pass
+                raise
+            logger.warning(
+                f"hold embedding unavailable; kept raw bucket for later backfill / "
+                f"hold 向量化不可用，已保留原文待后补: {bucket_id}: {type(exc).__name__}: {exc}"
+            )
         self._invalidate_bm25()
         self._record_v3_bucket_event(
             "create",
@@ -650,7 +657,13 @@ class BucketManager:
     # 更新桶
     # Supports: content, tags, importance, valence, arousal, name, resolved
     # ---------------------------------------------------------
-    async def update(self, bucket_id: str, **kwargs) -> bool:
+    async def update(
+        self,
+        bucket_id: str,
+        *,
+        allow_embedding_fallback: bool = False,
+        **kwargs,
+    ) -> bool:
         """
         Update bucket content or metadata fields.
         更新桶的内容或元数据字段。
@@ -661,7 +674,7 @@ class BucketManager:
 
         # content 改动会触发 embedding 重新生成（见下方 _sync_embedding 调用），
         # 同样要求 fail-fast：embedding 不可用就拒绝，不碰文件（不写入半新半旧状态）。
-        if "content" in kwargs:
+        if "content" in kwargs and not allow_embedding_fallback:
             self._require_embedding_available()
 
         try:
@@ -801,7 +814,16 @@ class BucketManager:
         # 失败不再静默吞掉——异常向上抛，调用方（trace 等）据此向用户报错。
         # 注意：文件内容此时已落盘，调用方需要知道这是「半失败」状态。
         if "content" in kwargs:
-            await self._sync_embedding(bucket_id, post.content or "")
+            try:
+                await self._sync_embedding(bucket_id, post.content or "")
+            except Exception as exc:
+                if not allow_embedding_fallback:
+                    raise
+                logger.warning(
+                    f"hold merge embedding unavailable; kept appended raw content / "
+                    f"hold 合并后向量化不可用，已保留追加原文待后补: "
+                    f"{bucket_id}: {type(exc).__name__}: {exc}"
+                )
         self._invalidate_bm25()
         self._record_v3_bucket_event(
             "update",

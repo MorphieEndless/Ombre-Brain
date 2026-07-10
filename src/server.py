@@ -33,7 +33,6 @@ import hashlib
 import hmac
 import secrets
 import time
-import json as _json_lib
 from typing import Optional, Awaitable
 from starlette.requests import Request
 from starlette.responses import Response
@@ -385,52 +384,19 @@ from web._shared import _mark_op  # noqa: F401  (injected into tools._runtime be
 
 
 # =============================================================
-# 仪表板硬删除通知队列（Dashboard Hard Purge Notification）
-# 她/他从仪表板彻底删除记忆后，下次 AI 调用任何工具时一次性通知。
-# 通知文件存于 buckets_dir/_pending_deletions.json，消费后立即删除。
-# AI 无法触发此通知（它不是 MCP 工具，只能由仪表板 HTTP 端点写入）。
+# 已退役的硬删除通知兼容钩子
+# web/_shared.py 仍保留这两个注入位，以免旧扩展导入时报错。
+# 当前版本不写入、不消费硬删除通知，也不抹除记忆。
 # =============================================================
 
-def _deletion_notice_path() -> str:
-    return os.path.join(config.get("buckets_dir", "buckets"), "_pending_deletions.json")
-
-
-def _write_deletion_notice(names: list) -> None:
-    """追加待发送删除通知。多次删除批次会合并入同一文件直至 AI 读取。"""
-    path = _deletion_notice_path()
-    try:
-        existing: list = []
-        if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
-                existing = _json_lib.load(f)
-        existing.extend(names)
-        with open(path, "w", encoding="utf-8") as f:
-            _json_lib.dump(existing, f, ensure_ascii=False)
-    except Exception as e:
-        logger.warning(f"Failed to write deletion notice: {e}")
+def _write_deletion_notice(_names: list) -> None:
+    """兼容旧注入接口；物理删除能力已退役。"""
+    return None
 
 
 def _pop_deletion_notice() -> str:
-    """读取并消费通知文件。返回格式化通知字符串（含尾部换行），无通知返回空串。"""
-    path = _deletion_notice_path()
-    if not os.path.exists(path):
-        return ""
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            names = _json_lib.load(f)
-        os.remove(path)
-        if not names:
-            return ""
-        human = config.get("human", "人类")
-        ts = time.strftime("%Y-%m-%d %H:%M")
-        item_list = "\n".join(f"  · {n}" for n in names)
-        return (
-            f"「{ts}，{human} 通过前端界面永久删除了以下记忆：\n{item_list}\n"
-            f"如果其中有你想保留的，你可以告诉 {human}。」\n\n"
-        )
-    except Exception as e:
-        logger.warning(f"Failed to read deletion notice: {e}")
-        return ""
+    """兼容旧返回值；当前永远没有硬删除通知。"""
+    return ""
 
 
 # 这些 helper 定义在 server.py（读/写 webhook 全局等），但 web/ 的 hooks/buckets 路由要用。
@@ -608,7 +574,7 @@ async def hold(
     arousal: Optional[float] = -1,
     why_remembered: Optional[str] = "",
 ) -> str:
-    """存入一条记忆(一句话级)。系统自动打标并尝试与近似的已有桶合并。tags 逗号分隔,importance 1-10。pinned=True=标记为永久核心,不衰减不合并。feel=True=存为感受类记忆(不参与普通浮现,仅通过 breath(domain=\"feel\") 读取)。source_bucket=正在消化的原始记忆桶 ID,会被标为已消化以加速淡化。why_remembered=记录原因(可选,自由文本,仅用于展示不计分)。"""
+    """仅在对话中已明确决定“这段内容值得成为长期记忆”时调用；不要因普通聊天、猜测或工具名称联想而自行调用。存入一条一句话级记忆，content 必须保留原意和事实，不得先改写成摘要；OB 的 hold 路径也绝不会压缩正文。系统优先自动打标，API 不可用时使用本地中性元数据继续逐字保存。tags 逗号分隔,importance 1-10。pinned=True=标记为永久核心,不衰减不合并。feel=True=存为感受类记忆(不参与普通浮现,仅通过 feel 检索读取)。source_bucket=正在消化的原始记忆桶 ID,会被标为已消化以加速淡化。why_remembered=记录原因(可选,自由文本,仅用于展示不计分)。"""
     return await _with_notice(
         _t_hold.dispatch(
             content=content, tags=tags, importance=importance,
@@ -627,7 +593,7 @@ async def hold(
 
 @mcp.tool()
 async def grow(content: str = "", items: Optional[list] = None) -> str:
-    """整理一段长文本(如一天的记录/一段日记/一篇总结)存入记忆,系统拆分为 2~6 条独立事件桶并各自尝试合并。短内容(<30 字)走 hold 单条快速路径,不强行拆分。
+    """仅在对话中已明确要求整理并写入长期记忆时调用，不要根据普通聊天自行推断写入意图。整理一段长文本(如一天的记录/一段日记/一篇总结)存入记忆,系统拆分为 2~6 条独立事件桶并各自尝试合并。短内容(<30 字)走 hold 单条快速路径,不强行拆分。
 
     进阶(可选):若你(上层 AI)已经把长文拆成了 N 条最终正文,传 items=[条1, 条2, ...](字符串列表)即可**逐字入库**——跳过系统的二次拆分与改写,每条正文一字不动,只自动补元数据(领域/情感/标签/命名);合并到老桶也用原文追加、不再压缩。你有完整对话上下文,拆分和表述质量比只看二手长文的内部模型更高,能避免反复压缩带来的失真。传了 items 就忽略 content;不传则按上面的默认行为整段整理。"""
     return await _with_notice(
@@ -656,7 +622,7 @@ async def trace(
     dont_surface: Optional[int] = -1,
     why_remembered: Optional[str] = "",
 ) -> str:
-    """修改某条记忆的元数据或内容。resolved=1=标记已放下,沉底仅在关键词触发时返回;resolved=0=重新激活;pinned=1=标记永久核心(锁 importance=10),0=取消;digested=1=标记已消化,加速淡化;content=替换桶正文并重建 embedding;delete=True=彻底删除(不可恢复);status=plan 桶状态(active/resolved/abandoned);weight=plan 承诺重量 0.0-1.0;dont_surface=1=不再出现在 breath,0=恢复;why_remembered=更新记录原因。只传需要修改的字段,-1 或空串表示不改。"""
+    """仅在明确需要修改某条已存在记忆时调用，不要猜测 bucket_id 或自行改写记忆。resolved=1=标记已放下,沉底仅在关键词触发时返回;resolved=0=重新激活;pinned=1=标记永久核心(锁 importance=10),0=取消;digested=1=标记已消化,加速淡化;content=替换桶正文并重建 embedding;delete=True=移入 archive 并标记 deleted_at（只是归档，Markdown 文件不会被物理删除）;status=plan 桶状态(active/resolved/abandoned);weight=plan 承诺重量 0.0-1.0;dont_surface=1=不再出现在 breath,0=恢复;why_remembered=更新记录原因。只传需要修改的字段,-1 或空串表示不改。"""
     return await _with_notice(
         _t_trace.dispatch(
             bucket_id=bucket_id, name=name, domain=domain,
@@ -992,10 +958,22 @@ if __name__ == "__main__":
                     if path.startswith("/mcp"):
                         headers = {k.lower(): v for k, v in scope.get("headers", [])}
                         auth = headers.get(b"authorization", b"").decode("latin-1")
-                        if not (auth.startswith("Bearer ") and _is_valid_mcp_token(auth[7:])):
-                            # Build public base URL from ASGI scope headers
-                            proto = headers.get(b"x-forwarded-proto", b"").decode() or scope.get("scheme", "http")
-                            host = (headers.get(b"x-forwarded-host") or headers.get(b"host", b"")).decode()
+                        # Build the externally visible canonical resource. Proxy headers can
+                        # contain comma-separated chains; the first value is the client-facing one.
+                        proto = (
+                            headers.get(b"x-forwarded-proto", b"").decode().split(",", 1)[0].strip()
+                            or scope.get("scheme", "http")
+                        )
+                        host = (
+                            (headers.get(b"x-forwarded-host") or headers.get(b"host", b""))
+                            .decode().split(",", 1)[0].strip()
+                        )
+                        base = f"{proto}://{host}"
+                        resource = f"{base}{path.rstrip('/')}"
+                        if not (
+                            auth.startswith("Bearer ")
+                            and _is_valid_mcp_token(auth[7:], resource=resource)
+                        ):
                             base = f"{proto}://{host}"
                             # 让 resource_metadata 指向「本次请求 endpoint」对应的 metadata，
                             # 使 metadata.resource 与实际连接的 /mcp 路径严格匹配（RFC 9728）。
@@ -1005,7 +983,7 @@ if __name__ == "__main__":
                             meta_url = f"{base}/.well-known/oauth-protected-resource/{endpoint}"
                             ww_auth = (
                                 f'Bearer realm="Ombre Brain",'
-                                f' resource_metadata="{meta_url}"'
+                                f' resource_metadata="{meta_url}", scope="mcp"'
                             )
                             body = _json_mw.dumps({
                                 "error": "Unauthorized",

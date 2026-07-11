@@ -234,6 +234,9 @@ Diagnostics regression tests.
     monkeypatch.setattr(system.sh, "version", "2.4.8")
     monkeypatch.setattr(system.sh, "repo_root", str(tmp_path))
     monkeypatch.setattr(system.sh, "_is_setup_needed", lambda: False)
+    # Keep this unit test independent of the host running pytest. The test
+    # exercises diagnostics fields, not Docker mount detection.
+    monkeypatch.setattr(system.sh, "in_docker", lambda: False)
 
     payload = await system.build_system_diagnostics()
     by_id = {check["id"]: check for check in payload["checks"]}

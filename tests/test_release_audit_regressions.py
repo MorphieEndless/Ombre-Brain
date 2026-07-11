@@ -265,13 +265,12 @@ def test_embedding_is_owned_by_bucket_manager_on_normal_write_paths():
         assert "generate_and_store(" not in source, rel
 
 
-def test_dashboard_sources_are_identical_and_use_real_host_mount_contract():
-    root_dashboard = ROOT / "dashboard.html"
+def test_dashboard_source_uses_real_host_mount_contract():
+    # 单一真源：运行时（src/web/dashboard.py）只读 frontend/dashboard.html，
+    # 仓库根目录不再维护同名镜像文件，故这里只校验这一份的内容契约。
     frontend_dashboard = ROOT / "frontend" / "dashboard.html"
 
-    root_source = root_dashboard.read_text(encoding="utf-8")
     source = frontend_dashboard.read_text(encoding="utf-8")
-    assert root_source == source
     assert "${OMBRE_HOST_VAULT_DIR:-./buckets}</code> 挂到容器的 <code>/app/buckets" in source
     assert "${OMBRE_HOST_VAULT_DIR:-./buckets}:/data" not in source
     assert 'id="settings-host-vault-save"' in source

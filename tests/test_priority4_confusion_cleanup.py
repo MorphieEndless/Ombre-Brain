@@ -224,7 +224,7 @@ def test_config_example_marks_wikilink_deprecated_without_active_stanza():
 
 
 def test_dashboard_single_bucket_delete_is_not_labeled_as_hard_delete():
-    for rel in ("dashboard.html", "frontend/dashboard.html"):
+    for rel in ("frontend/dashboard.html",):
         text = (ROOT / rel).read_text(encoding="utf-8")
 
         assert "删除到档案" in text
@@ -239,7 +239,7 @@ def test_dashboard_single_bucket_delete_is_not_labeled_as_hard_delete():
 
 
 def test_dashboard_exposes_oauth_authentication_switch():
-    for rel in ("dashboard.html", "frontend/dashboard.html"):
+    for rel in ("frontend/dashboard.html",):
         text = (ROOT / rel).read_text(encoding="utf-8")
 
         assert 'id="cfg-mcp-auth"' in text

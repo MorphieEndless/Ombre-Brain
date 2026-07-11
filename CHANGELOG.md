@@ -13,6 +13,8 @@
 - SessionStart hook 脚本（`.claude/hooks/session_breath.py`）此前调用 `/breath-hook` 不带任何 token、遇 401/网络错误静默吞掉，看起来"运行正常"实则没有 breath；现已支持 `OMBRE_HOOK_TOKEN`（Authorization Bearer）、出错时打印可诊断信息到 stderr（不阻断会话启动）、默认 URL 改为 `http://localhost:18001`（此前误写 `:8000`，与 Docker 对外默认端口不符）。
 - Docker 快速开始路线此前存在 onboarding 断点：README 引导把 `docs/CLAUDE_PROMPT.md` 放进 system prompt，但预构建镜像的 `.dockerignore` 排除了整个 `docs/` 和所有 Markdown，Docker 用户本地无源码也拿不到该文件。现将面向用户的 `docs/CLAUDE_PROMPT.md`、`docs/INTERNALS.md`、`docs/MULTI_OWNER.md`、`docs/OPERATIONS.md`、`README.md`、`CHANGELOG.md` 放行进镜像；内部设计稿（`docs/superpowers/`、`docs/secrets/` 等）仍不进镜像。
 - 同时把 `.claude/hooks/session_breath.py`（原被整个 `.claude/` 目录忽略规则挡住、用户无处获取）放行为官方产物。
+- 删除仓库根目录的 `dashboard.html`：它只是 `frontend/dashboard.html` 的字节级镜像，运行时代码（`src/web/dashboard.py`）从不读取它，纯粹为满足一条"两份必须一致"的测试断言而人工维护，是「同一事实存两处」的反模式。改为单一真源，`tests/test_release_audit_regressions.py` 及另外 5 个内容契约测试同步只校验 `frontend/dashboard.html`。
+- Dashboard 前端（`frontend/dashboard.html`）补齐登录/急救屏与设置区（⓪~⑦）title 属性的中英文对照，统一采用「中文 / English」内联格式，与项目既有 Tab/标题规范对齐；技术字段名（Model/API Key/Base URL/Timeout 等）按约定保持纯英文。
 
 ### 测试 / Tests
 

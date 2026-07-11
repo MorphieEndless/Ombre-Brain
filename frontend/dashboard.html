@@ -1770,7 +1770,7 @@
   </div>
   <div class="header-actions">
     <button onclick="openFeedback()" title="给作者反馈" style="height:32px;padding:0 12px;gap:5px;display:inline-flex;align-items:center;white-space:nowrap;font-size:12px;"><i data-lucide="message-circle"></i> 反馈</button>
-    <button onclick="doLogout()" title="退出登录" style="height:32px;padding:0 12px;gap:5px;display:inline-flex;align-items:center;white-space:nowrap;font-size:12px;"><i data-lucide="log-out"></i> 退出</button>
+    <button onclick="doLogout()" title="退出登录 / Log out" style="height:32px;padding:0 12px;gap:5px;display:inline-flex;align-items:center;white-space:nowrap;font-size:12px;"><i data-lucide="log-out"></i> 退出</button>
   </div>
 </div>
 
@@ -1901,7 +1901,7 @@
       <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
         <button class="btn-primary" onclick="toolTestBreath()" title="试一次 breath" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:6px;"><i data-lucide="wind"></i> 试Breath</button>
         <button onclick="toolGithubSync()" title="立即备份到 GitHub" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:6px;"><i data-lucide="upload-cloud"></i> 备份</button>
-        <button onclick="loadToolsPanel()" title="刷新状态" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:6px;"><i data-lucide="refresh-cw"></i> 刷新</button>
+        <button onclick="loadToolsPanel()" title="刷新状态 / Refresh status" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:6px;"><i data-lucide="refresh-cw"></i> 刷新</button>
       </div>
       <div id="tools-action-result" style="margin-top:12px;font-size:12px;color:var(--text-dim);line-height:1.8;"></div>
 
@@ -2254,7 +2254,7 @@
           <input type="text" id="settings-human-name" placeholder="人类" maxlength="20" style="width:180px;" />
         </div>
         <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
-          <button class="btn-primary" onclick="saveHumanName()" title="保存" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存</button>
+          <button class="btn-primary" onclick="saveHumanName()" title="保存 / Save" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存</button>
           <span id="settings-human-msg" style="font-size:12px;color:var(--text-dim);"></span>
         </div>
         <div style="font-size:12px;color:var(--text-dim);margin:10px 0 6px;line-height:1.6;">
@@ -2262,7 +2262,7 @@
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
           <input type="text" id="settings-human-from" placeholder="用户" maxlength="20" style="width:120px;" />
-          <button onclick="syncExistingHuman()" title="替换旧记忆" style="font-size:12px;padding:0 12px;height:32px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="replace"></i> 替换旧记忆</button>
+          <button onclick="syncExistingHuman()" title="替换旧记忆 / Replace in existing memories" style="font-size:12px;padding:0 12px;height:32px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="replace"></i> 替换旧记忆</button>
           <span id="settings-human-sync-msg" style="font-size:12px;color:var(--text-dim);"></span>
         </div>
       </div>
@@ -2276,7 +2276,7 @@
           <div class="config-row"><label>当前密码</label><input type="password" id="settings-current-pwd" placeholder="当前密码" /></div>
           <div class="config-row"><label>新密码</label><input type="password" id="settings-new-pwd" placeholder="新密码（至少6位）" /></div>
           <div class="config-row"><label>确认</label><input type="password" id="settings-new-pwd2" placeholder="再次输入新密码" /></div>
-          <button class="btn-primary" onclick="changePassword()" title="保存密码" style="margin-top:4px;padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存密码</button>
+          <button class="btn-primary" onclick="changePassword()" title="保存密码 / Save password" style="margin-top:4px;padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存密码</button>
           <div id="settings-pwd-msg" style="margin-top:10px;font-size:13px;"></div>
         </div>
       </div>
@@ -2287,7 +2287,7 @@
         <div id="settings-qa-form">
           <div class="config-row"><label>安全问题</label><input type="text" id="settings-qa-q" placeholder="例：我第一只猫叫什么" /></div>
           <div class="config-row"><label>答案</label><input type="text" id="settings-qa-a" placeholder="答案（不区分大小写）" /></div>
-          <button class="btn-primary" onclick="saveSecurityQuestion()" title="保存急救问题" style="margin-top:4px;padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="shield"></i> 保存</button>
+          <button class="btn-primary" onclick="saveSecurityQuestion()" title="保存急救问题 / Save security question" style="margin-top:4px;padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="shield"></i> 保存</button>
           <div id="settings-qa-msg" style="margin-top:10px;font-size:13px;"></div>
         </div>
       </div>
@@ -2318,7 +2318,7 @@
               <span id="tunnel-status-dot" style="width:10px;height:10px;border-radius:50%;background:var(--text-dim);flex-shrink:0;transition:background 0.3s;"></span>
               <span id="tunnel-status-text" style="font-size:12px;color:var(--text-dim);">未运行</span>
             </div>
-            <button id="tunnel-toggle-btn" class="btn-primary" onclick="toggleTunnel()" title="启动/停止隧道" style="padding:0 14px;height:32px;font-size:12px;display:inline-flex;align-items:center;gap:5px;flex-shrink:0;"><i data-lucide="play"></i> 启动</button>
+            <button id="tunnel-toggle-btn" class="btn-primary" onclick="toggleTunnel()" title="启动/停止隧道 / Start/stop tunnel" style="padding:0 14px;height:32px;font-size:12px;display:inline-flex;align-items:center;gap:5px;flex-shrink:0;"><i data-lucide="play"></i> 启动</button>
           </div>
 
           <!-- 错误日志 -->
@@ -2340,7 +2340,7 @@
               <input type="checkbox" id="tunnel-autostart" style="display:none"
                 onchange="syncSwFromCb('tunnel-autostart','tunnel-autostart-sw','tunnel-autostart-led')">
             </div>
-            <button class="btn-primary" onclick="saveTunnelToken()" title="保存 Token" style="padding:0 14px;height:32px;font-size:12px;display:inline-flex;align-items:center;gap:5px;flex-shrink:0;"><i data-lucide="key"></i> 保存 Token</button>
+            <button class="btn-primary" onclick="saveTunnelToken()" title="保存 Token / Save token" style="padding:0 14px;height:32px;font-size:12px;display:inline-flex;align-items:center;gap:5px;flex-shrink:0;"><i data-lucide="key"></i> 保存 Token</button>
           </div>
           <div id="tunnel-msg" style="margin-top:8px;font-size:12px;"></div>
         </div>
@@ -2348,7 +2348,7 @@
 
       <div>
         <div style="font-weight:600;font-size:13px;margin-bottom:6px;">退出登录</div>
-        <button class="btn-danger" onclick="doLogout()" title="退出登录" style="padding:0 14px;height:36px;font-size:12px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="log-out"></i> 退出登录</button>
+        <button class="btn-danger" onclick="doLogout()" title="退出登录 / Log out" style="padding:0 14px;height:36px;font-size:12px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="log-out"></i> 退出登录</button>
       </div>
     </div>
 
@@ -2359,7 +2359,7 @@
       <div style="margin-bottom:18px;">
         <div style="font-weight:600;font-size:13px;margin-bottom:6px;">服务状态</div>
         <div id="settings-status" style="font-size:13px;color:var(--text-dim);line-height:2;">加载中…</div>
-        <button onclick="loadSettingsStatus()" title="刷新" style="margin-top:8px;font-size:12px;padding:0 12px;height:32px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="refresh-cw"></i> 刷新</button>
+        <button onclick="loadSettingsStatus()" title="刷新 / Refresh" style="margin-top:8px;font-size:12px;padding:0 12px;height:32px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="refresh-cw"></i> 刷新</button>
       </div>
 
       <div style="margin-bottom:18px;">
@@ -2368,7 +2368,7 @@
           快速检查本地配置、数据目录、向量化、GitHub 备份和访问控制，不会主动请求外部 API。
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-          <button onclick="loadSystemDiagnostics()" title="运行体检" style="font-size:12px;padding:0 12px;height:32px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="activity"></i> 一键体检</button>
+          <button onclick="loadSystemDiagnostics()" title="运行体检 / Run diagnostics" style="font-size:12px;padding:0 12px;height:32px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="activity"></i> 一键体检</button>
           <span id="system-diagnostics-summary" style="font-size:12px;color:var(--text-dim);">尚未运行</span>
           <span id="system-diagnostics-updated" style="font-size:11px;color:var(--text-light);"></span>
         </div>
@@ -2382,7 +2382,7 @@
           点这里清理残留的孤儿固化桶：把它们降级回动态桶，释放配额、解开权重卡死。安全幂等，可重复点。
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
-          <button onclick="fixPinnedDesync()" title="检查并修复" style="font-size:12px;padding:0 12px;height:32px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="wrench"></i> 检查并修复</button>
+          <button onclick="fixPinnedDesync()" title="检查并修复 / Check &amp; fix" style="font-size:12px;padding:0 12px;height:32px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="wrench"></i> 检查并修复</button>
           <span id="fix-pinned-msg" style="font-size:12px;"></span>
         </div>
       </div>
@@ -2398,8 +2398,8 @@
           <input type="text" id="settings-host-vault" placeholder="例如 /Users/you/Obsidian/Ombre Brain" style="flex:1;" />
         </div>
         <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
-          <button id="settings-host-vault-save" class="btn-primary" onclick="saveHostVault()" title="保存" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存</button>
-          <button onclick="loadHostVault()" title="重新加载" style="font-size:12px;padding:0 12px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="refresh-cw"></i> 重载</button>
+          <button id="settings-host-vault-save" class="btn-primary" onclick="saveHostVault()" title="保存 / Save" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存</button>
+          <button onclick="loadHostVault()" title="重新加载 / Reload" style="font-size:12px;padding:0 12px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="refresh-cw"></i> 重载</button>
           <span id="settings-host-vault-msg" style="font-size:12px;"></span>
         </div>
       </div>
@@ -2437,15 +2437,15 @@
         <div class="config-row" style="align-items:center;">
           <label>Model</label>
           <input type="text" id="cfg-dehy-model" placeholder="gemini-2.5-flash-lite" style="flex:1;" />
-          <button type="button" onclick="fetchModels('dehy')" title="获取模型列表" style="margin-left:6px;padding:0 10px;height:32px;font-size:11px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="download"></i> 获取</button>
+          <button type="button" onclick="fetchModels('dehy')" title="获取模型列表 / Fetch model list" style="margin-left:6px;padding:0 10px;height:32px;font-size:11px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="download"></i> 获取</button>
         </div>
         <div id="cfg-dehy-model-list" class="model-list-dropdown"></div>
         <div class="config-row" id="cfg-dehy-url-row"><label>Base URL</label><input type="text" id="cfg-dehy-url" placeholder="https://..." /></div>
         <div class="config-row" style="align-items:center;">
           <label>API Key</label>
           <input type="password" id="cfg-dehy-key" placeholder="当前: 加载中…" style="flex:1;" />
-          <button type="button" onclick="saveCompressKey()" title="保存 Key" style="margin-left:8px;padding:0 10px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="key"></i> 保存</button>
-          <button type="button" onclick="testDehydrationKey()" title="测试连接" style="margin-left:4px;padding:0 10px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="zap"></i> 测试</button>
+          <button type="button" onclick="saveCompressKey()" title="保存 Key / Save key" style="margin-left:8px;padding:0 10px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="key"></i> 保存</button>
+          <button type="button" onclick="testDehydrationKey()" title="测试连接 / Test connection" style="margin-left:4px;padding:0 10px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="zap"></i> 测试</button>
           <span id="dehy-key-msg" style="margin-left:8px;font-size:11px;"></span>
         </div>
         <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">留空不改。Key 保存后立即生效并写入 .env（重启持久）。</div>
@@ -2484,8 +2484,8 @@
         <div class="config-row" style="align-items:center;">
           <label>API Key</label>
           <input type="password" id="cfg-emb-api-key" placeholder="当前: 加载中…" style="flex:1;" />
-          <button type="button" onclick="saveEmbedKey()" title="保存 Key" style="margin-left:8px;padding:0 10px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="key"></i> 保存</button>
-          <button type="button" onclick="testEmbeddingKey()" title="测试向量化连接" style="margin-left:4px;padding:0 10px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="zap"></i> 测试</button>
+          <button type="button" onclick="saveEmbedKey()" title="保存 Key / Save key" style="margin-left:8px;padding:0 10px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="key"></i> 保存</button>
+          <button type="button" onclick="testEmbeddingKey()" title="测试向量化连接 / Test embedding connection" style="margin-left:4px;padding:0 10px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="zap"></i> 测试</button>
           <span id="emb-key-msg" style="margin-left:8px;font-size:11px;"></span>
         </div>
         <div class="config-row">
@@ -2515,7 +2515,7 @@
         <div class="config-row" style="align-items:center;">
           <label>Model</label>
           <input type="text" id="cfg-emb-model" placeholder="gemini-embedding-001" style="flex:1;" />
-          <button type="button" onclick="fetchModels('emb')" title="获取模型列表" style="margin-left:6px;padding:0 10px;height:32px;font-size:11px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="download"></i> 获取</button>
+          <button type="button" onclick="fetchModels('emb')" title="获取模型列表 / Fetch model list" style="margin-left:6px;padding:0 10px;height:32px;font-size:11px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="download"></i> 获取</button>
         </div>
         <div id="cfg-emb-model-list" class="model-list-dropdown"></div>
         <div style="margin-top:10px;padding:10px 12px;border:1px dashed var(--border,#ddd);border-radius:6px;">
@@ -2554,16 +2554,16 @@
 
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
             <button type="button" class="btn-primary" onclick="oneClickLocal()" style="padding:7px 14px;display:inline-flex;align-items:center;gap:6px;"><svg class="icon" aria-hidden="true"><use href="#i-rocket"></use></svg> 一键本地化（装 + 起 + 下模型 + 切换）</button>
-            <button type="button" onclick="switchEmbedding('gemini')" title="切回云端" style="padding:7px 10px;"><i data-lucide="cloud"></i></button>
-            <button type="button" onclick="loadLocalEmbStatus()" title="刷新状态" style="padding:7px 10px;"><i data-lucide="refresh-cw"></i></button>
+            <button type="button" onclick="switchEmbedding('gemini')" title="切回云端 / Switch back to cloud" style="padding:7px 10px;"><i data-lucide="cloud"></i></button>
+            <button type="button" onclick="loadLocalEmbStatus()" title="刷新状态 / Refresh status" style="padding:7px 10px;"><i data-lucide="refresh-cw"></i></button>
           </div>
 
           <details style="margin-bottom:6px;">
             <summary style="cursor:pointer;font-size:12px;color:var(--text-light);">分步操作 / 高级（逐步：装运行时 → 启动 → 下模型 → 切换）</summary>
             <div style="padding-top:8px;">
               <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-                <button type="button" onclick="installOllama()" title="按当前系统免提权安装 ollama 运行时" style="padding:6px 10px;"><i data-lucide="download-cloud"></i> 1·安装运行时</button>
-                <button type="button" onclick="startOllama()" title="把 ollama 作为 OB 子进程启动" style="padding:6px 10px;"><i data-lucide="play"></i> 2·启动</button>
+                <button type="button" onclick="installOllama()" title="按当前系统免提权安装 ollama 运行时 / Install the Ollama runtime for your OS (no admin needed)" style="padding:6px 10px;"><i data-lucide="download-cloud"></i> 1·安装运行时</button>
+                <button type="button" onclick="startOllama()" title="把 ollama 作为 OB 子进程启动 / Start Ollama as an OB child process" style="padding:6px 10px;"><i data-lucide="play"></i> 2·启动</button>
               </div>
               <div class="config-row" style="align-items:center;">
                 <label style="min-width:auto;">模型镜像</label>
@@ -2574,8 +2574,8 @@
                 <input type="text" id="local-emb-mirror-custom" placeholder="或自定义 registry 前缀，如 myhub.com/lib/" style="flex:1;margin-left:8px;" />
               </div>
               <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-                <button type="button" onclick="pullLocalModel()" title="仅下载 bge-m3" style="padding:6px 10px;"><i data-lucide="download"></i> 3·下载 bge-m3</button>
-                <button type="button" onclick="switchEmbedding('ollama')" title="切换到本地并重算" style="padding:6px 10px;"><i data-lucide="cpu"></i> 4·切本地</button>
+                <button type="button" onclick="pullLocalModel()" title="仅下载 bge-m3 / Download bge-m3 only" style="padding:6px 10px;"><i data-lucide="download"></i> 3·下载 bge-m3</button>
+                <button type="button" onclick="switchEmbedding('ollama')" title="切换到本地并重算 / Switch to local &amp; recompute" style="padding:6px 10px;"><i data-lucide="cpu"></i> 4·切本地</button>
               </div>
             </div>
           </details>
@@ -2587,7 +2587,7 @@
       </div>
 
       <div style="display:flex;gap:12px;margin-top:14px;align-items:center;">
-        <button class="btn-primary" onclick="saveConfig(true)" title="保存配置" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存配置</button>
+        <button class="btn-primary" onclick="saveConfig(true)" title="保存配置 / Save config" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存配置</button>
         <span id="config-status" style="font-size:13px;"></span>
       </div>
       <div style="margin-top:6px;font-size:11px;color:var(--text-light);">注：本「保存」按钮同时提交「③ 引擎」与「④ 桶行为」中除采样外的所有字段（同一个 /api/config 接口），并立即写入 config.yaml。</div>
@@ -2620,8 +2620,8 @@
                  style="flex:1;" oninput="document.getElementById('sampling-temp-val').textContent=this.value;" />
         </div>
         <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
-          <button class="btn-primary" onclick="saveSamplingSettings()" title="保存" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存</button>
-          <button onclick="testSamplingBreath()" title="试一次 breath" style="font-size:12px;padding:0 12px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="wind"></i> 试Breath</button>
+          <button class="btn-primary" onclick="saveSamplingSettings()" title="保存 / Save" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存</button>
+          <button onclick="testSamplingBreath()" title="试一次 breath / Try a breath" style="font-size:12px;padding:0 12px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="wind"></i> 试Breath</button>
           <span id="sampling-msg" style="font-size:12px;"></span>
         </div>
         <div id="sampling-test-result" style="margin-top:10px;font-size:12px;color:var(--text-dim);"></div>
@@ -2666,7 +2666,7 @@
         <div class="form-row" style="align-items:center;">
           <label>Model</label>
           <input type="text" id="env-compress-model" placeholder="例：deepseek-chat" style="font-family:monospace;flex:1;" />
-          <button type="button" onclick="fetchModels('env-compress')" title="获取模型列表" style="margin-left:6px;padding:0 10px;height:32px;font-size:11px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="download"></i> 获取</button>
+          <button type="button" onclick="fetchModels('env-compress')" title="获取模型列表 / Fetch model list" style="margin-left:6px;padding:0 10px;height:32px;font-size:11px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="download"></i> 获取</button>
         </div>
         <div id="env-compress-model-list" class="model-list-dropdown" style="margin-left:122px;"></div>
         <div class="form-row">
@@ -2701,7 +2701,7 @@
       </div>
 
       <div style="display:flex;gap:12px;align-items:center;margin-bottom:20px;">
-        <button class="btn-primary" onclick="saveEnvConfig()" title="保存环境配置" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存</button>
+        <button class="btn-primary" onclick="saveEnvConfig()" title="保存环境配置 / Save environment config" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存</button>
         <span id="env-config-status" style="font-size:13px;"></span>
       </div>
 
@@ -2714,7 +2714,7 @@
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
             <span id="env-vars-summary" style="font-size:12px;color:var(--text-dim);"></span>
-            <button onclick="loadEnvVars()" title="刷新" style="font-size:12px;padding:4px 9px;"><i data-lucide="refresh-cw"></i></button>
+            <button onclick="loadEnvVars()" title="刷新 / Refresh" style="font-size:12px;padding:4px 9px;"><i data-lucide="refresh-cw"></i></button>
           </div>
           <div id="env-vars-list" style="font-size:12px;"></div>
         </div>
@@ -2767,7 +2767,7 @@
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
             <span style="color:var(--text-dim);font-size:11px;min-width:60px;">/mcp</span>
             <span id="mcp-url-main" style="flex:1;color:var(--text);word-break:break-all;"></span>
-            <button onclick="copyMcpUrl('main')" title="复制" style="padding:3px 8px;font-size:11px;white-space:nowrap;background:none;border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim);"><i data-lucide="copy"></i></button>
+            <button onclick="copyMcpUrl('main')" title="复制 / Copy" style="padding:3px 8px;font-size:11px;white-space:nowrap;background:none;border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim);"><i data-lucide="copy"></i></button>
           </div>
         </div>
         <div style="margin-top:6px;font-size:11px;color:var(--text-light);">12 个工具已合并到单一连接器 /mcp，只需连这一条。</div>
@@ -2800,7 +2800,7 @@
             <option value="true">开启 OAuth（Claude.ai 网页版 / Claude Code 远程需要）</option>
             <option value="false">关闭 · 免认证直连（自有前端 / GPT / GLM）</option>
           </select>
-          <button type="button" onclick="saveMcpAuth()" title="保存并写入 config.yaml" style="margin-left:8px;padding:0 12px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="save"></i> 保存</button>
+          <button type="button" onclick="saveMcpAuth()" title="保存并写入 config.yaml / Save &amp; write to config.yaml" style="margin-left:8px;padding:0 12px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="save"></i> 保存</button>
           <span id="mcp-auth-msg" style="margin-left:8px;font-size:11px;"></span>
         </div>
         <div style="margin-top:6px;font-size:11px;color:var(--text-light);line-height:1.7;">
@@ -2814,7 +2814,7 @@
         <div class="config-row" style="align-items:center;">
           <label>对外端口</label>
           <input type="number" id="cfg-host-port" min="1" max="65535" placeholder="18001" style="width:140px;" />
-          <button type="button" onclick="saveHostPort()" title="保存端口" style="margin-left:8px;padding:0 12px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="save"></i> 保存</button>
+          <button type="button" onclick="saveHostPort()" title="保存端口 / Save port" style="margin-left:8px;padding:0 12px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="save"></i> 保存</button>
           <span id="host-port-msg" style="margin-left:8px;font-size:11px;"></span>
         </div>
         <div id="host-port-hint" style="margin-top:6px;font-size:11px;color:var(--text-light);line-height:1.7;"></div>
@@ -2822,8 +2822,8 @@
 
       <!-- 操作按钮 -->
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-        <button class="btn-primary" onclick="copyAllMcpUrls()" title="复制 /mcp 链接"><i data-lucide="copy"></i> 复制链接</button>
-        <button onclick="exportClaudeDesktopConfig()" title="导出 claude_desktop_config.json" style="padding:7px 14px;font-size:13px;border:1px solid var(--border);background:none;border-radius:2px;cursor:pointer;font-family:inherit;color:var(--text);display:inline-flex;align-items:center;gap:6px;"><i data-lucide="download"></i> desktop config</button>
+        <button class="btn-primary" onclick="copyAllMcpUrls()" title="复制 /mcp 链接 / Copy /mcp URL"><i data-lucide="copy"></i> 复制链接</button>
+        <button onclick="exportClaudeDesktopConfig()" title="导出 claude_desktop_config.json / Export claude_desktop_config.json" style="padding:7px 14px;font-size:13px;border:1px solid var(--border);background:none;border-radius:2px;cursor:pointer;font-family:inherit;color:var(--text);display:inline-flex;align-items:center;gap:6px;"><i data-lucide="download"></i> desktop config</button>
       </div>
 
       <details style="margin-top:16px;">
@@ -2874,10 +2874,10 @@
       </div>
 
       <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;">
-        <button type="button" onclick="saveGithubConfig()" title="保存配置" style="padding:0 14px;height:36px;font-size:13px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存</button>
-        <button type="button" onclick="validateGithub()" title="验证连接" style="padding:0 14px;height:36px;font-size:13px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="shield-check"></i> 验证</button>
-        <button type="button" class="btn-primary" onclick="runGithubSync()" id="gh-sync-btn" title="立即同步" style="padding:0 14px;height:36px;font-size:13px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="upload-cloud"></i> 同步</button>
-        <button type="button" onclick="runGithubImport()" id="gh-import-btn" title="从 GitHub 拉回记忆（会覆盖本地同名记忆）" style="padding:0 14px;height:36px;font-size:13px;display:inline-flex;align-items:center;gap:5px;border:1px solid var(--accent,#b85c3c);color:var(--accent,#b85c3c);"><i data-lucide="download-cloud"></i> 从 GitHub 导入</button>
+        <button type="button" onclick="saveGithubConfig()" title="保存配置 / Save config" style="padding:0 14px;height:36px;font-size:13px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存</button>
+        <button type="button" onclick="validateGithub()" title="验证连接 / Verify connection" style="padding:0 14px;height:36px;font-size:13px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="shield-check"></i> 验证</button>
+        <button type="button" class="btn-primary" onclick="runGithubSync()" id="gh-sync-btn" title="立即同步 / Sync now" style="padding:0 14px;height:36px;font-size:13px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="upload-cloud"></i> 同步</button>
+        <button type="button" onclick="runGithubImport()" id="gh-import-btn" title="从 GitHub 拉回记忆（会覆盖本地同名记忆）/ Import from GitHub (overwrites local memories with the same name)" style="padding:0 14px;height:36px;font-size:13px;display:inline-flex;align-items:center;gap:5px;border:1px solid var(--accent,#b85c3c);color:var(--accent,#b85c3c);"><i data-lucide="download-cloud"></i> 从 GitHub 导入</button>
       </div>
       <div style="margin-top:8px;font-size:11px;color:var(--accent,#b85c3c);line-height:1.6;">
         ⚠️ 导入 = 把 GitHub 上的记忆拉回本地，<b>会覆盖同名记忆</b>（本地独有的保留）。导入前会自动存一份本地 zip 备份；导入后自动重建向量索引。一般用于换机/数据丢失后的恢复或回滚。
@@ -2993,40 +2993,40 @@
 <div id="auth-overlay" style="position:fixed;inset:0;z-index:9999;background:var(--bg-gradient);background-attachment:fixed;display:flex;align-items:center;justify-content:center;">
   <div style="background:var(--surface);backdrop-filter:blur(16px);border:1px solid var(--border);border-radius:24px;padding:48px 40px;max-width:400px;width:90%;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,0.12);">
     <h2 style="font-family:'Cormorant Garamond',serif;font-size:28px;color:var(--accent);margin-bottom:8px;">◐ Ombre Brain</h2>
-    <p style="color:var(--text-dim);font-size:13px;margin-bottom:28px;" id="auth-subtitle">验证身份</p>
+    <p style="color:var(--text-dim);font-size:13px;margin-bottom:28px;" id="auth-subtitle">验证身份 / Verifying identity</p>
 
     <!-- Setup form -->
     <div id="auth-setup-form" style="display:none;">
-      <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px;">首次使用，请设置访问密码</p>
-      <input type="password" id="auth-setup-pwd" placeholder="设置密码（至少6位）" style="display:block;width:100%;padding:10px 16px;border:1px solid var(--border);border-radius:10px;background:var(--surface-solid);color:var(--text);font-size:14px;margin-bottom:10px;" />
-      <input type="password" id="auth-setup-pwd2" placeholder="确认密码" style="display:block;width:100%;padding:10px 16px;border:1px solid var(--border);border-radius:10px;background:var(--surface-solid);color:var(--text);font-size:14px;margin-bottom:12px;" onkeydown="if(event.key==='Enter')doSetup()" />
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px;">首次使用，请设置访问密码 / First time here — please set an access password</p>
+      <input type="password" id="auth-setup-pwd" placeholder="设置密码（至少6位）/ Password (6+ chars)" style="display:block;width:100%;padding:10px 16px;border:1px solid var(--border);border-radius:10px;background:var(--surface-solid);color:var(--text);font-size:14px;margin-bottom:10px;" />
+      <input type="password" id="auth-setup-pwd2" placeholder="确认密码 / Confirm password" style="display:block;width:100%;padding:10px 16px;border:1px solid var(--border);border-radius:10px;background:var(--surface-solid);color:var(--text);font-size:14px;margin-bottom:12px;" onkeydown="if(event.key==='Enter')doSetup()" />
       <details style="margin-bottom:16px;text-align:left;">
-        <summary style="font-size:12px;color:var(--text-dim);cursor:pointer;user-select:none;">设置急救安全问题（可选，忘记密码时用）</summary>
+        <summary style="font-size:12px;color:var(--text-dim);cursor:pointer;user-select:none;">设置急救安全问题（可选，忘记密码时用）/ Set a security question (optional, for password recovery)</summary>
         <div style="margin-top:10px;">
-          <input type="text" id="auth-setup-q" placeholder="你的安全问题，例：我第一只猫叫什么" style="display:block;width:100%;padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface-solid);color:var(--text);font-size:13px;margin-bottom:8px;box-sizing:border-box;" />
-          <input type="text" id="auth-setup-a" placeholder="答案（不区分大小写）" style="display:block;width:100%;padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface-solid);color:var(--text);font-size:13px;box-sizing:border-box;" />
+          <input type="text" id="auth-setup-q" placeholder="你的安全问题，例：我第一只猫叫什么 / Your question, e.g. my first cat's name" style="display:block;width:100%;padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface-solid);color:var(--text);font-size:13px;margin-bottom:8px;box-sizing:border-box;" />
+          <input type="text" id="auth-setup-a" placeholder="答案（不区分大小写）/ Answer (case-insensitive)" style="display:block;width:100%;padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface-solid);color:var(--text);font-size:13px;box-sizing:border-box;" />
         </div>
       </details>
-      <button onclick="doSetup()" style="width:100%;padding:12px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:14px;cursor:pointer;">设置密码并进入</button>
+      <button onclick="doSetup()" style="width:100%;padding:12px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:14px;cursor:pointer;">设置密码并进入 / Set password &amp; enter</button>
     </div>
 
     <!-- Login form -->
     <div id="auth-login-form" style="display:none;">
-      <input type="password" id="auth-login-pwd" placeholder="输入访问密码" style="display:block;width:100%;padding:10px 16px;border:1px solid var(--border);border-radius:10px;background:var(--surface-solid);color:var(--text);font-size:14px;margin-bottom:12px;" onkeydown="if(event.key==='Enter')doLogin()" />
-      <button onclick="doLogin()" style="width:100%;padding:12px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:14px;cursor:pointer;">登录</button>
+      <input type="password" id="auth-login-pwd" placeholder="输入访问密码 / Enter access password" style="display:block;width:100%;padding:10px 16px;border:1px solid var(--border);border-radius:10px;background:var(--surface-solid);color:var(--text);font-size:14px;margin-bottom:12px;" onkeydown="if(event.key==='Enter')doLogin()" />
+      <button onclick="doLogin()" style="width:100%;padding:12px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:14px;cursor:pointer;">登录 / Log in</button>
       <div style="margin-top:12px;text-align:center;">
-        <a href="#" onclick="showRecovery();return false;" style="font-size:12px;color:var(--text-dim);text-decoration:none;border-bottom:1px dashed var(--border);">忘记密码 →</a>
+        <a href="#" onclick="showRecovery();return false;" style="font-size:12px;color:var(--text-dim);text-decoration:none;border-bottom:1px dashed var(--border);">忘记密码 / Forgot password →</a>
       </div>
     </div>
 
     <!-- Recovery form -->
     <div id="auth-recovery-form" style="display:none;">
-      <p style="font-size:13px;color:var(--text-dim);margin-bottom:4px;">急救模式</p>
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:4px;">急救模式 / Recovery mode</p>
       <p id="auth-recovery-question" style="font-size:14px;color:var(--text);font-weight:500;margin-bottom:16px;"></p>
-      <input type="text" id="auth-recovery-answer" placeholder="你的答案" style="display:block;width:100%;padding:10px 16px;border:1px solid var(--border);border-radius:10px;background:var(--surface-solid);color:var(--text);font-size:14px;margin-bottom:10px;" />
-      <input type="password" id="auth-recovery-newpwd" placeholder="新密码（至少6位）" style="display:block;width:100%;padding:10px 16px;border:1px solid var(--border);border-radius:10px;background:var(--surface-solid);color:var(--text);font-size:14px;margin-bottom:16px;" onkeydown="if(event.key==='Enter')doRecover()" />
-      <button onclick="doRecover()" style="width:100%;padding:12px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:14px;cursor:pointer;margin-bottom:8px;">重置密码并进入</button>
-      <div style="text-align:center;"><a href="#" onclick="showLogin();return false;" style="font-size:12px;color:var(--text-dim);text-decoration:none;">← 返回登录</a></div>
+      <input type="text" id="auth-recovery-answer" placeholder="你的答案 / Your answer" style="display:block;width:100%;padding:10px 16px;border:1px solid var(--border);border-radius:10px;background:var(--surface-solid);color:var(--text);font-size:14px;margin-bottom:10px;" />
+      <input type="password" id="auth-recovery-newpwd" placeholder="新密码（至少6位）/ New password (6+ chars)" style="display:block;width:100%;padding:10px 16px;border:1px solid var(--border);border-radius:10px;background:var(--surface-solid);color:var(--text);font-size:14px;margin-bottom:16px;" onkeydown="if(event.key==='Enter')doRecover()" />
+      <button onclick="doRecover()" style="width:100%;padding:12px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:14px;cursor:pointer;margin-bottom:8px;">重置密码并进入 / Reset password &amp; enter</button>
+      <div style="text-align:center;"><a href="#" onclick="showLogin();return false;" style="font-size:12px;color:var(--text-dim);text-decoration:none;">← 返回登录 / Back to login</a></div>
     </div>
 
     <div id="auth-error" style="color:var(--negative);font-size:13px;margin-top:12px;display:none;"></div>
@@ -3085,14 +3085,14 @@ async function checkAuth() {
     const resp = await fetch('/auth/status');
     const data = await resp.json();
     if (data.setup_needed) {
-      document.getElementById('auth-subtitle').textContent = '首次设置';
+      document.getElementById('auth-subtitle').textContent = '首次设置 / First-time setup';
       document.getElementById('auth-setup-form').style.display = 'block';
       return false;
     } else if (data.authenticated) {
       document.getElementById('auth-overlay').style.display = 'none';
       return true;
     } else {
-      document.getElementById('auth-subtitle').textContent = '请输入访问密码';
+      document.getElementById('auth-subtitle').textContent = '请输入访问密码 / Enter access password';
       document.getElementById('auth-login-form').style.display = 'block';
       return false;
     }
@@ -3130,7 +3130,7 @@ async function doSetup() {
 function showLogin() {
   document.getElementById('auth-recovery-form').style.display = 'none';
   document.getElementById('auth-login-form').style.display = 'block';
-  document.getElementById('auth-subtitle').textContent = '请输入访问密码';
+  document.getElementById('auth-subtitle').textContent = '请输入访问密码 / Enter access password';
   document.getElementById('auth-error').style.display = 'none';
 }
 
@@ -3141,7 +3141,7 @@ async function showRecovery() {
   document.getElementById('auth-recovery-question').textContent = d.question;
   document.getElementById('auth-login-form').style.display = 'none';
   document.getElementById('auth-recovery-form').style.display = 'block';
-  document.getElementById('auth-subtitle').textContent = '急救模式';
+  document.getElementById('auth-subtitle').textContent = '急救模式 / Recovery mode';
   document.getElementById('auth-error').style.display = 'none';
 }
 
@@ -3174,7 +3174,7 @@ async function doLogout() {
   document.getElementById('auth-setup-form').style.display = 'none';
   document.getElementById('auth-login-form').style.display = 'none';
   document.getElementById('auth-login-form').style.display = 'block';
-  document.getElementById('auth-subtitle').textContent = '请输入访问密码';
+  document.getElementById('auth-subtitle').textContent = '请输入访问密码 / Enter access password';
   document.getElementById('auth-error').style.display = 'none';
   document.getElementById('auth-overlay').style.display = 'flex';
 }
@@ -3236,10 +3236,10 @@ async function loadTunnelStatus() {
   const d = await resp.json();
   setHwSwitch('tunnel-autostart', d.auto_start);
   if (d.running) {
-    _setTunnelUI(true, '已连接', 'var(--positive, #9DC880)', '停止', '');
+    _setTunnelUI(true, '已连接 / Connected', 'var(--positive, #9DC880)', '停止', '');
   } else {
     const err = d.last_error || '';
-    _setTunnelUI(false, err ? '连接失败' : '未运行',
+    _setTunnelUI(false, err ? '连接失败 / Connection failed' : '未运行 / Not running',
       err ? 'var(--negative)' : 'var(--text-dim)', '启动', err);
   }
 }
@@ -3274,7 +3274,7 @@ async function toggleTunnel() {
   if (isRunning) {
     const resp = await authFetch('/api/tunnel/stop', {method: 'POST'});
     if (!resp) return;
-    _setTunnelUI(false, '未运行', 'var(--text-dim)', '启动', '');
+    _setTunnelUI(false, '未运行 / Not running', 'var(--text-dim)', '启动', '');
   } else {
     // Check token set
     const statusResp = await authFetch('/api/tunnel/status');
@@ -3286,9 +3286,9 @@ async function toggleTunnel() {
       btn.disabled = false;
       return;
     }
-    _setTunnelUI(false, '连接中…', '#f0a500', '连接中…', '');
+    _setTunnelUI(false, '连接中… / Connecting…', '#f0a500', '连接中… / Connecting…', '');
     const resp = await authFetch('/api/tunnel/start', {method: 'POST'});
-    if (!resp) { _setTunnelUI(false, '未运行', 'var(--text-dim)', '启动', ''); return; }
+    if (!resp) { _setTunnelUI(false, '未运行 / Not running', 'var(--text-dim)', '启动', ''); return; }
     if (!resp.ok) {
       const d = await resp.json().catch(() => ({}));
       _setTunnelUI(false, '启动失败', 'var(--negative)', '启动', d.error || '启动失败');
@@ -3400,7 +3400,7 @@ async function fetchModels(section) {
 
 async function testDehydrationKey() {
   const msgEl = document.getElementById('dehy-key-msg');
-  msgEl.style.color = 'var(--text-dim)'; msgEl.textContent = '测试中…';
+  msgEl.style.color = 'var(--text-dim)'; msgEl.textContent = '测试中… / Testing…';
   const resp = await authFetch('/api/test/dehydration', {method: 'POST'});
   if (!resp) return;
   const d = await resp.json().catch(() => ({}));
@@ -3414,7 +3414,7 @@ async function testDehydrationKey() {
 async function testEmbeddingKey() {
   const msgEl = document.getElementById('emb-key-msg');
   if (!msgEl) return;
-  msgEl.style.color = 'var(--text-dim)'; msgEl.textContent = '测试中…';
+  msgEl.style.color = 'var(--text-dim)'; msgEl.textContent = '测试中… / Testing…';
   const resp = await authFetch('/api/test/embedding', {method: 'POST'});
   if (!resp) return;
   const d = await resp.json().catch(() => ({}));
@@ -3485,7 +3485,7 @@ async function loadSystemDiagnostics() {
   const updatedEl = document.getElementById('system-diagnostics-updated');
   if (!summaryEl || !listEl) return;
   summaryEl.style.color = 'var(--text-dim)';
-  summaryEl.textContent = '体检中…';
+  summaryEl.textContent = '体检中… / Running diagnostics…';
   listEl.innerHTML = '';
   try {
     const resp = await authFetch('/api/system/diagnostics');
@@ -3511,7 +3511,7 @@ async function loadSystemDiagnostics() {
 async function fixPinnedDesync() {
   const msgEl = document.getElementById('fix-pinned-msg');
   if (!msgEl) return;
-  msgEl.style.color = 'var(--text-dim)'; msgEl.textContent = '检查中…';
+  msgEl.style.color = 'var(--text-dim)'; msgEl.textContent = '检查中… / Checking…';
   try {
     const presp = await authFetch('/api/maintenance/fix-pinned-desync');
     if (!presp) return;
@@ -3523,11 +3523,11 @@ async function fixPinnedDesync() {
       msgEl.innerHTML = _SV.ok + ` 计数已对齐，当前钉选 ${pd.pinned} 个，无需修复`;
       return;
     }
-    if (!confirm(`发现 ${n} 个孤儿固化桶（已取消钉选却没降级）。\n将把它们降级回动态桶（释放配额、解开权重卡死），不会删除内容。是否继续？`)) {
+    if (!confirm(`发现 ${n} 个孤儿固化桶（已取消钉选却没降级）。\n将把它们降级回动态桶（释放配额、解开权重卡死），不会删除内容。是否继续？\n\nFound ${n} orphaned pinned bucket(s). They will be demoted back to dynamic (freeing quota, unblocking weight). Continue?`)) {
       msgEl.style.color = 'var(--text-dim)'; msgEl.textContent = '已取消';
       return;
     }
-    msgEl.textContent = '修复中…';
+    msgEl.textContent = '修复中… / Fixing…';
     const aresp = await authFetch('/api/maintenance/fix-pinned-desync', { method: 'POST' });
     if (!aresp) return;
     const ad = await readJsonSafe(aresp);
@@ -3557,10 +3557,10 @@ async function loadEnvVars() {
     const groups = [
       { key: 'llm', label: 'LLM / 压缩' },
       { key: 'embed', label: 'Embedding / 向量化' },
-      { key: 'paths', label: '路径' },
-      { key: 'system', label: '服务配置' },
+      { key: 'paths', label: '路径 / Paths' },
+      { key: 'system', label: '服务配置 / Service config' },
       { key: 'webhook', label: 'Webhook' },
-      { key: 'auth', label: '鉴权' },
+      { key: 'auth', label: '鉴权 / Auth' },
     ];
 
     let html = '';
@@ -3617,7 +3617,7 @@ async function loadSamplingSettings() {
 async function saveSamplingSettings() {
   const msg = document.getElementById('sampling-msg');
   msg.style.color = 'var(--text-dim)';
-  msg.textContent = '保存中…';
+  msg.textContent = '保存中… / Saving…';
   const body = {
     enabled: document.getElementById('sampling-enabled').checked,
     top_k: parseInt(document.getElementById('sampling-topk').value, 10),
@@ -3716,7 +3716,7 @@ async function toolToggleSampling() {
   var sw = document.getElementById('sw-sampling');
   var willOn = sw.getAttribute('aria-checked') !== 'true';
   var base = _toolsSampling || { top_k: 12, sample_k: 3, temperature: 0.7 };
-  _toolsMsg('保存中…');
+  _toolsMsg('保存中… / Saving…');
   try {
     var resp = await authFetch('/api/settings/sampling', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -3735,7 +3735,7 @@ async function toolToggleTunnel() {
   var sw = document.getElementById('sw-tunnel');
   var willOn = sw.getAttribute('aria-checked') !== 'true';
   if (willOn) {
-    _toolsMsg('启动中…');
+    _toolsMsg('启动中… / Starting…');
     try {
       var st = await authFetch('/api/tunnel/status');
       var sd = st && st.ok ? await st.json() : {};
@@ -3745,7 +3745,7 @@ async function toolToggleTunnel() {
       else { var d = resp ? await resp.json().catch(function(){return{};}) : {}; _toolsMsg('启动失败: ' + (d.error || ''), 'err'); }
     } catch (e) { _toolsMsg('启动失败: ' + e, 'err'); }
   } else {
-    _toolsMsg('停止中…');
+    _toolsMsg('停止中… / Stopping…');
     try {
       var resp2 = await authFetch('/api/tunnel/stop', { method: 'POST' });
       if (resp2 && resp2.ok) { _setSwitch('sw-tunnel', 'led-tunnel', false); _toolsMsg('已停止外网访问', 'ok'); }
@@ -3823,7 +3823,7 @@ async function saveHostVault() {
   const msg = document.getElementById('settings-host-vault-msg');
   if (!input) return;
   const value = input.value.trim();
-  msg.textContent = '保存中…';
+  msg.textContent = '保存中… / Saving…';
   msg.style.color = 'var(--text-dim)';
   try {
     const resp = await authFetch('/api/host-vault', {
@@ -4114,21 +4114,21 @@ async function showDetail(id) {
       whyHtml +
       '<div class="detail-meta">' +
         '<div class="field"><label>ID</label>' + id + '</div>' +
-        '<div class="field"><label>类型</label>' + (meta.type || 'dynamic') + '</div>' +
-        '<div class="field"><label>域</label>' + (meta.domain || []).join(', ') + '</div>' +
-        '<div class="field"><label>标签</label>' + (meta.tags || []).join(', ') + '</div>' +
-        '<div class="field"><label>事件效价</label>V' + (meta.valence || 0.5).toFixed(2) + '</div>' +
-        '<div class="field"><label>唤醒度</label>A' + (meta.arousal || 0.3).toFixed(2) + '</div>' +
-        '<div class="field"><label>模型视角</label>' + (meta.model_valence != null ? 'V' + meta.model_valence.toFixed(2) : '—') + '</div>' +
-        '<div class="field"><label>重要度</label>' + (meta.importance || 5) + '/10</div>' +
-        '<div class="field"><label>权重分</label>' + (b.score != null ? b.score.toFixed(4) : '—') + '</div>' +
-        '<div class="field"><label>激活次数</label>' + (meta.activation_count != null ? meta.activation_count : 0) + '</div>' +
-        '<div class="field"><label>已解决</label>' + (meta.resolved ? _SV.ok : '—') + '</div>' +
-        '<div class="field"><label>已消化</label>' + (meta.digested ? _SV.ok : '—') + '</div>' +
-        '<div class="field"><label>钉选</label>' + (meta.pinned ? _SV.ok : '—') + '</div>' +
-        '<div class="field"><label>Anchor</label>' + (meta.anchor ? _SV.anchor+' 坐标系' : '—') + '</div>' +
-        '<div class="field"><label>创建</label>' + (meta.created || '—') + '</div>' +
-        '<div class="field"><label>最后活跃</label>' + (meta.last_active || '—') + '</div>' +
+        '<div class="field"><label>类型 / Type</label>' + (meta.type || 'dynamic') + '</div>' +
+        '<div class="field"><label>域 / Domain</label>' + (meta.domain || []).join(', ') + '</div>' +
+        '<div class="field"><label>标签 / Tags</label>' + (meta.tags || []).join(', ') + '</div>' +
+        '<div class="field"><label>事件效价 / Valence</label>V' + (meta.valence || 0.5).toFixed(2) + '</div>' +
+        '<div class="field"><label>唤醒度 / Arousal</label>A' + (meta.arousal || 0.3).toFixed(2) + '</div>' +
+        '<div class="field"><label>模型视角 / Model view</label>' + (meta.model_valence != null ? 'V' + meta.model_valence.toFixed(2) : '—') + '</div>' +
+        '<div class="field"><label>重要度 / Importance</label>' + (meta.importance || 5) + '/10</div>' +
+        '<div class="field"><label>权重分 / Weight</label>' + (b.score != null ? b.score.toFixed(4) : '—') + '</div>' +
+        '<div class="field"><label>激活次数 / Activations</label>' + (meta.activation_count != null ? meta.activation_count : 0) + '</div>' +
+        '<div class="field"><label>已解决 / Resolved</label>' + (meta.resolved ? _SV.ok : '—') + '</div>' +
+        '<div class="field"><label>已消化 / Digested</label>' + (meta.digested ? _SV.ok : '—') + '</div>' +
+        '<div class="field"><label>钉选 / Pinned</label>' + (meta.pinned ? _SV.ok : '—') + '</div>' +
+        '<div class="field"><label>Anchor</label>' + (meta.anchor ? _SV.anchor+' 坐标系 / anchor' : '—') + '</div>' +
+        '<div class="field"><label>创建 / Created</label>' + (meta.created || '—') + '</div>' +
+        '<div class="field"><label>最后活跃 / Last active</label>' + (meta.last_active || '—') + '</div>' +
         weightHtml +
         triggerHtml +
       '</div>' +
@@ -4154,7 +4154,7 @@ async function bucketPin(id) {
     if (!res.ok) throw new Error(await res.text());
     await showDetail(id);
     loadBuckets();
-  } catch (e) { alert('钉选切换失败: ' + e.message); }
+  } catch (e) { alert('钉选切换失败 / Pin toggle failed: ' + e.message); }
 }
 
 // iter 2.0: anchor 切换 / anchor toggle
@@ -4174,7 +4174,7 @@ async function bucketForget(id) {
     if (!res.ok) throw new Error(await res.text());
     await showDetail(id);
     loadBuckets();
-  } catch (e) { alert('遗忘切换失败: ' + e.message); }
+  } catch (e) { alert('遗忘切换失败 / Forget toggle failed: ' + e.message); }
 }
 
 // iter 1.9 C: 渲染折叠区 + 批量允许浮现
@@ -4210,13 +4210,13 @@ async function bucketAllowOne(id) {
     });
     if (!res.ok) throw new Error(await res.text());
     loadBuckets();
-  } catch (e) { alert('恢复失败: ' + e.message); }
+  } catch (e) { alert('恢复失败 / Restore failed: ' + e.message); }
 }
 
 async function bucketsForgetAllow() {
   var ids = (allBuckets || []).filter(function(b) { return b.dont_surface; }).map(function(b) { return b.id; });
   if (!ids.length) return;
-  if (!confirm('把这 ' + ids.length + ' 条全部恢复为允许浮现？')) return;
+  if (!confirm('把这 ' + ids.length + ' 条全部恢复为允许浮现？ / Restore surfacing for all ' + ids.length + ' item(s)?')) return;
   try {
     var res = await fetch(BASE + '/api/buckets/forget', {
       method: 'POST',
@@ -4225,7 +4225,7 @@ async function bucketsForgetAllow() {
     });
     if (!res.ok) throw new Error(await res.text());
     loadBuckets();
-  } catch (e) { alert('批量恢复失败: ' + e.message); }
+  } catch (e) { alert('批量恢复失败 / Bulk restore failed: ' + e.message); }
 }
 
 async function bucketResolve(id) {
@@ -4240,7 +4240,7 @@ async function bucketResolve(id) {
 }
 
 async function bucketArchive(id) {
-  if (!confirm('确认归档此桶？归档后将从浮现/搜索中隐藏，但文件仍保留在 archive/ 目录。')) return;
+  if (!confirm('确认归档此桶？归档后将从浮现/搜索中隐藏，但文件仍保留在 archive/ 目录。\n\nArchive this bucket? It will be hidden from surfacing/search, but the file stays in archive/.')) return;
   try {
     var res = await fetch(BASE + '/api/bucket/' + id + '/archive', { method: 'POST' });
     if (!res.ok) throw new Error(await res.text());
@@ -4250,7 +4250,7 @@ async function bucketArchive(id) {
 }
 
 async function bucketDelete(id) {
-  if (!confirm('这会把此记忆桶移入删除档案，并从日常界面隐藏；文件仍保留在 archive/ 中。继续？')) return;
+  if (!confirm('这会把此记忆桶移入删除档案，并从日常界面隐藏；文件仍保留在 archive/ 中。继续？\n\nThis moves the bucket to the delete archive and hides it from everyday views; the file stays in archive/. Continue?')) return;
   try {
     var res = await fetch(BASE + '/api/bucket/' + id + '?confirm=true', { method: 'DELETE' });
     if (!res.ok) throw new Error(await res.text());
@@ -5524,10 +5524,10 @@ async function pollBackfillStatus() {
 }
 
 async function startBackfill() {
-  if (!confirm('补齐缺失向量：\n\n· 只给 embeddings.db 里没有的桶生成向量，不动已有向量\n· 比「重算全库」省额度，幂等，可反复点\n· 后台运行，期间可正常使用\n\n开始？')) return;
+  if (!confirm('补齐缺失向量：\n\n· 只给 embeddings.db 里没有的桶生成向量，不动已有向量\n· 比「重算全库」省额度，幂等，可反复点\n· 后台运行，期间可正常使用\n\n开始？\n\nBackfill missing embeddings:\n\n· Only generates vectors for buckets missing from embeddings.db; leaves existing ones untouched\n· Cheaper than a full recompute, idempotent, safe to click repeatedly\n· Runs in the background; the app stays usable\n\nStart?')) return;
   var st = document.getElementById('emb-backfill-status');
   var btn = document.getElementById('emb-backfill-btn');
-  if (st) st.textContent = '启动中…';
+  if (st) st.textContent = '启动中… / Starting…';
   try {
     var r = await authFetch('/api/embedding/backfill', { method: 'POST' });
     if (!r) return;
@@ -5556,7 +5556,7 @@ document.addEventListener('click', function(e) {
     if (!confirm(msg)) return;
     var btn = e.target;
     btn.disabled = true;
-    btn.textContent = '启动中…';
+    btn.textContent = '启动中… / Starting…';
     fetch(BASE + '/api/embedding/migrate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -5637,7 +5637,7 @@ function _renderInstall(s) {
     return;
   }
   if (s.phase === 'done') { el.innerHTML = '<b style="color:var(--positive,#7EAD68)">' + _SV.ok + ' 运行时安装完成</b>'; return; }
-  var ph = ({ starting:'准备', downloading:'下载中', installing:'安装中', extracting:'解压中' })[s.phase] || s.phase;
+  var ph = ({ starting:'准备 / Preparing', downloading:'下载中 / Downloading', installing:'安装中 / Installing', extracting:'解压中 / Extracting' })[s.phase] || s.phase;
   el.innerHTML = ph + (s.percent ? ' · ' + s.percent + '%' : '') + (s.msg ? ' · ' + esc(s.msg) : '');
 }
 async function _installAndWait() {
@@ -5737,7 +5737,7 @@ async function switchEmbedding(mode, skipConfirm) {
   }
   if (!skipConfirm && !confirm('即将切换到「' + label + '」并重算全库向量。\n\n· 后台运行，期间可正常使用（检索暂用旧库）\n· Gemini 3072 维 ↔ bge-m3 1024 维不通用，必须重算\n· 切到本地前请确认 bge-m3 已下载\n\n继续？')) return;
   var st = document.getElementById('emb-migrate-status');
-  if (st) st.textContent = '启动中…';
+  if (st) st.textContent = '启动中… / Starting…';
   try {
     var r = await authFetch('/api/embedding/migrate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
@@ -5800,9 +5800,9 @@ async function oneClickLocal() {
   var er = await authFetch('/api/embedding/local/env');
   if (!er) return;
   var env = await readJsonSafe(er);
-  if (!env || !env.ok) { alert('环境检测失败，请稍后重试。'); return; }
+  if (!env || !env.ok) { alert('环境检测失败，请稍后重试。 / Environment check failed, please retry later.'); return; }
   if (env.in_docker) {
-    alert('检测到 OB 运行在 Docker 容器里。\n\n本地向量化请启用自带的 ollama 容器（容器内无法给宿主装运行时）：\n\n  docker compose -f docker-compose.user.yml --profile local up -d\n\n起好后回来：「下载 bge-m3」→「切本地」即可。');
+    alert('检测到 OB 运行在 Docker 容器里。\n\n本地向量化请启用自带的 ollama 容器（容器内无法给宿主装运行时）：\n\n  docker compose -f docker-compose.user.yml --profile local up -d\n\n起好后回来：「下载 bge-m3」→「切本地」即可。\n\nDetected OB is running inside a Docker container.\n\nFor local embeddings, enable the bundled ollama container (a container cannot install a runtime onto the host):\n\n  docker compose -f docker-compose.user.yml --profile local up -d\n\nOnce it is up, come back and click "Download bge-m3" → "Switch to local".');
     return;
   }
   var osName = ({ windows:'Windows', linux:'Linux', macos:'macOS' })[env.os] || env.os;
@@ -5811,12 +5811,12 @@ async function oneClickLocal() {
   // 1) 安装运行时
   if (!env.installed) {
     var ins = await _installAndWait();
-    if (!ins.ok) { alert('运行时安装未完成，已停在这一步。\n可在「运行时镜像」换成 GitHub 源重试，或按下方提示手动安装后再点一次。'); return; }
+    if (!ins.ok) { alert('运行时安装未完成，已停在这一步。\n可在「运行时镜像」换成 GitHub 源重试，或按下方提示手动安装后再点一次。\n\nRuntime install did not complete, stopped at this step.\nTry switching "Runtime mirror" to the GitHub source, or follow the instructions below to install manually and click again.'); return; }
   }
   // 2) 启动（子进程常驻）
   if (!env.running) {
     var started = await startOllama();
-    if (!started) { alert('Ollama 启动失败，已停在这一步。'); return; }
+    if (!started) { alert('Ollama 启动失败，已停在这一步。 / Ollama failed to start, stopped at this step.'); return; }
   }
   // 3) 缺模型则下载
   var sr = await authFetch('/api/embedding/local/status?model=bge-m3');
@@ -5826,7 +5826,7 @@ async function oneClickLocal() {
     if (pmsg) pmsg.textContent = '开始下载 bge-m3（约 1.2GB）…';
     await pullLocalModel();
     var ok = await _waitLocalPull();
-    if (!ok) { alert('模型下载未成功，已中止（未改动现有向量）。可在「模型镜像」换 ModelScope 重试。'); return; }
+    if (!ok) { alert('模型下载未成功，已中止（未改动现有向量）。可在「模型镜像」换 ModelScope 重试。\n\nModel download did not succeed, aborted (existing vectors untouched). Try switching "Model mirror" to ModelScope.'); return; }
   }
   // 4) 切到本地并重算
   await switchEmbedding('ollama', true);
@@ -5892,7 +5892,7 @@ async function saveGithubConfig() {
   var prefix = (document.getElementById('gh-prefix').value || '').trim();
   var autoInterval = parseInt(document.getElementById('gh-interval').value || '0', 10);
   if (!repo) { msg.innerHTML = _SV.warn + ' 请填写仓库名（owner/repo）'; msg.style.color = 'var(--accent)'; return; }
-  msg.textContent = '保存中…'; msg.style.color = '';
+  msg.textContent = '保存中… / Saving…'; msg.style.color = '';
   try {
     var res = await authFetch('/api/github/config', {
       method: 'POST',
@@ -5914,7 +5914,7 @@ async function saveGithubConfig() {
 
 async function validateGithub() {
   var msg = document.getElementById('gh-msg');
-  msg.textContent = '验证中…'; msg.style.color = '';
+  msg.textContent = '验证中… / Verifying…'; msg.style.color = '';
   try {
     var res = await authFetch('/api/github/validate', {method: 'POST'});
     var d = await readJsonSafe(res);
@@ -5931,7 +5931,7 @@ async function validateGithub() {
 async function runGithubSync() {
   var msg = document.getElementById('gh-msg');
   var btn = document.getElementById('gh-sync-btn');
-  btn.disabled = true; btn.textContent = '同步中…';
+  btn.disabled = true; btn.textContent = '同步中… / Syncing…';
   msg.textContent = '正在上传 bucket 文件到 GitHub…'; msg.style.color = '';
   try {
     var res = await authFetch('/api/github/sync', {method: 'POST'});
@@ -5952,7 +5952,7 @@ async function runGithubSync() {
 async function runGithubImport(force) {
   var msg = document.getElementById('gh-msg');
   var btn = document.getElementById('gh-import-btn');
-  if (!force && !confirm('从 GitHub 把记忆拉回本地。\n\n同名记忆会被 GitHub 上的版本覆盖，本地独有的记忆保留不动。\n导入前会自动存一份本地备份，万一不对可以退回。\n\n继续吗？')) return;
+  if (!force && !confirm('从 GitHub 把记忆拉回本地。\n\n同名记忆会被 GitHub 上的版本覆盖，本地独有的记忆保留不动。\n导入前会自动存一份本地备份，万一不对可以退回。\n\n继续吗？\n\nImport memories back from GitHub.\n\nMemories with the same name will be overwritten by the GitHub version; local-only memories stay untouched.\nA local backup is taken automatically before import, so you can roll back if needed.\n\nContinue?')) return;
   if (btn) { btn.disabled = true; }
   msg.textContent = '正在从 GitHub 拉回记忆…（已先备份本地）'; msg.style.color = '';
   try {
@@ -5979,7 +5979,7 @@ async function runGithubImport(force) {
       msg.innerHTML = _SV.err + ' ' + esc(d.error || '备份失败，已取消导入');
       msg.style.color = 'var(--accent)';
       if (btn) { btn.disabled = false; }
-      if (confirm('导入前的本地备份没做成功，所以这次没有「后悔药」。\n\n仍要强制从 GitHub 覆盖本地同名记忆吗？（覆盖后无法找回）')) {
+      if (confirm('导入前的本地备份没做成功，所以这次没有「后悔药」。\n\n仍要强制从 GitHub 覆盖本地同名记忆吗？（覆盖后无法找回）\n\nThe pre-import local backup did not succeed, so there is no safety net this time.\n\nForce-overwrite local memories with the same name from GitHub anyway? (cannot be undone)')) {
         return runGithubImport(true);
       }
       return;
@@ -6193,7 +6193,7 @@ async function refreshEnvShadowWarning() {
 
 async function saveEnvConfig() {
   var statusEl = document.getElementById('env-config-status');
-  statusEl.textContent = '保存中…';
+  statusEl.textContent = '保存中… / Saving…';
   var updates = {};
   // Identity
   var aiName = document.getElementById('env-ai-name').value.trim();
@@ -6248,7 +6248,7 @@ async function saveEnvConfig() {
 
 async function _saveEnvKeys(updates, msgElId) {
   var msgEl = document.getElementById(msgElId);
-  if (msgEl) msgEl.textContent = '保存中…';
+  if (msgEl) msgEl.textContent = '保存中… / Saving…';
   try {
     var r = await authFetch('/api/env-config', {
       method: 'POST',
@@ -6662,7 +6662,7 @@ async function loadPlans() {
 }
 
 async function planAction(id, action) {
-  if (action === 'abandon' && !confirm('确认放弃这个计划？仍然会保留在记录里。')) return;
+  if (action === 'abandon' && !confirm('确认放弃这个计划？仍然会保留在记录里。 / Abandon this plan? It stays in the record.')) return;
   try {
     const resp = await authFetch('/api/plans/' + encodeURIComponent(id) + '/action', {
       method: 'POST',
@@ -6855,7 +6855,7 @@ async function runImportPreflight(file) {
   const summary = document.getElementById('import-preflight-summary');
   const btn = document.getElementById('import-start-confirm-btn');
   if (panel) panel.style.display = '';
-  if (summary) { summary.style.color = 'var(--text-dim)'; summary.textContent = '预检中…'; }
+  if (summary) { summary.style.color = 'var(--text-dim)'; summary.textContent = '预检中… / Pre-checking…'; }
   if (btn) btn.disabled = true;
   const fd = new FormData();
   fd.append('file', file);
@@ -6905,7 +6905,7 @@ async function pollImportStatus() {
   try {
     const res = await fetch(BASE + '/api/import/status');
     const s = await res.json().catch(() => null);
-    if (!s) { alert('导入状态读取失败（服务器响应非 JSON）'); return; }
+    if (!s) { alert('导入状态读取失败（服务器响应非 JSON）/ Failed to read import status (server response was not JSON)'); return; }
     updateImportUI(s);
     if (s.status === 'running') {
       importPollTimer = setInterval(async () => {
@@ -6968,7 +6968,7 @@ async function loadImportResults() {
           <button onclick="reviewAction('${b.id}','pin')" class="icon-btn" title="固定为永久记忆"><i data-lucide="pin"></i> 固定</button>
           <button onclick="reviewAction('${b.id}','important')" class="icon-btn" title="标为重要"><i data-lucide="star"></i> 重要</button>
           <button onclick="reviewAction('${b.id}','noise')" class="icon-btn" title="标为噪声并resolve"><i data-lucide="trash-2"></i> 噪声</button>
-          <button onclick="if(confirm('确定移入删除档案？'))reviewAction('${b.id}','delete')" class="icon-btn" title="删除到档案" style="color:var(--negative);"><i data-lucide="x"></i> 删除到档案</button>
+          <button onclick="if(confirm('确定移入删除档案？ / Move to delete archive?'))reviewAction('${b.id}','delete')" class="icon-btn" title="删除到档案 / Move to archive" style="color:var(--negative);"><i data-lucide="x"></i> 删除到档案</button>
         </div>
       </div>
     `).join('');
@@ -7131,7 +7131,7 @@ setInterval(pollHeartbeat, 15000);
 async function loadLogs() {
   const out = document.getElementById('logs-output');
   const meta = document.getElementById('logs-meta');
-  out.textContent = '加载中…';
+  out.textContent = '加载中… / Loading…';
   const level = document.getElementById('logs-level').value;
   const limit = parseInt(document.getElementById('logs-limit').value, 10) || 200;
   try {
@@ -7223,7 +7223,7 @@ function copyOBError(i) {
 }
 
 async function clearOBErrors() {
-  if (!confirm('清空错误日志？此操作不影响 server.log，仅清空 errors.jsonl。')) return;
+  if (!confirm('清空错误日志？此操作不影响 server.log，仅清空 errors.jsonl。 / Clear error log? This does not touch server.log, only errors.jsonl.')) return;
   try {
     var r = await fetch(BASE + '/api/errors/clear', { method: 'POST' });
     var d = await r.json();
@@ -7435,7 +7435,7 @@ function handleMigrateFileSelect(event) {
 
 async function uploadMigrateZip(file) {
   if (!file.name.endsWith('.zip')) {
-    alert('请选择 .zip 格式的导出文件');
+    alert('请选择 .zip 格式的导出文件 / Please select a .zip export file');
     return;
   }
   document.getElementById('migrate-upload-zone').innerHTML =
@@ -7688,7 +7688,7 @@ async function bucketSaveEdit(bid) {
   // 内容只在非空时带上，避免误清空
   if (newContent && newContent.trim()) body.content = newContent;
   const msg = document.getElementById('edit-msg');
-  msg.textContent = '保存中…';
+  msg.textContent = '保存中… / Saving…';
   msg.style.color = 'var(--text-dim)';
   try {
     const r = await fetch(BASE + '/api/bucket/' + bid + '/edit', {
@@ -7929,7 +7929,7 @@ async function sendLetter() {
 
 async function editLetter(id) {
   const l = _lettersCache.find(x => x.id === id);
-  if (!l) { alert('未找到该信件'); return; }
+  if (!l) { alert('未找到该信件 / Letter not found'); return; }
   const newTitle = prompt('标题（留空则不改）：', l.title || '');
   if (newTitle === null) return;
   const newDate = prompt('日期 YYYY-MM-DD（留空则不改）：', l.date || '');
@@ -7940,26 +7940,26 @@ async function editLetter(id) {
   if (newTitle !== (l.title || '') && newTitle !== '') body.title = newTitle;
   if (newDate !== (l.date || '') && newDate !== '') body.date = newDate;
   if (newContent !== (l.content || '') && newContent.trim() !== '') body.content = newContent;
-  if (!Object.keys(body).length) { alert('未做任何修改'); return; }
-  if (!confirm('确认保存修改？')) return;
+  if (!Object.keys(body).length) { alert('未做任何修改 / No changes made'); return; }
+  if (!confirm('确认保存修改？ / Save changes?')) return;
   try {
     const r = await fetch(BASE + '/api/letter/' + encodeURIComponent(id), {
       method: 'PATCH', headers: {'Content-Type':'application/json'},
       body: JSON.stringify(body),
     });
     const d = await r.json();
-    if (d.ok) { alert('已更新'); loadLetters(); }
+    if (d.ok) { alert('已更新 / Updated'); loadLetters(); }
     else { alert(d.error || '更新失败'); }
   } catch (e) { alert(e.message); }
 }
 
 async function deleteLetter(id) {
-  if (!confirm('这会把这封信移入删除档案；文件仍保留在 archive/ 中。继续？')) return;
-  if (!confirm('再次确认：这不是物理抹除。')) return;
+  if (!confirm('这会把这封信移入删除档案；文件仍保留在 archive/ 中。继续？\n\nThis moves the letter to the delete archive; the file stays in archive/. Continue?')) return;
+  if (!confirm('再次确认：这不是物理抹除。 / Confirm again: this is not a physical erase.')) return;
   try {
     const r = await fetch(BASE + '/api/letter/' + encodeURIComponent(id) + '?confirm=true', { method: 'DELETE' });
     const d = await r.json();
-    if (d.ok) { alert('已删除到档案'); loadLetters(); }
+    if (d.ok) { alert('已删除到档案 / Moved to archive'); loadLetters(); }
     else { alert(d.error || '删除失败'); }
   } catch (e) { alert(e.message); }
 }
@@ -8042,7 +8042,7 @@ if (location.hash === '#letters') {
 async function openFeedback() {
   const modal = document.getElementById('feedback-modal');
   modal.style.display = 'flex';
-  document.getElementById('feedback-log-area').textContent = '加载中…';
+  document.getElementById('feedback-log-area').textContent = '加载中… / Loading…';
   try {
     const r = await fetch(BASE + '/api/logs?limit=30');
     const d = await r.json();
@@ -8140,7 +8140,7 @@ async function syncExistingHuman() {
   var msg = document.getElementById('settings-human-sync-msg');
   var from = fromEl ? fromEl.value.trim() : '';
   if (!from) from = '用户';
-  if (msg) { msg.textContent = '替换中…'; msg.style.color = 'var(--text-dim)'; }
+  if (msg) { msg.textContent = '替换中… / Replacing…'; msg.style.color = 'var(--text-dim)'; }
   try {
     var res = await fetch(BASE + '/api/settings/human/sync-existing', {
       method: 'POST',

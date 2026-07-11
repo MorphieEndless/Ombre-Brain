@@ -4,14 +4,14 @@ tools/breath/search.py — 有 query 的检索模式
 ========================================
 
 走 breath(query=...) 时进入这里。一次向量查询与 bucket_manager 的
-关键词/BM25 检索融合，逐条 dehydrate 后塞 token 预算。
+关键词/BM25 检索融合，命中后逐字返回桶正文并套 token 预算。
 
 关键行为：
 - domain/valence/arousal 作为过滤参数传给 bucket_mgr.search
 - embedding 未配置/未启用/调用失败时明确提示并继续关键词/BM25 检索
 - 向量通道阈值 sim>=0.65；domain/tags/type 过滤与关键词通道完全一致
-- 脱水 API 失败时返回最多 300 字原文片段，不让展示层故障吞掉命中
-- 命中后调 touch()，记忆重构会把展示层 valence 按当前情绪做 ±0.1 微调
+- 命中正文不经过 LLM 摘要、改写或压缩，直接返回当前存储的 content
+- 命中后调 touch()，但不修改本次返回的正文或元数据
 - 检索结果 < 3 时 40% 概率从低权重旧桶里随机漂出 1-3 条「忽然想起来」
 - 命中 0 条时回 webhook 报空，并给出可操作的引导文案
 
@@ -30,16 +30,14 @@ import random
 
 from ombrebrain.policy.surfacing import SurfacePolicyVM
 from .. import _runtime as rt
-from utils import strip_wikilinks, count_tokens_approx
+from ._verbatim import render_stored_bucket
 
 _SURFACE_POLICY = SurfacePolicyVM.default()
 
-# Bound concurrent summaries so a cold cache does not burst the provider.
-_DEHY_CONCURRENCY = 5
 _VECTOR_QUERY_TOPK = 50
 
 _SEMANTIC_DISABLED_NOTE = "[检索降级：语义索引暂不可用，本次仅使用关键词/BM25。]"
-_SUMMARY_FALLBACK_NOTE = "[展示降级：摘要服务暂不可用，以下为原文片段。]"
+_BUDGET_NOTICE = "[token 预算不足：命中的下一条记忆未被截断或摘要，请提高 max_tokens 后重试。]"
 
 
 def _bucket_has_tags(meta: dict, tag_filter: list) -> bool:
@@ -51,10 +49,6 @@ def _bucket_has_tags(meta: dict, tag_filter: list) -> bool:
 
 def _can_surface_search(bucket: dict) -> bool:
     return _SURFACE_POLICY.evaluate_bucket(bucket, mode="search").allowed
-
-
-def _raw_summary_fallback(content: str) -> str:
-    return strip_wikilinks(content)[:300].strip() or "（空记忆）"
 
 
 async def _semantic_scores(query: str, top_k: int) -> tuple[dict[str, float], str]:
@@ -117,68 +111,27 @@ async def surface_search(
     matches = [b for b in matches if _bucket_has_tags(b["metadata"], tag_filter)]
     matches = matches[:max_results]
 
-    # 性能 P3：候选桶并发脱水（有界信号量），再按原顺序套 token 预算。
-    # 冷缓存时 N 次 LLM 往返从串行变并发；matches 已被上游截到 ~20，量可控。
-    _sem = asyncio.Semaphore(_DEHY_CONCURRENCY)
-
-    async def _dehydrate_one(bucket):
-        """返回 (is_core, is_vector, bucket_id, summary, used_raw_fallback)。"""
-        meta_b = bucket["metadata"]
-        is_core = meta_b.get("pinned") or meta_b.get("protected") or meta_b.get("type") == "permanent"
-        clean_meta = {k: v for k, v in meta_b.items() if k != "tags"}
-        # --- 记忆重构：根据当前情绪微调展示层 valence（±0.1）---
-        if q_valence is not None and "valence" in clean_meta:
-            original_v = float(clean_meta.get("valence") or 0.5)
-            shift = (q_valence - 0.5) * 0.2
-            clean_meta["valence"] = max(0.0, min(1.0, original_v + shift))
-        async with _sem:
-            try:
-                summary = await rt.dehydrator.dehydrate(strip_wikilinks(bucket["content"]), clean_meta)
-            except Exception as dehy_err:
-                rt.logger.warning(
-                    f"search result dehydrate failed, using raw fallback: "
-                    f"{type(dehy_err).__name__}: {dehy_err}"
-                )
-                summary = _raw_summary_fallback(bucket["content"])
-                used_raw_fallback = True
-            else:
-                used_raw_fallback = False
-        if not str(summary or "").strip():
-            summary = _raw_summary_fallback(bucket["content"])
-            used_raw_fallback = True
-        return (
-            is_core,
-            bool(bucket.get("vector_match")),
-            bucket["id"],
-            summary,
-            used_raw_fallback,
-        )
-
-    dehydrated = await asyncio.gather(*[_dehydrate_one(b) for b in matches])
-
     results = []
     token_used = 0
-    used_raw_fallback = False
+    budget_blocked = False
     touched_ids: list = []   # 性能 P2：浮现后统一在后台 touch，不在响应路径逐条 await
-    for item in dehydrated:
-        if item is None:
-            continue
-        if token_used >= max_tokens:
-            break
-        is_core, is_vector, bucket_id, summary, item_used_raw = item
-        used_raw_fallback = used_raw_fallback or item_used_raw
-        summary_tokens = count_tokens_approx(summary)
-        if token_used + summary_tokens > max_tokens:
-            break
-        touched_ids.append(bucket_id)
+    for bucket in matches:
+        meta = bucket["metadata"]
+        bucket_id = bucket["id"]
+        is_core = meta.get("pinned") or meta.get("protected") or meta.get("type") == "permanent"
         if is_core:
-            summary = f"📌 [核心准则] [bucket_id:{bucket_id}] {summary}"
-        elif is_vector:
-            summary = f"[语义关联] [bucket_id:{bucket_id}] {summary}"
+            header = f"📌 [核心准则] [bucket_id:{bucket_id}]"
+        elif bucket.get("vector_match"):
+            header = f"[语义关联] [bucket_id:{bucket_id}]"
         else:
-            summary = f"[bucket_id:{bucket_id}] {summary}"
-        results.append(summary)
-        token_used += summary_tokens
+            header = f"[bucket_id:{bucket_id}]"
+        rendered, entry_tokens = render_stored_bucket(bucket, header)
+        if token_used + entry_tokens > max_tokens:
+            budget_blocked = True
+            break
+        results.append(rendered)
+        token_used += entry_tokens
+        touched_ids.append(bucket_id)
 
     # 性能 P2：把 touch 移出响应路径 —— 浮现完的桶在后台一次性更新激活，
     # ripple=False 跳过读全库的时间涟漪。响应不再等这些写盘/涟漪。
@@ -186,7 +139,7 @@ async def surface_search(
         asyncio.create_task(rt.bucket_mgr.touch_many(touched_ids, ripple=False))
 
     # --- 检索结果 < 3 时 40% 概率随机浮现 ---
-    if len(matches) < min(3, max_results) and random.random() < 0.4:
+    if not budget_blocked and len(matches) < min(3, max_results) and random.random() < 0.4:
         try:
             all_buckets = await rt.bucket_mgr.list_all(include_archive=False)
             matched_ids = {b["id"] for b in matches}
@@ -204,14 +157,23 @@ async def surface_search(
                 )
                 drift_results = []
                 for b in drifted:
-                    clean_meta = {k: v for k, v in b["metadata"].items() if k != "tags"}
-                    summary = await rt.dehydrator.dehydrate(strip_wikilinks(b["content"]), clean_meta)
-                    drift_results.append(f"[surface_type: random]\n{summary}")
-                results.append("--- 忽然想起来 ---\n" + "\n---\n".join(drift_results))
+                    rendered, entry_tokens = render_stored_bucket(
+                        b,
+                        f"[surface_type: random] [bucket_id:{b['id']}]",
+                    )
+                    if token_used + entry_tokens > max_tokens:
+                        budget_blocked = True
+                        break
+                    drift_results.append(rendered)
+                    token_used += entry_tokens
+                if drift_results:
+                    results.append("--- 忽然想起来 ---\n" + "\n---\n".join(drift_results))
         except Exception as e:
             rt.logger.warning(f"Random surfacing failed / 随机浮现失败: {e}")
 
     if not results:
+        if budget_blocked:
+            return f"{semantic_notice}\n{_BUDGET_NOTICE}" if semantic_notice else _BUDGET_NOTICE
         if rt.fire_webhook:
             await rt.fire_webhook("breath", {"mode": "empty", "matches": 0})
         empty_text = (
@@ -224,8 +186,8 @@ async def surface_search(
     notices = []
     if semantic_notice:
         notices.append(semantic_notice)
-    if used_raw_fallback:
-        notices.append(_SUMMARY_FALLBACK_NOTE)
+    if budget_blocked:
+        notices.append(_BUDGET_NOTICE)
     if notices:
         final_text = "\n".join(notices + [final_text])
     if rt.fire_webhook:

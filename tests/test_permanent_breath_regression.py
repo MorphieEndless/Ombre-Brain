@@ -124,7 +124,7 @@ async def test_default_breath_respects_dont_surface_even_for_core_bucket(bucket_
 
 
 @pytest.mark.asyncio
-async def test_search_breath_falls_back_when_embedding_and_dehydrate_are_unavailable(
+async def test_search_breath_returns_raw_content_without_dehydration(
     bucket_mgr,
     decay_eng,
     monkeypatch,
@@ -155,7 +155,7 @@ async def test_search_breath_falls_back_when_embedding_and_dehydrate_are_unavail
     assert bucket_id in result
     assert "Candlelit protocol" in result
     assert "语义索引暂不可用" in result
-    assert "摘要服务暂不可用" in result
+    assert "摘要服务暂不可用" not in result
 
 
 @pytest.mark.asyncio

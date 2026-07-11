@@ -282,7 +282,7 @@ feel 桶自身：
 1. **Feel 通道**（`domain="feel"` 或 `tags` 含 `"feel"`/`"__feel__"`）：直接拉所有 `type==feel` 桶，按 `created` 倒序展示原文，按 `surfacing.feel_max_tokens`（默认 6000）做 token 预算；**超出预算的旧 feel 折叠为 60 字符单行摘要**，并在末尾追加 `更早的 feel 摘要（N 条，已折叠）` 段。**不排除 anchor 桶**（设计：feel 通道只看 type=feel）。
 2. **重要度批量模式**（`importance_min >= 1`）：跳过语义搜索，按 importance 降序返回 ≤20 条；过滤 `feel/plan/letter` 与 `dont_surface=True`；**不过滤 anchor、不过滤 pinned**（设计：主动按 importance 检索时希望能找到所有重要桶）。
 3. **浮现模式**（无 `query`）：钉选桶始终展示为「核心准则」+ 未解决桶按衰减分排序，**冷启动**（`activation_count==0 && importance>=8`）的桶最多 2 个插到最前；后续排序**有两条互斥路径**：当 `surfacing.sampling.enabled=true` 时走加权无放回采样（`top_k` / `sample_k` / `temperature` 控制；详见 §7.1），否则走原 Top-1 固定 + Top-2~20 随机洗牌；按 `max_results` 硬截断。**排除 anchor 桶**（设计：anchor 是坐标系，不该随机冒泡干扰日常浮现；这是浮现模式独有的过滤）。浮现**不调用** `touch()`。**末尾追加 `=== 久未浮现 ===`** 段（iter 1.6 §7 被动联想）：从 `activation_count==0 && importance>=8` 或 `importance>=9 && 距 last_active>7天` 的桶里随机抽 1~2 条，模拟「突然想起来」。
-4. **检索模式**（有 `query`）：每个 query 只生成一次查询向量，与 rapidfuzz/BM25 多维评分共同进入 `BucketManager.search()` → 过滤 `feel/plan/letter`，**pinned/permanent 仍可被检索命中（不过滤），命中后加 📌 前缀** → 纯语义候选相似度 `>=0.65` 标 `[语义关联]`，且不能绕过 domain/tags/type 过滤 → 情绪重构（valence 微调 ±0.1）→ 命中时 `touch()` → 结果不足 3 条时 40% 概率随机漂浮 1~3 条低权重旧桶。embedding 不可用时明确提示后继续关键词/BM25；dehydrate 不可用时返回最多 300 字原文片段。**不过滤 anchor**（设计：主动检索时希望能找到坐标系桶）。
+4. **检索模式**（有 `query`）：每个 query 只生成一次查询向量，与 rapidfuzz/BM25 多维评分共同进入 `BucketManager.search()` → 过滤 `feel/plan/letter`，**pinned/permanent 仍可被检索命中（不过滤），命中后加 📌 前缀** → 纯语义候选相似度 `>=0.65` 标 `[语义关联]`，且不能绕过 domain/tags/type 过滤 → 命中时 `touch()` → 结果不足 3 条时 40% 概率随机漂浮 1~3 条低权重旧桶。embedding 不可用时明确提示后继续关键词/BM25；桶一旦命中，返回层直接使用当前存储的完整 `content`，不调用 dehydrate、不剥除 wikilink、不截断或改写。**不过滤 anchor**（设计：主动检索时希望能找到坐标系桶）。
 
 (实现注意：`tags="feel"` 在第一个分支被映射为 `domain="feel"` 后清出 tag_filter；其它 tag 走 AND 过滤；`max_tokens` 上限 20000，`max_results` 上限 50；`importance_min` 模式下硬上限 20 条不可调；浮现模式中钉选桶**不计入** `max_results` 上限。)
 
@@ -1473,7 +1473,7 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 | `breath` 浮现 | `list_all` 异常 | 返回「记忆系统暂时无法访问。」 |
 | `breath` 检索 | `search` 异常 | 返回「检索过程出错，请稍后重试。」 |
 | `breath` 检索 | embedding 不可用 / 查询失败 | 明确附加「检索降级」提示，跳过向量通道，继续 rapidfuzz + BM25 |
-| `breath` 检索展示 | dehydrate 不可用 / 返回空 | 明确附加「展示降级」提示，返回最多 300 字原文片段 |
+| `breath` 检索展示 | embedding 不可用 | 明确附加「检索降级」提示，使用关键词/BM25；命中正文仍逐字完整返回 |
 | `breath` 检索 | 结果 < 3 | 40% 概率随机漂浮 1~3 条低权重旧桶 |
 | `hold` `analyze` 失败 | API 异常 | 正文逐字落盘，元数据使用本地中性默认值并明确提示；绝不压缩正文 |
 | `hold` 合并搜索失败 | search 异常 | 直接走新建路径 |
@@ -1484,13 +1484,13 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 | `grow` 短内容 (<30 字) | — | 跳过 digest 走 hold 单条 |
 | `trace` 桶不存在 | get None | 返回「未找到记忆桶: {id}」 |
 | `trace` 无字段变更 | — | 返回「没有任何字段需要修改。」 |
-| `dehydrator.dehydrate` API 不可用 | `api_available=False` | 方法本身抛 RuntimeError；`breath(query=...)` 在展示边界捕获并回退原文片段 |
+| `dehydrator.dehydrate` API 不可用 | `api_available=False` | 不影响 breath；正文返回阶段不再调用 dehydrator |
 | `embedding.search_similar` 未启用 | enabled=False | 返回 `[]`，调用方 fallback |
 | `_check_plan_resolution` 无 embedding | — | 整体跳过（保守，不误报） |
 | `decay_cycle` list_all 失败 | 异常 | 返回 `{checked:0, error:str}`，不终止后台循环 |
 | `decay_cycle` 单桶评分失败 | 异常 | WARNING 日志，跳过该桶 |
 
-**核心设计决策（不要轻改）**：派生服务不能决定 Markdown 原文是否存在。`hold` 打标失败时使用明确标注的中性元数据保留原文；`breath` 摘要失败时显示受长度限制的原文片段；需要 LLM 做结构化拆分的 `grow` 长内容仍可显式报错。所有降级都必须对调用方可见，不能伪装成完整语义结果。
+**核心设计决策（不要轻改）**：派生服务不能决定 Markdown 原文是否存在。`hold` 打标失败时使用明确标注的中性元数据保留原文；`breath` 只让检索/排序决定“想起哪段”，正文返回阶段逐字使用 Markdown 当前 content；需要 LLM 做结构化拆分的 `grow` 长内容仍可显式报错。所有检索降级都必须对调用方可见，不能伪装成完整语义结果。
 
 ---
 
@@ -1587,7 +1587,7 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 
 1. **`pulse` 顶部统计行已显示 plan/letter/feel 数**。现在头部直接列出 `feel 桶` / `plan 桶` / `letter 桶`，不再出现「底下有桶但顶部数字对不上」。
 
-2. **README 与代码降级行为已对齐**（iter 2.0 doc-fix 闭合）。README 第三步与「常见问题」均改口为「无 key 时 hold/grow 仍能保存桶（自动兜底为「未分类」域，无打标、无向量），但 breath 浮现/检索阶段一旦触发脱水就会报错」。原冲突源自旧版 README 措辞「没有 API key 也能跑，只是脱水压缩功能不可用」与代码 `dehydrator.dehydrate()` 在 `api_available=False` 时直接 `RuntimeError` 的实情不符；现以代码实情为准。
+2. **README 与代码降级行为已对齐**。无 key 时 hold/grow 仍能保存桶（自动兜底为「未分类」域，无打标、无向量）；breath 的语义检索会明确降级为关键词/BM25，但命中桶的正文直接逐字读取 Markdown content，不依赖 `dehydrator.dehydrate()`。
 
 3. **`breath(domain="feel")` 文档说支持，但很多用户没意识到 `tags="feel"` 等价**。两条路径在 server.py:`breath` 顶部统一映射，已加在工具 docstring 里，但 dashboard 没暴露 feel 通道入口。
 

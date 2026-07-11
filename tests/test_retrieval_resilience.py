@@ -65,7 +65,7 @@ async def run_search(query, *, domain="", tags=None):
 
 
 @pytest.mark.asyncio
-async def test_dynamic_memory_remains_readable_with_both_providers_offline(
+async def test_dynamic_memory_remains_readable_without_summary_provider(
     bucket_mgr, decay_eng, monkeypatch
 ):
     bucket_id = await bucket_mgr.create(
@@ -85,7 +85,7 @@ async def test_dynamic_memory_remains_readable_with_both_providers_offline(
     assert bucket_id in result
     assert "cedar notebook" in result
     assert "语义索引暂不可用" in result
-    assert "摘要服务暂不可用" in result
+    assert "摘要服务暂不可用" not in result
 
 
 @pytest.mark.asyncio

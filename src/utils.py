@@ -30,6 +30,8 @@ import uuid
 import json
 import yaml
 import logging
+import math
+import tempfile
 from pathlib import Path
 from datetime import date, datetime
 from typing import Optional
@@ -51,7 +53,7 @@ _TOKEN_RATIO_PER_CHAR = 0.05     # 标点/空格等其它字符的兜底贡献
 # setup_logging() 文件日志轮转配置。
 _LOG_FILE_MAX_BYTES = 1_000_000  # 单个日志文件 1 MB 后轮转
 _LOG_FILE_BACKUP_COUNT = 3       # 保留 3 个历史文件
-_LOG_FALLBACK_DIR = "/tmp/ombre_logs"  # 所有候选路径都失败时的最终兜底
+_LOG_FALLBACK_DIR = os.path.join(tempfile.gettempdir(), "ombre_logs")
 
 # sanitize_name() 桶名最大长度（防止文件名过长导致 OS 报错）。
 _BUCKET_NAME_MAX_LEN = 80
@@ -382,7 +384,7 @@ def positive_float(value, default: float) -> float:
         parsed = float(value)
     except (TypeError, ValueError):
         return float(default)
-    if parsed <= 0:
+    if not math.isfinite(parsed) or parsed <= 0:
         return float(default)
     return parsed
 
@@ -395,7 +397,7 @@ def _apply_env_float_override(config: dict, env_name: str, *path: str) -> None:
         parsed = float(value)
     except ValueError:
         return
-    if parsed <= 0:
+    if not math.isfinite(parsed) or parsed <= 0:
         return
     cursor = config
     for key in path[:-1]:
@@ -666,6 +668,25 @@ def safe_path(base_dir: str, filename: str) -> Path:
             f"{target} is not inside / 不在 {base} 内"
         )
     return target
+
+
+def atomic_write_text(path: str | Path, text: str) -> None:
+    """Atomically replace a UTF-8 text file after flushing it to disk."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f"{target.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+    except Exception:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def count_tokens_approx(text: str) -> int:

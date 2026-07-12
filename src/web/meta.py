@@ -305,7 +305,10 @@ def register(mcp) -> None:
     @mcp.custom_route("/api/do-update", methods=["POST"])
     async def api_do_update(request: Request) -> Response:
         from starlette.responses import StreamingResponse
-        import asyncio as _asyncio, zipfile as _zipfile, io as _io, os as _os
+        import asyncio as _asyncio
+        import io as _io
+        import os as _os
+        import zipfile as _zipfile
 
         err = sh._require_auth(request)
         if err:
@@ -459,7 +462,8 @@ def register(mcp) -> None:
                                        "或设 OMBRE_UPDATE_ALLOW_PIP=1 后再更新。\n\n")
                             else:
                                 yield "data: 依赖清单有变化，正在 pip install…\n\n"
-                                import subprocess as _sp, sys as _sys
+                                import subprocess as _sp
+                                import sys as _sys
                                 _p = _sp.run(
                                     [_sys.executable, "-m", "pip", "install", "--no-cache-dir", "-r", _req_path],
                                     capture_output=True, text=True, timeout=600,

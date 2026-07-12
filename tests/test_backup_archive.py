@@ -1,6 +1,4 @@
-import asyncio
 import io
-import json
 import sqlite3
 import zipfile
 
@@ -9,7 +7,6 @@ import pytest
 
 from backup_archive import (
     BackupArchiveError,
-    MANIFEST_NAME,
     build_export_archive,
     read_backup_archive,
 )

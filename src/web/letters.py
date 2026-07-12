@@ -16,6 +16,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from . import _shared as sh
+from tools._common import check_content_size, check_metadata_size
 
 try:
     from utils import strip_wikilinks, get_ai_name  # type: ignore
@@ -98,6 +99,18 @@ def register(mcp) -> None:
             return JSONResponse({"error": "author required"}, status_code=400)
         if not content:
             return JSONResponse({"error": "content required"}, status_code=400)
+        size_err = check_content_size(content)
+        if size_err:
+            return JSONResponse({"error": size_err}, status_code=400)
+        metadata_err = check_metadata_size(
+            author=raw_author,
+            user_name=body.get("user_name", ""),
+            title=body.get("title", ""),
+            date=body.get("date", ""),
+            ai_name=body.get("ai_name", ""),
+        )
+        if metadata_err:
+            return JSONResponse({"error": metadata_err}, status_code=400)
         # ai_name：请求体显式传入优先，否则取环境变量 AI_NAME（回退 "AI"）。
         ai = (body.get("ai_name") or "").strip() or get_ai_name()
         low = raw_author.lower()
@@ -164,6 +177,9 @@ def register(mcp) -> None:
 
         updates: dict = {}
         if "content" in body and isinstance(body["content"], str) and body["content"].strip():
+            size_err = check_content_size(body["content"])
+            if size_err:
+                return JSONResponse({"error": size_err}, status_code=400)
             updates["content"] = body["content"].strip()
         if "title" in body and isinstance(body["title"], str):
             updates["title"] = body["title"].strip()[:120]

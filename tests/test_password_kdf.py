@@ -45,7 +45,7 @@ def test_legacy_hash_still_verifies():
 def test_needs_rehash_detects_legacy_and_weak():
     assert sh._needs_rehash(_legacy_hash("x")) is True
     assert sh._needs_rehash("") is True
-    assert sh._needs_rehash(f"pbkdf2_sha256$1000$aa$bb") is True  # 迭代数过低
+    assert sh._needs_rehash("pbkdf2_sha256$1000$aa$bb") is True  # 迭代数过低
     assert sh._needs_rehash(sh._hash_secret("x")) is False
 
 

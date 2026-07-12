@@ -24,7 +24,12 @@ core（普通存入 + 自动合并）。
 from typing import Optional
 
 from .. import _runtime as rt
-from .._common import check_content_size, enforce_high_importance_quota, enforce_pinned_quota
+from .._common import (
+    check_content_size,
+    check_metadata_size,
+    enforce_high_importance_quota,
+    enforce_pinned_quota,
+)
 from .feel import store_feel
 from .pinned import store_pinned
 from .core import store_core
@@ -41,15 +46,44 @@ async def dispatch(
     arousal: Optional[float] = -1,
     why_remembered: Optional[str] = "",
 ) -> str:
-    if tags is None: tags = ""
-    if importance is None: importance = 5
-    if pinned is None: pinned = False
-    if feel is None: feel = False
-    if source_bucket is None: source_bucket = ""
-    if valence is None: valence = -1
-    if arousal is None: arousal = -1
-    if why_remembered is None: why_remembered = ""
+    content = "" if content is None else str(content)
+    if tags is None:
+        tags = ""
+    if importance is None:
+        importance = 5
+    if pinned is None:
+        pinned = False
+    if feel is None:
+        feel = False
+    if source_bucket is None:
+        source_bucket = ""
+    if valence is None:
+        valence = -1
+    if arousal is None:
+        arousal = -1
+    if why_remembered is None:
+        why_remembered = ""
     why_remembered = str(why_remembered).strip()[:500]
+    try:
+        importance = int(importance)
+    except (TypeError, ValueError, OverflowError):
+        importance = 5
+    try:
+        valence = float(valence)
+    except (TypeError, ValueError, OverflowError):
+        valence = -1
+    try:
+        arousal = float(arousal)
+    except (TypeError, ValueError, OverflowError):
+        arousal = -1
+
+    metadata_err = check_metadata_size(
+        tags=tags,
+        source_bucket=source_bucket,
+        why_remembered=why_remembered,
+    )
+    if metadata_err:
+        return metadata_err
     if rt.mark_op:
         rt.mark_op("hold")
     rt.record_v3_tool_event("hold", {

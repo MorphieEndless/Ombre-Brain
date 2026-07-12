@@ -24,11 +24,13 @@ trace 是 OB 唯一的「写元数据」入口，承接所有桶字段更新和�
 ========================================
 """
 
+import math
 from typing import Optional
 
 from memory_messages import resolved_hint
+from utils import parse_bool
 from .. import _runtime as rt
-from .._common import check_content_size, check_pinned_quota
+from .._common import check_content_size, check_metadata_size, check_pinned_quota
 
 
 async def trace_core(
@@ -49,21 +51,77 @@ async def trace_core(
     dont_surface: Optional[int] = -1,
     why_remembered: Optional[str] = "",
 ) -> str:
-    if name is None: name = ""
-    if domain is None: domain = ""
-    if valence is None: valence = -1
-    if arousal is None: arousal = -1
-    if importance is None: importance = -1
-    if tags is None: tags = ""
-    if resolved is None: resolved = -1
-    if pinned is None: pinned = -1
-    if digested is None: digested = -1
-    if content is None: content = ""
-    if delete is None: delete = False
-    if status is None: status = ""
-    if weight is None: weight = -1
-    if dont_surface is None: dont_surface = -1
-    if why_remembered is None: why_remembered = ""
+    bucket_id = "" if bucket_id is None else str(bucket_id)
+    if name is None:
+        name = ""
+    if domain is None:
+        domain = ""
+    if valence is None:
+        valence = -1
+    if arousal is None:
+        arousal = -1
+    if importance is None:
+        importance = -1
+    if tags is None:
+        tags = ""
+    if resolved is None:
+        resolved = -1
+    if pinned is None:
+        pinned = -1
+    if digested is None:
+        digested = -1
+    if content is None:
+        content = ""
+    if delete is None:
+        delete = False
+    if status is None:
+        status = ""
+    if weight is None:
+        weight = -1
+    if dont_surface is None:
+        dont_surface = -1
+    if why_remembered is None:
+        why_remembered = ""
+    content = str(content)
+    name = str(name)
+    domain = str(domain)
+    tags = str(tags)
+    status = str(status)
+    why_remembered = str(why_remembered)
+    delete = parse_bool(delete, default=False)
+
+    def _finite_float(value, default: float) -> float:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return default
+        return numeric if math.isfinite(numeric) else default
+
+    def _safe_int(value, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError, OverflowError):
+            return default
+
+    valence = _finite_float(valence, -1)
+    arousal = _finite_float(arousal, -1)
+    weight = _finite_float(weight, -1)
+    importance = _safe_int(importance, -1)
+    resolved = _safe_int(resolved, -1)
+    pinned = _safe_int(pinned, -1)
+    digested = _safe_int(digested, -1)
+    dont_surface = _safe_int(dont_surface, -1)
+
+    metadata_err = check_metadata_size(
+        bucket_id=bucket_id,
+        name=name,
+        domain=domain,
+        tags=tags,
+        status=status,
+        why_remembered=why_remembered,
+    )
+    if metadata_err:
+        return metadata_err
     if rt.mark_op:
         rt.mark_op("trace")
     rt.record_v3_tool_event("trace", {

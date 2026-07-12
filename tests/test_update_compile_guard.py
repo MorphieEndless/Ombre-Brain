@@ -3,9 +3,7 @@
 裸机没有 entrypoint 守护，坏更新 execv 进去会一直崩。重启前先字节编译新代码，
 不通过就从 _prev 还原、放弃重启，保住可用状态。
 """
-import os
 
-import pytest
 
 import web.meta as meta
 
@@ -39,8 +37,10 @@ def test_compile_check_ignores_pycache(tmp_path):
 
 def test_restore_from_prev_recovers_src_frontend_version(tmp_path):
     repo = tmp_path
-    src = repo / "src"; src.mkdir()
-    front = repo / "frontend"; front.mkdir()
+    src = repo / "src"
+    src.mkdir()
+    front = repo / "frontend"
+    front.mkdir()
     prev = repo / "_prev"
     (prev / "src").mkdir(parents=True)
     (prev / "frontend").mkdir(parents=True)
@@ -62,6 +62,8 @@ def test_restore_from_prev_recovers_src_frontend_version(tmp_path):
 
 def test_restore_returns_false_without_prev(tmp_path):
     repo = tmp_path
-    src = repo / "src"; src.mkdir()
-    front = repo / "frontend"; front.mkdir()
+    src = repo / "src"
+    src.mkdir()
+    front = repo / "frontend"
+    front.mkdir()
     assert meta._restore_from_prev(str(repo), str(repo / "_prev"), str(src), str(front)) is False

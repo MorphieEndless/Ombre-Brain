@@ -26,18 +26,11 @@ web._shared，然后以 @mcp.tool() 注册薄封装（真正的实现在 src/too
 
 import os
 import sys
-import random
 import logging
 import asyncio
-import hashlib
-import hmac
-import secrets
 import time
 from typing import Optional, Awaitable
-from starlette.requests import Request
-from starlette.responses import Response
 import httpx
-import yaml
 
 
 # --- Ensure same-directory modules can be imported ---
@@ -53,7 +46,7 @@ from embedding_engine import EmbeddingEngine
 from embedding_outbox import EmbeddingOutbox
 from import_memory import ImportEngine
 from migrate_engine import MigrateEngine
-from utils import load_config, setup_logging, strip_wikilinks, count_tokens_approx, get_version, extract_wikilinks, parse_bool
+from utils import get_version, load_config, parse_bool, setup_logging
 
 # --- iter 2.1：MCP 工具实现已按代码路径拆分到 tools/ 子包 ---
 # 本文件只保留 MCP 注册 + 路由（HTTP custom_route）+ 共享辅助。
@@ -68,10 +61,6 @@ from tools import anchor as _t_anchor
 from tools import plan as _t_plan
 from tools import dream as _t_dream
 from tools import i as _t_i
-from tools._common import (
-    check_content_size as _check_content_size,
-    check_pinned_quota as _check_pinned_quota,
-)
 
 # --- Load config & init logging / 加载配置 & 初始化日志 ---
 config = load_config()
@@ -134,6 +123,10 @@ except (ValueError, TypeError):
     logger.warning("端口配置不是合法整数，回退到 18001")
     OMBRE_PORT = 18001
 
+# Docker needs an all-interface default; bare-metal deployments can restrict it
+# with OMBRE_BIND_HOST=127.0.0.1.
+_BIND_HOST = (os.environ.get("OMBRE_BIND_HOST") or "0.0.0.0").strip() or "0.0.0.0"  # nosec B104
+
 # OMBRE_HOOK_URL: 在 breath/dream 被调用后推送事件到该 URL（POST JSON）。
 # OMBRE_HOOK_SKIP: 设为 true/1/yes 跳过推送。详见 ENV_VARS.md。
 # _fire_webhook 每次调用直接读 os.environ（不缓存模块常量）——这样 dashboard 的
@@ -151,6 +144,7 @@ except (ValueError, TypeError):
 # --- Webhook / HTTP 客户端超时 ---
 _WEBHOOK_TIMEOUT_SECONDS = 5.0
 _HEALTH_PROBE_TIMEOUT_SECONDS = 5
+_DEFAULT_MAX_MCP_REQUEST_BYTES = 4 * 1024 * 1024
 
 # --- Dashboard 鉴权 / 会话 / 密码 / 日志&错误面板分页常量 已移至 web/_shared.py、web/system.py ---
 
@@ -190,9 +184,6 @@ try:
         begin_warnings,
         pop_warnings,
         format_warnings_suffix,
-        recent_errors,
-        clear_errors_log,
-        get_recent_logs,
     )
 except ImportError:
     from .errors import (  # type: ignore
@@ -204,9 +195,6 @@ except ImportError:
         begin_warnings,
         pop_warnings,
         format_warnings_suffix,
-        recent_errors,
-        clear_errors_log,
-        get_recent_logs,
     )
 configure_errors_path(config.get("buckets_dir", "buckets"))
 
@@ -318,12 +306,12 @@ _gh_auto_interval: int = int(_gh_cfg.get("auto_interval_minutes") or 0)
 # 全部挂在 mcp 主实例上。
 mcp = FastMCP(
     "Ombre Brain",
-    host="0.0.0.0",
+    host=_BIND_HOST,
     port=OMBRE_PORT,
 )
 mcp_extra = FastMCP(
     "Ombre Brain Extra",
-    host="0.0.0.0",
+    host=_BIND_HOST,
     port=OMBRE_PORT,
 )
 
@@ -846,6 +834,7 @@ if __name__ == "__main__":
         import threading
         import uvicorn
         from starlette.middleware.cors import CORSMiddleware
+        from web.request_limits import MCPRequestBodyLimitMiddleware
 
         # --- Application-level keepalive: ping /health every 60s ---
         # --- 应用层保活：每 60 秒 ping 一次 /health，防止 Cloudflare Tunnel 空闲断连 ---
@@ -953,6 +942,25 @@ if __name__ == "__main__":
             expose_headers=["*"],
         )
         logger.info("CORS middleware enabled for remote transport / 已启用 CORS 中间件")
+
+        try:
+            _mcp_body_limit = int(
+                (config.get("limits") or {}).get(
+                    "max_mcp_request_bytes", _DEFAULT_MAX_MCP_REQUEST_BYTES
+                )
+            )
+        except (TypeError, ValueError, OverflowError):
+            _mcp_body_limit = _DEFAULT_MAX_MCP_REQUEST_BYTES
+        if _mcp_body_limit < 0:
+            _mcp_body_limit = _DEFAULT_MAX_MCP_REQUEST_BYTES
+        _app.add_middleware(
+            MCPRequestBodyLimitMiddleware,
+            max_bytes=_mcp_body_limit,
+        )
+        logger.info(
+            "MCP request body limit: %s",
+            "disabled" if _mcp_body_limit == 0 else f"{_mcp_body_limit} bytes",
+        )
 
         # MCP Bearer token auth — pure ASGI middleware (no response buffering)
         # BaseHTTPMiddleware buffers SSE streams and breaks MCP tool listing
@@ -1082,7 +1090,7 @@ if __name__ == "__main__":
             "开启(需 OAuth Bearer)" if _mcp_auth_required
             else "关闭(免 token 直连，仅限可信内网/本机)",
         )
-        uvicorn.run(_app, host="0.0.0.0", port=OMBRE_PORT)
+        uvicorn.run(_app, host=_BIND_HOST, port=OMBRE_PORT)
     else:
         # stdio：工具已在启动入口处统一回灌进 mcp（12 个全暴露），这里直接跑。
         mcp.run(transport=transport)

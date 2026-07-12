@@ -29,9 +29,9 @@ except ImportError:  # pragma: no cover
     from ..utils import parse_bool  # type: ignore
 
 try:
-    from backup_archive import BackupArchiveError, build_export_archive  # type: ignore
+    from backup_archive import MAX_ARCHIVE_BYTES, BackupArchiveError, build_export_archive  # type: ignore
 except ImportError:  # pragma: no cover
-    from ..backup_archive import BackupArchiveError, build_export_archive  # type: ignore
+    from ..backup_archive import MAX_ARCHIVE_BYTES, BackupArchiveError, build_export_archive  # type: ignore
 
 logger = sh.logger
 
@@ -52,7 +52,53 @@ except ImportError:  # pragma: no cover
     from ..import_memory import preview_import  # type: ignore
 
 
+_DEFAULT_MAX_IMPORT_UPLOAD_BYTES = 64 * 1024 * 1024
+
+
+def _max_import_upload_bytes() -> int:
+    limits = (getattr(sh, "config", {}) or {}).get("limits") or {}
+    try:
+        return max(1, int(limits.get("max_import_upload_bytes") or _DEFAULT_MAX_IMPORT_UPLOAD_BYTES))
+    except (TypeError, ValueError):
+        return _DEFAULT_MAX_IMPORT_UPLOAD_BYTES
+
+
+async def _read_body_limited(request: Request, limit: int) -> bytes:
+    raw_length = str((getattr(request, "headers", {}) or {}).get("content-length", "") or "").strip()
+    if raw_length:
+        try:
+            length = int(raw_length)
+        except ValueError:
+            length = 0
+        if length > limit:
+            raise ValueError(f"Upload too large ({length} bytes > {limit} byte limit)")
+
+    stream = getattr(request, "stream", None)
+    if callable(stream):
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in stream():
+            total += len(chunk)
+            if total > limit:
+                raise ValueError(f"Upload too large ({total} bytes > {limit} byte limit)")
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+    body = await request.body()
+    if len(body) > limit:
+        raise ValueError(f"Upload too large ({len(body)} bytes > {limit} byte limit)")
+    return body
+
+
+async def _read_file_field_limited(file_field, limit: int) -> bytes:
+    raw = await file_field.read(limit + 1)
+    if len(raw) > limit:
+        raise ValueError(f"Upload too large ({len(raw)} bytes > {limit} byte limit)")
+    return raw
+
+
 async def _read_import_upload_text(request: Request) -> tuple[str, str]:
+    limit = _max_import_upload_bytes()
     content_type = request.headers.get("content-type", "")
     filename = ""
     if "multipart/form-data" in content_type:
@@ -60,11 +106,11 @@ async def _read_import_upload_text(request: Request) -> tuple[str, str]:
         file_field = form.get("file")
         if not file_field or isinstance(file_field, str):
             raise ValueError("No file field")
-        raw_bytes = await file_field.read()
+        raw_bytes = await _read_file_field_limited(file_field, limit)
         filename = getattr(file_field, "filename", "upload")
         return raw_bytes.decode("utf-8", errors="replace"), filename
 
-    body = await request.body()
+    body = await _read_body_limited(request, limit)
     filename = request.query_params.get("filename", "upload")
     return body.decode("utf-8", errors="replace"), filename
 
@@ -554,9 +600,9 @@ def register(mcp) -> None:
                 file_field = form.get("file")
                 if not file_field or isinstance(file_field, str):
                     return JSONResponse({"error": "缺少 file 字段"}, status_code=400)
-                zip_bytes = await file_field.read()
+                zip_bytes = await _read_file_field_limited(file_field, MAX_ARCHIVE_BYTES)
             else:
-                zip_bytes = await request.body()
+                zip_bytes = await _read_body_limited(request, MAX_ARCHIVE_BYTES)
 
             if not zip_bytes:
                 return JSONResponse({"error": "文件为空"}, status_code=400)

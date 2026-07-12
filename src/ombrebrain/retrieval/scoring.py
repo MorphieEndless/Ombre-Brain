@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
+import math
 from typing import Any, Iterable, Mapping
 
 from ombrebrain.policy.surfacing import SurfacePolicyVM
@@ -257,9 +258,10 @@ def _coerce_gates(value: RetrievalGates | Mapping[str, Any] | None) -> Retrieval
 
 def _float_value(value: object, *, default: float = 0.0) -> float:
     try:
-        return float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+        numeric = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError, OverflowError):
         return default
+    return numeric if math.isfinite(numeric) else default
 
 
 def _clamp_gate(value: object) -> float:

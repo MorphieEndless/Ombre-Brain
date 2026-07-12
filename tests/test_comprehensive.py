@@ -7,11 +7,9 @@
 import math
 import os
 import sys
-import asyncio
 import pytest
 from pathlib import Path
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
 
 # ---------------------------------------------------------
 # 路径与环境变量（与 conftest.py 保持一致）
@@ -111,7 +109,7 @@ class TestCountTokensApprox:
         cn = "我爱Python编程"   # 7 Chinese chars
         en = "i love python"   # 3 English words
         # Chinese chars * 1.5 should dominate
-        assert count_tokens_approx(cn) > 5
+        assert count_tokens_approx(cn) > count_tokens_approx(en)
 
     def test_english_words_counted(self):
         from utils import count_tokens_approx
@@ -641,6 +639,7 @@ class TestBucketManagerAnchor:
         # 25th should be rejected
         result = await bucket_mgr.set_anchor(ids[24], True)
         count_after = await bucket_mgr.count_anchors()
+        assert result["ok"] is False
         assert count_after == 24
 
 
@@ -819,7 +818,6 @@ class TestDecayEngineRunCycle:
     @pytest.mark.asyncio
     async def test_run_cycle_returns_stats_dict(self, decay_engine, bucket_mgr):
         # Give decay_engine a bucket_mgr that has some buckets
-        from bucket_manager import BucketManager
         decay_engine.bucket_mgr = bucket_mgr
         await bucket_mgr.create(content="cycle test", domain=["测试"])
         result = await decay_engine.run_decay_cycle()
@@ -830,7 +828,6 @@ class TestDecayEngineRunCycle:
 
     @pytest.mark.asyncio
     async def test_run_cycle_archives_low_score_bucket(self, decay_engine, bucket_mgr):
-        from bucket_manager import BucketManager
         import frontmatter as fm
         decay_engine.bucket_mgr = bucket_mgr
         decay_engine.threshold = 9999.0  # Set threshold very high to force archiving
@@ -851,24 +848,22 @@ class TestDecayEngineRunCycle:
 
     @pytest.mark.asyncio
     async def test_run_cycle_skips_pinned(self, decay_engine, bucket_mgr):
-        import frontmatter as fm
         decay_engine.bucket_mgr = bucket_mgr
         decay_engine.threshold = 9999.0  # Force archive anything low
 
         bid = await bucket_mgr.create(content="pinned bucket", pinned=True)
-        result = await decay_engine.run_decay_cycle()
+        await decay_engine.run_decay_cycle()
         # Pinned bucket should never be archived
         still_alive = await bucket_mgr.get(bid)
         assert still_alive is not None
 
     @pytest.mark.asyncio
     async def test_run_cycle_skips_feel_buckets(self, decay_engine, bucket_mgr):
-        import frontmatter as fm
         decay_engine.bucket_mgr = bucket_mgr
         decay_engine.threshold = 9999.0  # Force archive anything
 
         bid = await bucket_mgr.create(content="feel bucket", bucket_type="feel")
-        result = await decay_engine.run_decay_cycle()
+        await decay_engine.run_decay_cycle()
         # Feel buckets should never be archived
         fpath = bucket_mgr._find_bucket_file(bid)
         if fpath is None:
@@ -937,7 +932,7 @@ class TestRecordError:
         assert isinstance(errors, list)
 
     def test_clear_errors_log(self, tmp_path):
-        from errors import configure_errors_path, record_error, clear_errors_log, recent_errors
+        from errors import clear_errors_log, configure_errors_path, record_error
         configure_errors_path(str(tmp_path))
         record_error("OB-E001", "to be cleared", log=False)
         cleared = clear_errors_log()

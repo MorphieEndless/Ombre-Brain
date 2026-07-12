@@ -8,6 +8,7 @@ web/embedding.py — 向量化后端摘要 / 迁移重算 / 本地 Ollama 模型
 ========================================
 """
 
+import asyncio
 import os
 import httpx
 import json as _json_lib
@@ -88,7 +89,10 @@ async def _ollama_pull_run(ollama_url: str, name: str) -> None:
     _ollama_pull_state = {"running": True, "model": name, "percent": 0, "status": "starting", "error": ""}
     try:
         # trust_env=False：本地/容器 ollama 不走系统代理（否则 Clash/V2Ray 开着会 502）
-        async with httpx.AsyncClient(timeout=None, trust_env=False) as c:
+        # Model pulls are long-running streams, so the read phase stays
+        # unbounded while connect/write/pool waits remain finite.
+        timeout = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as c:
             async with c.stream("POST", f"{ollama_url}/api/pull", json={"name": name, "stream": True}) as r:
                 if r.status_code != 200:
                     raw = await r.aread()

@@ -380,7 +380,7 @@ def _install_run(osk: str, arch: str, mirror: str) -> None:
                 )
             binp = os.path.join(root, "bin", "ollama")
             if os.path.isfile(binp):
-                os.chmod(binp, 0o755)
+                os.chmod(binp, 0o755)  # nosec B103
 
         elif osk == "macos":
             zp = os.path.join(tmpdir, "Ollama-darwin.zip")
@@ -393,7 +393,7 @@ def _install_run(osk: str, arch: str, mirror: str) -> None:
                 _safe_extract_zip(z, root)
             binp = os.path.join(root, "Ollama.app", "Contents", "Resources", "ollama")
             if os.path.isfile(binp):
-                os.chmod(binp, 0o755)
+                os.chmod(binp, 0o755)  # nosec B103
         else:
             raise RuntimeError(f"不支持的系统：{osk}")
 

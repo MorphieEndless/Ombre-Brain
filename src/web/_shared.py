@@ -509,10 +509,6 @@ def _verify_security_answer(answer: str) -> bool:
     return _verify_secret(answer.strip().lower(), stored)
 
 
-def _verify_password_hash(password: str, stored: str) -> bool:
-    return _verify_secret(password, stored)
-
-
 def _is_setup_needed() -> bool:
     """True if no password is configured (env var or file)."""
     if os.environ.get("OMBRE_DASHBOARD_PASSWORD", ""):

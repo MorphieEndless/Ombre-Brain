@@ -3,7 +3,6 @@
 Docker 下 /api/do-update 若从持久卷上的代码运行（repo_root 在数据卷内），热更新
 写盘后能扛过容器重建；若回退到镜像内置代码，则是易失的。前端据此如实提示。
 """
-import os
 
 import pytest
 

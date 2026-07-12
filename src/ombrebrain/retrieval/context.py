@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import json
+import math
 import re
 from typing import Any, Iterable, Mapping
 
@@ -202,9 +203,10 @@ def _arousal_label(value: float) -> str:
 
 def _float_or_none(value: object) -> float | None:
     try:
-        return float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+        numeric = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError, OverflowError):
         return None
+    return numeric if math.isfinite(numeric) else None
 
 
 def _neutralized_excerpt(content: str, *, limit: int) -> tuple[str, list[str]]:

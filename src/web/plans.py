@@ -14,6 +14,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from . import _shared as sh
+from tools._common import check_content_size
 
 logger = sh.logger
 
@@ -149,7 +150,7 @@ def register(mcp) -> None:
                 # 双重检查：类型必须是字符串，且 strip 后非空
                 if not isinstance(new_content, str) or not new_content.strip():
                     return JSONResponse({"error": "content required for edit"}, status_code=400)
-                size_err = _check_content_size(new_content)
+                size_err = check_content_size(new_content)
                 if size_err:
                     return JSONResponse({"error": size_err}, status_code=400)
                 updates["content"] = new_content.strip()

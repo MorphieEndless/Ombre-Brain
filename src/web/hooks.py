@@ -18,8 +18,6 @@ import hmac
 import os
 import random
 
-from starlette.requests import Request
-from starlette.responses import Response
 
 from . import _shared as sh
 

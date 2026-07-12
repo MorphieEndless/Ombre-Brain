@@ -2,13 +2,13 @@ name: Tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, testing]
     paths-ignore:
       - '*.md'
       - 'backup_*/**'
       - '.gitignore'
   pull_request:
-    branches: [main]
+    branches: [main, testing]
 
 jobs:
   test:
@@ -25,13 +25,62 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio
+          pip install pytest pytest-asyncio pytest-cov pytest-timeout ruff
 
-      - name: Run local tests (no API key needed)
-        run: python -m pytest tests/test_scoring.py tests/test_feel_flow.py -v --asyncio-mode=auto
+      - name: Run static checks
+        run: ruff check src tools deploy tests --no-cache
+
+      - name: Run full local suite with coverage
+        run: >-
+          python -m pytest tests -q
+          --asyncio-mode=auto
+          --cov=src
+          --cov-report=term-missing
+          --cov-report=xml
+          --cov-fail-under=60
 
       - name: Run LLM quality tests
         if: env.OMBRE_COMPRESS_API_KEY != ''
         env:
           OMBRE_COMPRESS_API_KEY: ${{ secrets.OMBRE_COMPRESS_API_KEY }}
         run: python -m pytest tests/test_llm_quality.py -v --asyncio-mode=auto
+
+      - name: Start isolated Docker MCP stack
+        run: |
+          docker network create ob-ci-net
+          docker volume create ob-ci-data
+          docker run -d --name ob-ci-llm --network ob-ci-net \
+            -v "$PWD:/workspace:ro" -w /workspace python:3.12-slim \
+            python tests/mcp_llm_stub.py
+          docker build -t ombre-brain-ci:local .
+          docker run -d --name ob-ci-app --network ob-ci-net \
+            -p 127.0.0.1:18084:8000 \
+            -v ob-ci-data:/app/buckets \
+            -e OMBRE_COMPRESS_MODEL=ombre-stub \
+            -e OMBRE_COMPRESS_API_FORMAT=openai_compat \
+            -e OMBRE_COMPRESS_API_KEY=audit-key \
+            -e OMBRE_COMPRESS_BASE_URL=http://ob-ci-llm:8080/v1 \
+            -e OMBRE_MCP_REQUIRE_AUTH=false \
+            ombre-brain-ci:local
+          for attempt in $(seq 1 60); do
+            curl --fail --silent http://127.0.0.1:18084/health && break
+            if [ "$attempt" -eq 60 ]; then
+              docker logs ob-ci-app
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Run 12-tool Docker MCP integration suite
+        env:
+          OMBRE_DOCKER_INTEGRATION_URL: http://127.0.0.1:18084/mcp
+        run: >-
+          python -m pytest tests/test_mcp_tools_docker_integration.py -q
+          --timeout=60
+
+      - name: Clean Docker MCP stack
+        if: always()
+        run: |
+          docker rm -f ob-ci-app ob-ci-llm || true
+          docker volume rm ob-ci-data || true
+          docker network rm ob-ci-net || true

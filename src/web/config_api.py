@@ -20,7 +20,6 @@ import os
 import sys
 import yaml
 import httpx
-import json as _json_lib
 
 from starlette.requests import Request
 from starlette.responses import Response

@@ -9,7 +9,6 @@ import io
 import json
 import zipfile
 
-import pytest
 
 import web.meta as meta
 

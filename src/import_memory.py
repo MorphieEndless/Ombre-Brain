@@ -720,7 +720,7 @@ class ImportEngine:
 
                 if should_preserve:
                     # Raw mode: store original content without summarization
-                    bucket_id = await self.bucket_mgr.create(
+                    await self.bucket_mgr.create(
                         content=item["content"],
                         tags=item.get("tags", []),
                         importance=item.get("importance", _DEFAULT_IMPORTANCE),
@@ -850,7 +850,7 @@ class ImportEngine:
                     self.state.data["api_calls"] += 1
 
         # Create new
-        bucket_id = await self.bucket_mgr.create(
+        await self.bucket_mgr.create(
             content=content,
             tags=tags,
             importance=importance,

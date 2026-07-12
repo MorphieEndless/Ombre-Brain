@@ -29,7 +29,15 @@ tools/_common.py — 跨工具共享的辅助逻辑
 
 from typing import Tuple
 import asyncio
+from concurrent.futures import Future
+from contextlib import asynccontextmanager
 import hashlib
+import math
+import os
+from pathlib import Path
+import threading
+import time
+import uuid
 
 from . import _runtime as rt
 
@@ -48,6 +56,10 @@ _EMBED_WARN = (
 # --- 桶与配额默认值 ---
 _DEFAULT_MAX_BUCKET_BYTES = 50 * 1024  # 50 KB 单桶上限（超过建议走 grow 拆存）
 _DEFAULT_MAX_PINNED = 20               # pinned 桶上限（哲学边界：重要必须稀缺）；与 config.example.yaml limits.max_pinned 同步
+_DEFAULT_MAX_GROW_INPUT_BYTES = 2 * 1024 * 1024
+_DEFAULT_MAX_QUERY_BYTES = 16 * 1024
+_DEFAULT_MAX_METADATA_BYTES = 16 * 1024
+_DEFAULT_MAX_GROW_ITEMS = 100
 
 # --- importance≥9 配额（rule.md §1.0 哲学） ---
 _HIGH_IMP_THRESHOLD = 9                # importance 达到该值算“高重要度”
@@ -72,19 +84,107 @@ _LOG_REASON_PREVIEW = 60               # 日志里预览的理由长度
 
 # --- content lock 哈希 key 长度 ---
 _CONTENT_LOCK_KEY_HEX = 16             # 64 bit 空间，碰撞概率徽不足道
+_CONTENT_LOCK_POLL_SECONDS = 0.01
+_CONTENT_LOCK_STALE_MIN_SECONDS = 180.0
+_CONTENT_LOCK_STALE_GRACE_SECONDS = 60.0
+_CONTENT_LOCK_WAIT_GRACE_SECONDS = 30.0
 
-# F-01 / F-08 fix: per-content-hash asyncio.Lock，防止并发同内容双新建。
-# asyncio 单线程模型下 dict 访问本身是原子的，无需额外互斥。
-# Lock 对象懒创建后不回收（单进程内独立 content hash 总量有限，不构成泄漏）。
-_merge_content_locks: dict[str, asyncio.Lock] = {}
+# Per-content turns use concurrent futures rather than asyncio.Lock. FastMCP may
+# dispatch independent HTTP sessions from different event loops/threads;
+# asyncio.Lock is not a cross-loop primitive and allowed two first writes to race.
+_merge_content_tails: dict[str, Future[None]] = {}
+_merge_content_tails_guard = threading.Lock()
 
 
-def _get_content_lock(content: str) -> asyncio.Lock:
-    """Return (lazily created) per-content-hash asyncio.Lock."""
+def _complete_content_turn(key: str, turn: Future[None]) -> None:
+    with _merge_content_tails_guard:
+        if not turn.done():
+            turn.set_result(None)
+        if _merge_content_tails.get(key) is turn:
+            _merge_content_tails.pop(key, None)
+
+
+@asynccontextmanager
+async def _filesystem_content_turn(key: str):
+    """Use atomic lock-file creation as a cross-loop/process final guard."""
+    base_dir = str(getattr(rt.bucket_mgr, "base_dir", "") or "").strip()
+    if not base_dir:
+        yield
+        return
+
+    lock_dir = Path(base_dir) / ".locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / f"content-{key}.lock"
+    token = f"{os.getpid()}:{threading.get_ident()}:{uuid.uuid4().hex}"
+    try:
+        llm_timeout = float(
+            (rt.config.get("dehydration") or {}).get("timeout_seconds", 120)
+        )
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        llm_timeout = 120.0
+    if not math.isfinite(llm_timeout) or llm_timeout <= 0:
+        llm_timeout = 120.0
+    stale_seconds = max(
+        _CONTENT_LOCK_STALE_MIN_SECONDS,
+        llm_timeout + _CONTENT_LOCK_STALE_GRACE_SECONDS,
+    )
+    deadline = time.monotonic() + stale_seconds + _CONTENT_LOCK_WAIT_GRACE_SECONDS
+    acquired = False
+
+    while not acquired:
+        try:
+            descriptor = os.open(
+                lock_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+        except FileExistsError:
+            try:
+                if time.time() - lock_path.stat().st_mtime > stale_seconds:
+                    lock_path.unlink(missing_ok=True)
+                    continue
+            except OSError:
+                pass
+            if time.monotonic() >= deadline:
+                raise TimeoutError("timed out waiting for identical-content write lock")
+            await asyncio.sleep(_CONTENT_LOCK_POLL_SECONDS)
+        else:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(token)
+            acquired = True
+
+    try:
+        yield
+    finally:
+        try:
+            if lock_path.read_text(encoding="utf-8") == token:
+                lock_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+@asynccontextmanager
+async def _content_turn(content: str):
+    """Serialize identical writes across tasks, loops, and request threads."""
     key = hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()[:_CONTENT_LOCK_KEY_HEX]
-    if key not in _merge_content_locks:
-        _merge_content_locks[key] = asyncio.Lock()
-    return _merge_content_locks[key]
+    turn: Future[None] = Future()
+    with _merge_content_tails_guard:
+        previous = _merge_content_tails.get(key)
+        _merge_content_tails[key] = turn
+
+    acquired = previous is None
+    try:
+        if previous is not None:
+            await asyncio.wrap_future(previous)
+            acquired = True
+        async with _filesystem_content_turn(key):
+            yield
+    finally:
+        if acquired:
+            _complete_content_turn(key, turn)
+        else:
+            # Cancellation while queued must preserve ordering for later turns.
+            previous.add_done_callback(lambda _completed: _complete_content_turn(key, turn))
 
 
 def _push_warning_safe(code: str, msg: str) -> None:
@@ -117,15 +217,41 @@ def _push_warning_safe(code: str, msg: str) -> None:
 
 def limits_cfg() -> dict:
     """读 config.limits 段；缺省值与 1.6 spec §5 一致：50KB 单桶 / 20 pinned。"""
-    return rt.config.get("limits", {}) or {}
+    config = rt.config if isinstance(rt.config, dict) else {}
+    return config.get("limits", {}) or {}
+
+
+def _configured_limit(name: str, default: int) -> int:
+    raw = limits_cfg().get(name, default)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return value if value >= 0 else default
 
 
 def max_bucket_bytes() -> int:
-    return int(limits_cfg().get("max_bucket_bytes") or _DEFAULT_MAX_BUCKET_BYTES)
+    return _configured_limit("max_bucket_bytes", _DEFAULT_MAX_BUCKET_BYTES)
 
 
 def max_pinned() -> int:
-    return int(limits_cfg().get("max_pinned") or _DEFAULT_MAX_PINNED)
+    return _configured_limit("max_pinned", _DEFAULT_MAX_PINNED)
+
+
+def max_grow_input_bytes() -> int:
+    return _configured_limit("max_grow_input_bytes", _DEFAULT_MAX_GROW_INPUT_BYTES)
+
+
+def max_query_bytes() -> int:
+    return _configured_limit("max_query_bytes", _DEFAULT_MAX_QUERY_BYTES)
+
+
+def max_metadata_bytes() -> int:
+    return _configured_limit("max_metadata_bytes", _DEFAULT_MAX_METADATA_BYTES)
+
+
+def max_grow_items() -> int:
+    return _configured_limit("max_grow_items", _DEFAULT_MAX_GROW_ITEMS)
 
 
 def check_content_size(content: str) -> str | None:
@@ -136,9 +262,77 @@ def check_content_size(content: str) -> str | None:
     size = len(content.encode("utf-8"))
     if size > cap:
         return (
-            f"内容过大（{size/1024:.1f} KB > 上限 {cap/1024:.0f} KB）。"
+            f"内容过大（{size / 1024:.1f} KB > 上限 {cap / 1024:.0f} KB）。"
             "请改用 grow 拆分存入，或在 config.limits.max_bucket_bytes 调高上限。"
         )
+    return None
+
+
+def check_grow_input_size(content: str) -> str | None:
+    cap = max_grow_input_bytes()
+    if cap <= 0:
+        return None
+    size = len(str(content or "").encode("utf-8"))
+    if size > cap:
+        return (
+            f"grow 输入过大（{size / 1024:.1f} KB > 上限 {cap / 1024:.0f} KB）。"
+            "请分批调用，或调整 config.limits.max_grow_input_bytes。"
+        )
+    return None
+
+
+def check_query_size(query: str) -> str | None:
+    cap = max_query_bytes()
+    if cap <= 0:
+        return None
+    size = len(str(query or "").encode("utf-8"))
+    if size > cap:
+        return (
+            f"查询过大（{size / 1024:.1f} KB > 上限 {cap / 1024:.0f} KB）。"
+            "请缩短查询，或调整 config.limits.max_query_bytes。"
+        )
+    return None
+
+
+def check_metadata_size(**fields: object) -> str | None:
+    cap = max_metadata_bytes()
+    if cap <= 0:
+        return None
+    try:
+        size = sum(len(str(value or "").encode("utf-8")) for value in fields.values())
+    except Exception:
+        return "元数据参数无法安全序列化。"
+    if size > cap:
+        labels = ", ".join(fields)
+        return (
+            f"元数据过大（{size / 1024:.1f} KB > 上限 {cap / 1024:.0f} KB；字段: {labels}）。"
+            "请缩短标签、名称或筛选条件。"
+        )
+    return None
+
+
+def check_grow_items_payload(items: list) -> str | None:
+    item_cap = max_grow_items()
+    if item_cap > 0 and len(items) > item_cap:
+        return f"grow items 过多（{len(items)} > 上限 {item_cap}）。请分批调用，或调整 config.limits.max_grow_items。"
+
+    byte_cap = max_grow_input_bytes()
+    if byte_cap <= 0:
+        return None
+    total = 0
+    for item in items:
+        if isinstance(item, str):
+            value = item
+        elif isinstance(item, dict):
+            value = item.get("content", "")
+        else:
+            continue
+        try:
+            total += len(str(value or "").encode("utf-8"))
+        except Exception:
+            return "grow items 包含无法安全序列化的 content。"
+        if total > byte_cap:
+            return f"grow items 正文总量过大（{total / 1024:.1f} KB > 上限 {byte_cap / 1024:.0f} KB）。请分批调用。"
     return None
 
 
@@ -357,7 +551,7 @@ async def merge_or_create(
     F-01 / F-08 fix：整个 search→create 路径在 per-content-hash Lock 下串行执行。
     同内容并发调用时后到的协程会阻塞，等前者写完后直接走合并分支，不产生重复桶。
     """
-    async with _get_content_lock(content):
+    async with _content_turn(content):
         return await _merge_or_create_inner(
             content=content, tags=tags, importance=importance, domain=domain,
             valence=valence, arousal=arousal, name=name, raw_merge=raw_merge,
@@ -380,18 +574,35 @@ async def _merge_or_create_inner(
     grow_batch_id: str = "",
 ) -> Tuple[str, bool, str]:
     """实际的 search→merge/create 逻辑，由 merge_or_create 在 Lock 保护下调用。"""
+    exact_storage_match = False
     try:
         existing = await rt.bucket_mgr.search(content, limit=1, domain_filter=domain or None)
     except Exception as e:
         rt.logger.warning(f"Search for merge failed, creating new / 合并搜索失败，新建: {e}")
         existing = []
 
+    # Cache invalidation and a concurrent list_all() refresh can cross: an old
+    # parsed snapshot may briefly hide a bucket that is already durable on disk.
+    # Before any create, let Markdown truth override search/cache results.
+    exact_finder = getattr(rt.bucket_mgr, "find_exact_content", None)
+    if callable(exact_finder):
+        try:
+            exact = exact_finder(content, domain_filter=domain or None)
+        except Exception as exc:
+            rt.logger.warning(f"Exact-content storage check failed: {exc}")
+        else:
+            if exact:
+                exact = dict(exact)
+                exact["score"] = float("inf")
+                existing = [exact]
+                exact_storage_match = True
+
     if existing and existing[0].get("score", 0) > (rt.config.get("merge_threshold") or 75):
         bucket = existing[0]
         # --- 不合并到钉选/保护桶 ---
         if not (bucket["metadata"].get("pinned") or bucket["metadata"].get("protected")):
             try:
-                if raw_merge:
+                if raw_merge or exact_storage_match:
                     # --- 原文拼接合并（hold 路径）---
                     old_text = bucket["content"].rstrip()
                     new_text = content.strip()
@@ -585,7 +796,6 @@ async def check_plan_resolution(new_event_text: str, source_bucket_id: str = "")
 # 反向不做：bucket trace(resolved=1) 不联动 plan（plan 是独立承诺，
 # 单条事件结束不等于承诺达成）。
 # ============================================================
-
 async def cascade_plan_resolved_to_buckets(plan_meta: dict, plan_id: str) -> list[str]:
     """把 plan_meta 里 related_bucket / resolved_by 指向的普通桶标 resolved。
 

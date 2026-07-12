@@ -31,6 +31,7 @@ from .. import _runtime as rt
 from .._common import (
     merge_or_create,
     check_content_size,
+    check_grow_items_payload,
     check_duplicate_for,
     check_plan_resolution,
 )
@@ -45,8 +46,12 @@ async def grow_core(content: str) -> str:
             f"API key 未配置或调用失败，日记拆分无法完成，桶未创建。请检查 OMBRE_COMPRESS_API_KEY。（错误：{e}）"
         ) from e
 
-    if not items:
+    if not isinstance(items, list) or not items:
         return "内容为空或整理失败。"
+    payload_err = check_grow_items_payload(items)
+    if payload_err:
+        rt.logger.warning(f"grow digest output rejected: {payload_err}")
+        return payload_err
 
     # iter 2.0 来源追踪：同一次 grow 拆出的所有桶共享同一个 batch_id，
     # dashboard 可按 grow_batch_id 聚合显示「这次日记一共归档了哪些事件」。
@@ -108,6 +113,10 @@ async def grow_items(items: list) -> str:
     - 合并走 raw_merge=True（原文追加，不 LLM 压缩老+新），消除第三次失真。
     存储沿用 grow 风格：共享 grow_batch_id，source_tool=grow，dashboard 仍可按批展示。
     """
+    payload_err = check_grow_items_payload(items)
+    if payload_err:
+        return payload_err
+
     # 规整：接受字符串条目；也容忍 {"content": "..."} 形式，取其正文。空条目丢弃。
     clean: list[str] = []
     for it in items:

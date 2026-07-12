@@ -28,9 +28,9 @@ bucket_manager.py — 记忆桶的增删改查与多维索引
 
 import os
 import re
-import math
 import asyncio
 import logging
+import math
 import shutil
 import time
 import uuid
@@ -51,7 +51,7 @@ def _clamp_importance(v, source: str) -> int:
     """importance 越界 → clamp 到 [1,10]，并产生 OB-W001 提示。"""
     try:
         iv = int(v)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         _ob_push_warning("OB-W001", f"importance={v!r} 无法解析，回退为 5（{source}）")
         return 5
     if iv < 1 or iv > 10:
@@ -68,6 +68,9 @@ def _clamp_unit(v, field: str, source: str) -> float:
     except (TypeError, ValueError):
         _ob_push_warning("OB-W002", f"{field}={v!r} 无法解析，回退为 0.5（{source}）")
         return 0.5
+    if not math.isfinite(fv):
+        _ob_push_warning("OB-W002", f"{field}={v!r} 不是有限数，回退为 0.5（{source}）")
+        return 0.5
     if fv < 0.0 or fv > 1.0:
         clamped = max(0.0, min(1.0, fv))
         _ob_push_warning("OB-W002", f"{field}={fv} 超出 [0.0,1.0]，已修正为 {clamped}（{source}）")
@@ -79,9 +82,16 @@ from pathlib import Path
 from typing import Any, Optional
 
 import frontmatter
-from rapidfuzz import fuzz
 
-from utils import generate_bucket_id, sanitize_name, safe_path, now_iso, parse_bool, parse_iso_datetime
+from utils import (
+    atomic_write_text,
+    generate_bucket_id,
+    sanitize_name,
+    safe_path,
+    now_iso,
+    parse_bool,
+    parse_iso_datetime,
+)
 from bucket_scoring import (
     calc_topic_score,
     calc_emotion_score,
@@ -103,30 +113,7 @@ except ImportError:
 logger = logging.getLogger("ombre_brain.bucket")
 
 
-def _atomic_write_text(path: str, text: str) -> None:
-    """原子写文本：写临时文件 → fsync → os.replace 就位。
-
-    记忆桶是最不能丢的东西。普通 open("w") 写到一半被杀 / 断电 / 磁盘写满，会把整条
-    记忆截断成半截、甚至清空。这里保证任何读者或崩溃恢复都只看到「旧的完整版」或
-    「新的完整版」，绝不出现半截文件。os.replace 在同一文件系统上是原子替换（POSIX + Windows 均是）。
-    """
-    directory = os.path.dirname(path) or "."
-    os.makedirs(directory, exist_ok=True)
-    # 临时名带 uuid：同进程内并发写同一桶时也不会撞到同一个 .tmp。
-    tmp = f"{path}.{uuid.uuid4().hex}.tmp"
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    except Exception:
-        try:
-            if os.path.exists(tmp):
-                os.remove(tmp)
-        except OSError:
-            pass
-        raise
+_atomic_write_text = atomic_write_text  # Backward-compatible private alias.
 
 
 # ============================================================
@@ -148,6 +135,28 @@ _SOURCE_TOOL_MAX = 32
 _GROW_BATCH_ID_MAX = 64
 _WHY_REMEMBERED_MAX = 500
 _TRIGGERED_BY_MAX = 64
+_DEFAULT_MAX_BUCKET_BYTES = 50 * 1024
+_MAX_TAGS = 64
+_MAX_TAG_CHARS = 128
+_MAX_DOMAINS = 16
+_MAX_DOMAIN_CHARS = 128
+_METADATA_TEXT_LIMITS = {
+    "status": 32,
+    "type": 32,
+    "resolution_reason": 500,
+    "resolved_by": 128,
+    "related_bucket": 128,
+    "author": 120,
+    "user_name": 120,
+    "title": 120,
+    "letter_date": 64,
+    "why_remembered": _WHY_REMEMBERED_MAX,
+    "triggered_by": _TRIGGERED_BY_MAX,
+    "source_tool": _SOURCE_TOOL_MAX,
+    "grow_batch_id": _GROW_BATCH_ID_MAX,
+    "last_merged_by": _SOURCE_TOOL_MAX,
+    "_pre_anchor_source_tool": _SOURCE_TOOL_MAX,
+}
 
 # --- _time_ripple：时间涾漪 ---
 _RIPPLE_HOURS = 48.0       # ±该小时内的桶被轻微唤醒
@@ -173,9 +182,12 @@ def _clamp01(value, default: float) -> float:
     这个 helper 静默钳制，适用于“调用方保证范围、充其量充个防”的场景。
     """
     try:
-        return max(0.0, min(1.0, float(value)))
+        numeric = float(value)
     except (TypeError, ValueError):
         return default
+    if not math.isfinite(numeric):
+        return default
+    return max(0.0, min(1.0, numeric))
 
 
 class BucketManager:
@@ -412,6 +424,50 @@ class BucketManager:
         在 create / _move_bucket / archive 三处使用。sanitize_name 后才能当路径用。
         """
         return sanitize_name(domain[0]) if domain else _DEFAULT_DOMAIN_NAME
+
+    def _max_bucket_bytes(self) -> int:
+        raw = (self.config.get("limits") or {}).get(
+            "max_bucket_bytes", _DEFAULT_MAX_BUCKET_BYTES
+        )
+        try:
+            value = int(raw)
+        except (TypeError, ValueError, OverflowError):
+            return _DEFAULT_MAX_BUCKET_BYTES
+        return value if value >= 0 else _DEFAULT_MAX_BUCKET_BYTES
+
+    def _validate_bucket_content(self, content: str) -> None:
+        cap = self._max_bucket_bytes()
+        if cap <= 0:
+            return
+        size = len(content.encode("utf-8"))
+        if size > cap:
+            raise ValueError(
+                f"内容过大（{size / 1024:.1f} KB > 上限 {cap / 1024:.0f} KB）。"
+                "请拆分后存入，或调整 config.limits.max_bucket_bytes。"
+            )
+
+    @classmethod
+    def _normalize_metadata_list(
+        cls,
+        values,
+        *,
+        max_items: int,
+        max_chars: int,
+    ) -> list[str]:
+        if values is None:
+            return []
+        if isinstance(values, str):
+            values = [values]
+        elif not isinstance(values, (list, tuple, set)):
+            values = [values]
+        normalized: list[str] = []
+        for value in values:
+            text = cls._sanitize_text(str(value)).strip()[:max_chars]
+            if text and text not in normalized:
+                normalized.append(text)
+            if len(normalized) >= max_items:
+                break
+        return normalized
 
     # ---------------------------------------------------------
     # Internal: keep embedding index in sync with markdown storage
@@ -700,8 +756,7 @@ class BucketManager:
 
         # F-04: 清洗 content / tags / name 中的危险控制字符和双向覆写符
         content = self._sanitize_text(content)
-        if tags:
-            tags = [self._sanitize_text(t) for t in tags]
+        self._validate_bucket_content(content)
         if name:
             name = self._sanitize_text(name)
 
@@ -735,7 +790,18 @@ class BucketManager:
             domain = domain if domain is not None else []
         else:
             domain = domain or [_DEFAULT_DOMAIN_NAME]
-        tags = tags or []
+        domain = self._normalize_metadata_list(
+            domain,
+            max_items=_MAX_DOMAINS,
+            max_chars=_MAX_DOMAIN_CHARS,
+        )
+        if bucket_type != "feel" and not domain:
+            domain = [_DEFAULT_DOMAIN_NAME]
+        tags = self._normalize_metadata_list(
+            tags,
+            max_items=_MAX_TAGS,
+            max_chars=_MAX_TAG_CHARS,
+        )
         linked_content = content  # wikilink injection disabled; LLM adds [[]] via prompt
 
         # --- Pinned/protected buckets: lock importance to 10 ---
@@ -905,6 +971,35 @@ class BucketManager:
             return None
         return data
 
+    def find_exact_content(
+        self,
+        content: str,
+        domain_filter: Optional[list[str]] = None,
+    ) -> Optional[dict]:
+        """Read Markdown directly for an exact match, bypassing derived caches."""
+        expected = self._sanitize_text(content)
+        filter_set = {
+            str(domain).strip().lower()
+            for domain in (domain_filter or [])
+            if str(domain).strip()
+        }
+        for _root, _fname, file_path in self._iter_md_files(self._active_dirs):
+            bucket = self._load_bucket(file_path)
+            if not bucket or bucket.get("content") != expected:
+                continue
+            metadata = bucket.get("metadata", {})
+            if metadata.get("deleted_at"):
+                continue
+            domains = metadata.get("domain") or []
+            if isinstance(domains, str):
+                domains = [domains]
+            if filter_set and not {
+                str(domain).strip().lower() for domain in domains
+            } & filter_set:
+                continue
+            return bucket
+        return None
+
     # ---------------------------------------------------------
     # Move bucket between directories
     # 在目录间移动桶文件
@@ -963,6 +1058,22 @@ class BucketManager:
         ):
             if field in kwargs:
                 kwargs[field] = parse_bool(kwargs[field])
+
+        if "content" in kwargs:
+            kwargs["content"] = self._sanitize_text(kwargs["content"])
+            self._validate_bucket_content(kwargs["content"])
+        if "tags" in kwargs:
+            kwargs["tags"] = self._normalize_metadata_list(
+                kwargs["tags"],
+                max_items=_MAX_TAGS,
+                max_chars=_MAX_TAG_CHARS,
+            )
+        if "domain" in kwargs:
+            kwargs["domain"] = self._normalize_metadata_list(
+                kwargs["domain"],
+                max_items=_MAX_DOMAINS,
+                max_chars=_MAX_DOMAIN_CHARS,
+            ) or [_DEFAULT_DOMAIN_NAME]
 
         try:
             post = frontmatter.load(file_path)
@@ -1062,6 +1173,10 @@ class BucketManager:
                     if kwargs[k] is None:
                         # None = 明确删除该 frontmatter 字段（用于 anchor release 清理临时字段）
                         post.metadata.pop(k, None)
+                    elif k in _METADATA_TEXT_LIMITS:
+                        post[k] = self._sanitize_text(str(kwargs[k])).strip()[
+                            :_METADATA_TEXT_LIMITS[k]
+                        ]
                     else:
                         post[k] = kwargs[k]
 
@@ -1907,10 +2022,18 @@ class BucketManager:
     def _sanitize_float_field(value, default: float) -> float:
         """从任意格式提取 float（兼容 'V0.9'、'[我的视角:V0.3]'、0.9 等老格式）"""
         if isinstance(value, (int, float)):
-            return max(0.0, min(1.0, float(value)))
+            numeric = float(value)
+            if not math.isfinite(numeric):
+                return default
+            return max(0.0, min(1.0, numeric))
         try:
             nums = re.findall(r'[-+]?\d*\.?\d+', str(value))
-            return max(0.0, min(1.0, float(nums[0]))) if nums else default
+            if not nums:
+                return default
+            numeric = float(nums[0])
+            if not math.isfinite(numeric):
+                return default
+            return max(0.0, min(1.0, numeric))
         except Exception:
             return default
 

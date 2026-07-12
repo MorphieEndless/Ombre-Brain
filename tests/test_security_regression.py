@@ -1,8 +1,6 @@
 import io
-import os
 import tarfile
 import zipfile
-from types import SimpleNamespace
 
 import pytest
 

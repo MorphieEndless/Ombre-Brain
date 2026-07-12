@@ -649,7 +649,7 @@ class MigrateEngine:
                     updated_expr = "updated_at" if "updated_at" in columns else "''"
                     hash_expr = "content_hash" if "content_hash" in columns else "''"
                     rows = src.execute(
-                        f"SELECT bucket_id, embedding, {updated_expr}, {hash_expr} "
+                        f"SELECT bucket_id, embedding, {updated_expr}, {hash_expr} "  # nosec B608
                         f"FROM embeddings WHERE bucket_id IN ({placeholders})",
                         source_ids,
                     ).fetchall()
@@ -657,7 +657,7 @@ class MigrateEngine:
                     rows = [
                         (source_id, vector, "", "")
                         for source_id, vector in src.execute(
-                            f"SELECT id, vector FROM embeddings WHERE id IN ({placeholders})",
+                            f"SELECT id, vector FROM embeddings WHERE id IN ({placeholders})",  # nosec B608
                             source_ids,
                         ).fetchall()
                     ]

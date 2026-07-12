@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import json
-from typing import Any, Iterable, Mapping
+from typing import Any, Mapping
 
 
 _TRACE_EVENT_TYPES = {

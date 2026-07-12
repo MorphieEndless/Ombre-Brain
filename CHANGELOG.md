@@ -2,10 +2,12 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
-## 未发布
+## 2.5.4
 
 ### 修复 / Fixed
 
+- `atomic_write_text`（`src/utils.py`）在 Windows 上未做长路径处理：domain/tag 合法长度可到 80~128 字符，落在较深的数据目录下时，拼出的桶文件全路径（含原子写入用的 `.tmp` 后缀）会超过 Windows 默认 260 字符 `MAX_PATH`，导致 `hold`/`grow` 等写入直接抛 `FileNotFoundError`（`tests/test_red_team_regressions.py::test_bucket_boundary_bounds_tags_and_domains` 在 Windows 上复现）。现在在 Windows 上一律用 `\\?\` 扩展路径前缀绕过该限制，Linux/macOS 行为不变。
+- `grow(items=...)`（预拆分逐字入库分支，`src/tools/grow/core.py`）在打标 API 不可用（未配置 `OMBRE_COMPRESS_API_KEY` 或调用失败）时会直接吞掉整条内容、不创建任何桶——与文档承诺的「一字不动只补元数据」矛盾，也和同类工具 `hold` 的降级行为不一致（`hold` 会在打标失败时落回本地中性元数据并原样保存正文）。真机验证 12 个工具时发现：无 API Key 场景下 `grow(items=[...])` 返回「新0合0」，正文全部丢失。现已改为与 `hold` 一致的降级路径：打标失败时使用本地中性元数据继续建桶，正文不丢，并在返回里追加提示。
 - 修复 `.gitignore` 里一条整目录忽略 `/tools/`，导致新脚本 `git add` 被静默吞掉、从未进仓库：pytest 12 个用例因此依赖的 `tools/vnext_preflight.py` 缺失而失败，系统诊断的 vnext_preflight 检查也永久报错。新建该 CLI（照 `tools/v3_health_report.py` 模板）并放开 `.gitignore`。
 - 补建 README「检索质量评测」一节引用、但从未存在过的 `tools/evaluate_retrieval.py`（离线关键词通道 + `--with-embedding` 混合检索，输出 Hit@K/Recall@K/MRR）。
 - 移除 `letter_write` 的过时校验实现 `src/tools/letters.py`（全仓零引用死代码，实际生效实现在 `tools/plan/core.py`，本就允许任意署名字符串），并修正 README 对 `author` 字段的过时描述。
@@ -18,7 +20,9 @@
 
 ### 测试 / Tests
 
-- 全量 `pytest tests/`：919 passed，7 skipped。
+- 全量 `pytest tests/`：961 passed，38 skipped。
+- 本地裸机 Windows 真实起服务（`streamable-http`）验证：Dashboard 首页 200 可打开、真实浏览器走完首次设密/登录流程、主界面正常渲染；12 个 MCP 工具通过 `/mcp` 逐一列出并**全部**真机调用一遍（`hold`/`breath`/`grow`/`trace`/`anchor`/`release`/`pulse`/`plan`/`letter_write`/`letter_read`/`I`/`dream`），核对返回内容与文档描述一致（新记忆可被检索回读；`trace(delete=True)` 仅移入 `archive/`，未物理抹除；`grow(items=...)` 修复后正确逐字建桶）；`tools/evaluate_retrieval.py`、`tools/vnext_preflight.py`、`tools/v3_health_report.py` 均运行通过。
+- 验证 Dashboard ③ 引擎的热更新：通过 `/api/env-config` 写入压缩模型 API Key 后，同进程内下一次 `hold` 调用立即使用新 Key 发起请求（服务端日志可见对应出站请求），无需重启进程。
 - 本地 Docker 从零 `--no-cache` 构建 + 部署验证；12 个 MCP 工具逐一真机调用核对文档描述；红蓝队核查物理删除红线（`trace(delete=True)` 确认只移入 `archive/`，未物理抹除）、鉴权边界、路径穿越注入，均符合预期。
 - 验证镜像内 `docs/` 只含 4 个白名单文件（`docs/secrets`、`docs/superpowers` 确认未进镜像）；`/dream-hook` 端点已移除（404），`/breath-hook` 鉴权正常（401）。
 

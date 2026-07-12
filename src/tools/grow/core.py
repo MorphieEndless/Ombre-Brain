@@ -137,14 +137,27 @@ async def grow_items(items: list) -> str:
     merged = 0
     embed_warnings = []
 
+    metadata_fallback = False
     for content_str in clean:
         try:
             size_err = check_content_size(content_str)
             if size_err:
                 results.append(f"⚠️（{size_err}）")
                 continue
-            # 只打标，不改写正文
-            meta = await rt.dehydrator.analyze(content_str)
+            # 只打标，不改写正文；打标失败（如 API key 未配置）不应丢正文——
+            # 落回本地中性元数据，与 hold 的降级行为保持一致（见 tools/hold/core.py）。
+            try:
+                meta = await rt.dehydrator.analyze(content_str)
+            except Exception as e:
+                metadata_fallback = True
+                rt.logger.warning(
+                    "grow items metadata analysis failed; preserving raw content with local defaults / "
+                    f"grow items 打标失败，使用本地默认元数据并原样保存正文: {type(e).__name__}: {e}"
+                )
+                default_analysis = getattr(rt.dehydrator, "_default_analysis", None)
+                meta = default_analysis() if callable(default_analysis) else {
+                    "domain": ["未分类"], "valence": 0.5, "arousal": 0.3, "tags": [], "suggested_name": "",
+                }
             result_name, is_merged, embed_warn = await merge_or_create(
                 content=content_str,
                 tags=meta.get("tags") or [],
@@ -174,4 +187,6 @@ async def grow_items(items: list) -> str:
     summary = f"{len(clean)}条(预拆分·逐字)|新{created}合{merged} batch:{batch_id}\n" + "\n".join(results)
     if embed_warnings:
         summary += f"\n⚠️ {embed_warnings[0]}"
+    if metadata_fallback:
+        summary += "\n⚠️ 打标 API 暂不可用：正文已逐字保存，未做任何压缩；元数据暂用本地中性值。"
     return summary

@@ -670,20 +670,36 @@ def safe_path(base_dir: str, filename: str) -> Path:
     return target
 
 
+def _win_long_path(path: Path) -> str:
+    """Prefix an absolute path with ``\\\\?\\`` on Windows to bypass the 260-char
+    MAX_PATH limit. Domain names can sanitize down to 80 chars each, and nested
+    under a deep install/data dir the combined bucket path can exceed it. No-op
+    on other platforms."""
+    if os.name != "nt":
+        return str(path)
+    resolved = os.path.abspath(str(path))
+    if resolved.startswith("\\\\?\\"):
+        return resolved
+    if resolved.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + resolved[2:]
+    return "\\\\?\\" + resolved
+
+
 def atomic_write_text(path: str | Path, text: str) -> None:
     """Atomically replace a UTF-8 text file after flushing it to disk."""
     target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
+    os.makedirs(_win_long_path(target.parent), exist_ok=True)
     temporary = target.with_name(f"{target.name}.{uuid.uuid4().hex}.tmp")
+    temporary_long = _win_long_path(temporary)
     try:
-        with temporary.open("w", encoding="utf-8") as handle:
+        with open(temporary_long, "w", encoding="utf-8") as handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, target)
+        os.replace(temporary_long, _win_long_path(target))
     except Exception:
         try:
-            temporary.unlink(missing_ok=True)
+            os.remove(temporary_long)
         except OSError:
             pass
         raise

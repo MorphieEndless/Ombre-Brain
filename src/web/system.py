@@ -1273,19 +1273,29 @@ async def build_system_diagnostics() -> dict[str, Any]:
     mcp_oauth_required = parse_bool(
         cfg.get("mcp_require_auth", True), default=True
     )
+    if setup_needed:
+        auth_status = "error"
+        auth_message = "Dashboard 密码未设置"
+        auth_action = "先设置 Dashboard 密码"
+    elif not mcp_oauth_required:
+        auth_status = "warning"
+        auth_message = "MCP OAuth 已关闭：任何能访问 /mcp 的人都可以匿名读写全部记忆"
+        auth_action = "公网部署请开启 OAuth；仅在可信本机/内网或已有反代鉴权时关闭"
+    else:
+        auth_status = "ok"
+        auth_message = "Dashboard 密码已设置，MCP OAuth 已开启"
+        auth_action = ""
     checks.append(_check(
         "auth",
         "访问控制",
-        "error" if setup_needed else "ok",
-        "Dashboard 密码未设置" if setup_needed else (
-            "Dashboard 密码已设置，MCP OAuth 已开启" if mcp_oauth_required else "Dashboard 密码已设置，MCP OAuth 已关闭"
-        ),
+        auth_status,
+        auth_message,
         details={
             "dashboard_password_set": not setup_needed,
             "using_env_password": bool(os.environ.get("OMBRE_DASHBOARD_PASSWORD", "")),
             "mcp_oauth_required": mcp_oauth_required,
         },
-        action="先设置 Dashboard 密码" if setup_needed else "",
+        action=auth_action,
     ))
 
     decay_engine = sh.decay_engine

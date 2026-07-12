@@ -16,6 +16,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from ombrebrain.policy.surfacing import SurfacePolicyVM
+from tools._common import check_query_size
 from . import _shared as sh
 
 logger = sh.logger
@@ -25,6 +26,20 @@ try:
     from utils import strip_wikilinks, extract_wikilinks  # type: ignore
 except ImportError:  # pragma: no cover
     from ..utils import strip_wikilinks, extract_wikilinks  # type: ignore
+
+
+def _unit_query_float(raw: str | None, name: str) -> float | None:
+    if raw in (None, ""):
+        return None
+    import math
+
+    try:
+        value = float(raw)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be a finite number in [0,1]") from exc
+    if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+        raise ValueError(f"{name} must be a finite number in [0,1]")
+    return value
 
 
 def register(mcp) -> None:
@@ -39,6 +54,9 @@ def register(mcp) -> None:
         query = request.query_params.get("q", "")
         if not query:
             return JSONResponse({"error": "missing q parameter"}, status_code=400)
+        query_error = check_query_size(query)
+        if query_error:
+            return JSONResponse({"error": query_error}, status_code=400)
         try:
             matches = await sh.bucket_mgr.search(query, limit=10)
             result = []
@@ -245,7 +263,10 @@ def register(mcp) -> None:
         if err:
             return err
         try:
-            n = min(int(request.query_params.get("n", "10")), 50)
+            n = max(1, min(int(request.query_params.get("n", "10")), 50))
+        except (TypeError, ValueError, OverflowError):
+            return JSONResponse({"error": "n must be an integer in [1,50]"}, status_code=400)
+        try:
             all_buckets = await sh.bucket_mgr.list_all(include_archive=False)
             results = []
             for bucket in all_buckets:
@@ -276,10 +297,16 @@ def register(mcp) -> None:
         if err:
             return err
         query = request.query_params.get("q", "")
+        query_error = check_query_size(query)
+        if query_error:
+            return JSONResponse({"error": query_error}, status_code=400)
         _qv_raw = request.query_params.get("valence")
         _qa_raw = request.query_params.get("arousal")
-        q_valence: float | None = float(_qv_raw) if _qv_raw else None
-        q_arousal: float | None = float(_qa_raw) if _qa_raw else None
+        try:
+            q_valence = _unit_query_float(_qv_raw, "valence")
+            q_arousal = _unit_query_float(_qa_raw, "arousal")
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
 
         try:
             all_buckets = await sh.bucket_mgr.list_all(include_archive=False)

@@ -552,6 +552,12 @@ def register(mcp) -> None:
             body = await request.json()
         except Exception:
             body = {}
+        if not isinstance(body, dict):
+            return JSONResponse({"ok": False, "error": "JSON body must be an object"}, status_code=400)
+        if "mirror" in body and not isinstance(body["mirror"], str):
+            return JSONResponse({"ok": False, "error": "mirror must be a string"}, status_code=400)
+        if len(str(body.get("mirror") or "")) > 2048:
+            return JSONResponse({"ok": False, "error": "mirror is too large"}, status_code=400)
         mirror = (str(body.get("mirror") or "official")).strip()
         osk, arch = _os_key(), _arch()
         _install_state = {"running": True, "phase": "starting", "percent": 0.0,

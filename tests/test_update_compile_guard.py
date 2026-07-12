@@ -35,7 +35,7 @@ def test_compile_check_ignores_pycache(tmp_path):
     assert meta._compile_check_dir(str(src)) is None
 
 
-def test_restore_from_prev_recovers_src_frontend_version(tmp_path):
+def test_restore_from_prev_recovers_src_frontend_version_and_requirements(tmp_path):
     repo = tmp_path
     src = repo / "src"
     src.mkdir()
@@ -47,10 +47,12 @@ def test_restore_from_prev_recovers_src_frontend_version(tmp_path):
     (prev / "src" / "server.py").write_text("GOOD_OLD = 1\n", encoding="utf-8")
     (prev / "frontend" / "app.js").write_text("// old\n", encoding="utf-8")
     (prev / "VERSION").write_text("1.0.0\n", encoding="utf-8")
+    (prev / "requirements.txt").write_text("old-dependency==1\n", encoding="utf-8")
 
     # 当前是坏版本
     (src / "server.py").write_text("BROKEN(:\n", encoding="utf-8")
     (front / "app.js").write_text("// broken\n", encoding="utf-8")
+    (repo / "requirements.txt").write_text("broken-dependency==9\n", encoding="utf-8")
 
     ok = meta._restore_from_prev(str(repo), str(prev), str(src), str(front))
     assert ok is True
@@ -58,6 +60,7 @@ def test_restore_from_prev_recovers_src_frontend_version(tmp_path):
     assert (front / "app.js").read_text(encoding="utf-8") == "// old\n"
     assert (repo / "VERSION").read_text(encoding="utf-8") == "1.0.0\n"
     assert (src / "VERSION").read_text(encoding="utf-8") == "1.0.0\n"
+    assert (repo / "requirements.txt").read_text(encoding="utf-8") == "old-dependency==1\n"
 
 
 def test_restore_returns_false_without_prev(tmp_path):

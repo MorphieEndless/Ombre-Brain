@@ -141,17 +141,29 @@ def register(mcp) -> None:
             body = await request.json()
         except Exception:
             return JSONResponse({"error": "invalid JSON"}, status_code=400)
-        token = body.get("token", "").strip()
-        try:
-            auto_start = parse_bool(body.get("auto_start", False))
-        except ValueError as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "JSON body must be an object"}, status_code=400)
+
         cfg = _load_tunnel_config()
-        if token:
-            cfg["token"] = token
-        cfg["auto_start"] = auto_start
+        if "token" in body:
+            token = body["token"]
+            if not isinstance(token, str):
+                return JSONResponse({"error": "token must be a string"}, status_code=400)
+            token = token.strip()
+            if token:
+                cfg["token"] = token
+        if "auto_start" in body:
+            try:
+                cfg["auto_start"] = parse_bool(body["auto_start"])
+            except ValueError as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+
         _save_tunnel_config(cfg)
-        return JSONResponse({"ok": True})
+        return JSONResponse({
+            "ok": True,
+            "token_set": bool(cfg.get("token")),
+            "auto_start": cfg.get("auto_start", False),
+        })
 
     @mcp.custom_route("/api/tunnel/start", methods=["POST"])
     async def api_tunnel_start(request: Request) -> Response:

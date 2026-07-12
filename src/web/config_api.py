@@ -44,6 +44,10 @@ except ImportError:  # pragma: no cover
     )
 
 logger = sh.logger
+_MAX_PROVIDER_KEY_CHARS = 8192
+_MAX_PROVIDER_URL_CHARS = 2048
+_MAX_PROVIDER_FORMAT_CHARS = 64
+_MAX_ENV_VALUE_CHARS = 8192
 
 
 def _rebuild_embedding_runtime():
@@ -539,13 +543,22 @@ def register(mcp) -> None:
         if err:
             return err
         try:
-            body = await request.json()
+            body = await sh._read_json_object(request)
         except Exception:
             return JSONResponse({"ok": False, "error": "invalid JSON"}, status_code=400)
 
+        provider_fields = ("api_key", "base_url", "api_format")
+        if any(key in body and not isinstance(body[key], str) for key in provider_fields):
+            return JSONResponse({"ok": False, "error": "provider fields must be strings"}, status_code=400)
         api_key = str(body.get("api_key", "")).strip()
         base_url = str(body.get("base_url", "")).strip()
         api_format = str(body.get("api_format", "openai_compat")).strip().lower()
+        if (
+            len(api_key) > _MAX_PROVIDER_KEY_CHARS
+            or len(base_url) > _MAX_PROVIDER_URL_CHARS
+            or len(api_format) > _MAX_PROVIDER_FORMAT_CHARS
+        ):
+            return JSONResponse({"ok": False, "error": "provider configuration is too large"}, status_code=400)
 
         # Sentinel "__use_current__": use server-side key from dehydration config
         if api_key == "__use_current__":
@@ -700,13 +713,15 @@ def register(mcp) -> None:
             return err
 
         try:
-            body = await request.json()
+            body = await sh._read_json_object(request)
         except Exception:
             return JSONResponse({"ok": False, "error": "invalid JSON"}, status_code=400)
 
         updates: dict = body.get("updates", {})
         if not isinstance(updates, dict) or not updates:
             return JSONResponse({"ok": False, "error": "updates 必须是非空对象"}, status_code=400)
+        if len(updates) > len(_ENV_CONFIG_FIELDS):
+            return JSONResponse({"ok": False, "error": "updates 字段过多"}, status_code=400)
 
         written: list[str] = []
         errors: list[str] = []
@@ -717,6 +732,9 @@ def register(mcp) -> None:
                 continue
             if not isinstance(val, str):
                 errors.append(f"{var}: 值必须是字符串，跳过")
+                continue
+            if len(val) > _MAX_ENV_VALUE_CHARS:
+                errors.append(f"{var}: 值超过 {_MAX_ENV_VALUE_CHARS} 字符，跳过")
                 continue
             # 拒绝明显的注入字符
             if "\n" in val or "\r" in val:
@@ -841,7 +859,7 @@ def register(mcp) -> None:
         if err:
             return err
         try:
-            body = await request.json()
+            body = await sh._read_json_object(request)
         except Exception:
             return JSONResponse({"ok": False, "error": "invalid JSON"}, status_code=400)
 

@@ -323,6 +323,9 @@ Diagnostics regression tests.
     assert by_id["embedding"]["status"] == "error"
     assert "待机" in by_id["embedding"]["message"]
     assert by_id["github"]["status"] == "warning"
+    assert by_id["auth"]["status"] == "warning"
+    assert "匿名读写" in by_id["auth"]["message"]
+    assert by_id["auth"]["action"]
     assert by_id["auth"]["details"]["mcp_oauth_required"] is False
     assert by_id["vnext_preflight"]["status"] == "ok"
     assert by_id["vnext_preflight"]["details"]["schema"] == "vnext-preflight.v1"

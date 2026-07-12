@@ -2,6 +2,15 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.6.0
+
+### 修复 / Fixed
+
+- Docker 代码播种不再只比较 `VERSION`：新增 `src/` + `frontend/` 稳定 SHA-256 镜像指纹，同版本自建镜像内容变化也会重新播种；镜像未变化时保留卷内 Dashboard 热更新。
+- 镜像重新播种改为暂存、校验后切换，原健康运行树可作为 `_prev` 崩溃回滚点；回滚不会被同一次启动立即反向覆盖。
+- 独立 bind/named/anonymous 代码卷可通过 mountinfo 正确识别为持久热更新，不再只认位于 `buckets_dir` 下的代码目录。
+- 启动日志明确输出活动代码目录及 `image-match` / `runtime-override` / `legacy-residue` 状态；旧布局 `<数据目录>/_app` 仅在确认未被使用时告警，不自动删除。
+
 ## 2.5.5
 
 ### 变更 / Changed —— Dashboard 面板重设计（纯前端，不动数据结构）

@@ -30,7 +30,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_desktop_management_api_first_run_and_authenticated_flow():
-    with httpx.Client(base_url=BASE_URL, timeout=60.0) as client:
+    with httpx.Client(base_url=BASE_URL, timeout=60.0, trust_env=False) as client:
         health = client.get("/health")
         assert health.status_code == 200
         assert health.json()["status"] == "ok"
@@ -39,9 +39,7 @@ def test_desktop_management_api_first_run_and_authenticated_flow():
         assert version.status_code == 200
         assert version.json()["version"]
 
-        update_info = client.get("/api/update-info")
-        assert update_info.status_code == 200
-        assert update_info.json()["version"] == version.json()["version"]
+        assert client.get("/api/update-info").status_code == 401
 
         auth_before = client.get("/auth/status")
         assert auth_before.status_code == 200
@@ -63,6 +61,10 @@ def test_desktop_management_api_first_run_and_authenticated_flow():
         assert setup.status_code == 200
         assert setup.json()["ok"] is True
         assert client.cookies.get("ombre_session")
+
+        update_info = client.get("/api/update-info")
+        assert update_info.status_code == 200
+        assert update_info.json()["version"] == version.json()["version"]
 
         auth_after = client.get("/auth/status")
         assert auth_after.json() == {
@@ -100,6 +102,49 @@ def test_desktop_management_api_first_run_and_authenticated_flow():
         diagnostics = client.get("/api/system/diagnostics")
         assert diagnostics.status_code == 200
         assert "checks" in diagnostics.json()
+
+        malformed_object_routes = [
+            ("POST", "/api/config"),
+            ("POST", "/api/import/review"),
+            ("POST", "/api/plans/missing/action"),
+            ("POST", "/api/github/config"),
+            ("POST", "/api/embedding/migrate"),
+            ("POST", "/api/embedding/local/pull"),
+            ("POST", "/api/letter"),
+            ("POST", "/api/models"),
+            ("POST", "/api/env-config"),
+            ("POST", "/api/transport"),
+            ("POST", "/api/buckets/forget"),
+            ("POST", "/api/settings/sampling"),
+            ("POST", "/api/settings/human"),
+            ("POST", "/api/settings/human/sync-existing"),
+        ]
+        for method, path in malformed_object_routes:
+            malformed = client.request(method, path, json=[])
+            assert malformed.status_code == 400, (path, malformed.text)
+
+        excessive_query = "q" * (16 * 1024 + 1)
+        assert client.get("/api/search", params={"q": excessive_query}).status_code == 400
+        assert client.get("/api/breath-debug", params={"q": excessive_query}).status_code == 400
+        assert client.get("/api/breath-debug", params={"valence": "nan"}).status_code == 400
+        assert client.get("/api/breath", params={"n": "not-an-int"}).status_code == 400
+        assert client.get("/api/import/results", params={"limit": "nan"}).status_code == 400
+        assert client.get("/api/letters", params={"author": excessive_query}).status_code == 400
+
+        def oversized_chunks():
+            for _ in range(65):
+                yield b"x" * (64 * 1024)
+
+        chunked_oversize = client.post(
+            "/auth/login",
+            content=oversized_chunks(),
+            headers={"Content-Type": "application/json"},
+        )
+        assert chunked_oversize.status_code == 413
+
+        assert client.get("/.well-known/oauth-protected-resource/mcp").status_code == 404
+        assert client.get("/.well-known/oauth-protected-resource/not-a-route").status_code == 404
+        assert client.get("/mcp-extra").status_code == 404
 
         invalid_transport = client.post(
             "/api/transport",

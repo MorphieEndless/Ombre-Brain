@@ -180,7 +180,7 @@ def register(mcp) -> None:
                 "env_var": "OMBRE_HOST_VAULT_DIR",
             }, status_code=409)
         try:
-            body = await request.json()
+            body = await sh._read_json_object(request)
         except Exception:
             return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
@@ -327,7 +327,10 @@ def register(mcp) -> None:
         if err:
             return err
         try:
-            limit = int(request.query_params.get("limit", "50"))
+            limit = max(1, min(int(request.query_params.get("limit", "50")), 200))
+        except (TypeError, ValueError, OverflowError):
+            return JSONResponse({"error": "limit must be an integer in [1,200]"}, status_code=400)
+        try:
             all_buckets = await sh.bucket_mgr.list_all(include_archive=False)
             # Sort by created time, newest first
             all_buckets.sort(key=lambda b: b["metadata"].get("created", ""), reverse=True)
@@ -356,19 +359,30 @@ def register(mcp) -> None:
         if err:
             return err
         try:
-            body = await request.json()
+            body = await sh._read_json_object(request)
         except Exception:
             return JSONResponse({"error": "Invalid JSON"}, status_code=400)
 
         decisions = body.get("decisions", [])
-        if not decisions:
+        if not isinstance(decisions, list) or not decisions:
             return JSONResponse({"error": "No decisions provided"}, status_code=400)
+        if len(decisions) > 1000:
+            return JSONResponse({"error": "Too many review decisions (max 1000)"}, status_code=400)
+        if any(not isinstance(decision, dict) for decision in decisions):
+            return JSONResponse({"error": "Each decision must be an object"}, status_code=400)
 
         applied = 0
         errors = 0
         for d in decisions:
             bid = d.get("bucket_id", "")
             action = d.get("action", "")
+            if (
+                not isinstance(bid, str)
+                or not isinstance(action, str)
+                or len(bid) > 128
+            ):
+                errors += 1
+                continue
             if not bid or not action:
                 continue
             try:
@@ -418,7 +432,7 @@ def register(mcp) -> None:
         if not bucket:
             return JSONResponse({"error": "bucket not found"}, status_code=404)
         try:
-            body = await request.json()
+            body = await sh._read_json_object(request)
         except Exception:
             return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
@@ -648,17 +662,20 @@ def register(mcp) -> None:
             )
 
         try:
-            body = await request.json()
+            body = await sh._read_json_object(request)
         except Exception:
-            body = {}
+            return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
         decisions: dict[str, str] = {}
         raw_decisions = body.get("decisions", {})
-        if isinstance(raw_decisions, dict):
-            valid_opts = {"skip", "overwrite", "keep_both"}
-            for bid, decision in raw_decisions.items():
-                if isinstance(bid, str) and isinstance(decision, str) and decision in valid_opts:
-                    decisions[bid] = decision
+        if not isinstance(raw_decisions, dict):
+            return JSONResponse({"error": "decisions must be an object"}, status_code=400)
+        if len(raw_decisions) > 10_000:
+            return JSONResponse({"error": "too many migration decisions"}, status_code=400)
+        valid_opts = {"skip", "overwrite", "keep_both"}
+        for bid, decision in raw_decisions.items():
+            if isinstance(bid, str) and isinstance(decision, str) and decision in valid_opts:
+                decisions[bid] = decision
 
         # 后台执行（apply 可能耗时较长，含重新向量化）
         async def _run_apply():

@@ -11,3 +11,10 @@ def test_dashboard_contains_system_diagnostics_panel_and_loader():
         assert "/api/system/diagnostics" in html
         assert "loadSystemDiagnostics();" in html
 
+
+def test_dashboard_forgotten_state_uses_supported_lucide_icon():
+    html = Path("frontend/dashboard.html").read_text(encoding="utf-8")
+
+    assert 'data-lucide="moon-off"' not in html
+    assert html.count('data-lucide="eye-off"') >= 4
+

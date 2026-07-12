@@ -24,12 +24,20 @@ import time as _time_mod
 import urllib.parse as _urlparse
 import base64 as _base64
 import hashlib as _hashlib_oauth
+import hmac as _hmac
 import html as _html_escape
+import ipaddress as _ipaddress
+import re as _re
 
 from starlette.requests import Request
 from starlette.responses import Response
 
 from . import _shared as sh
+
+try:
+    from utils import parse_bool  # type: ignore
+except ImportError:  # pragma: no cover
+    from ..utils import parse_bool  # type: ignore
 
 logger = sh.logger
 
@@ -43,23 +51,128 @@ _OAUTH_CODE_TTL = 300               # 5 min
 _MCP_TOKEN_TTL = 86400 * 30         # 30 天；避免 100 年秒数溢出部分客户端的 32-bit duration
 _MCP_REFRESH_TOKEN_TTL = 86400 * 365
 _MCP_SCOPE = "mcp"
+_OAUTH_CLIENT_TTL = 86400
+_MAX_OAUTH_CLIENTS = 1024
+_MAX_OAUTH_CODES = 1024
+_MAX_REDIRECT_URIS = 10
+_MAX_REDIRECT_URI_CHARS = 2048
+_MAX_CLIENT_NAME_CHARS = 200
+_PKCE_PATTERN = _re.compile(r"^[A-Za-z0-9._~-]{43,128}$")
+_FORBIDDEN_REDIRECT_SCHEMES = {
+    "about", "blob", "data", "file", "ftp", "javascript", "vbscript"
+}
+
+
+def _oauth_required_from_config() -> bool:
+    """Snapshot the effective MCP auth mode used for this server process."""
+    return parse_bool(sh.config.get("mcp_require_auth", True), default=True)
+
+
+def _oauth_not_found() -> Response:
+    """Do not advertise an OAuth surface when this MCP server is public."""
+    return Response(
+        status_code=404,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 def _first_forwarded(value: str) -> str:
     """Return the first proxy header value (RFC 7239 chains are comma-separated)."""
     return (value or "").split(",", 1)[0].strip()
 
+
 def _public_base_url(request: Request) -> str:
     """Return the externally-visible base URL, honoring Cloudflare/reverse-proxy headers."""
-    proto = _first_forwarded(request.headers.get("x-forwarded-proto") or "").lower()
+    proto = sh._trusted_forwarded_value(request, "x-forwarded-proto").lower()
     if proto not in ("http", "https"):
         proto = request.url.scheme
-    host = _first_forwarded(
-        request.headers.get("x-forwarded-host")
-        or request.headers.get("host")
-        or request.url.netloc
-    )
+    host = sh._trusted_forwarded_value(request, "x-forwarded-host")
+    if not host:
+        host = _first_forwarded(
+            request.headers.get("host") or request.url.netloc
+        )
+    if (
+        not host
+        or len(host) > 255
+        or any(char.isspace() or char in "/\\#" for char in host)
+    ):
+        host = request.url.netloc
     return f"{proto}://{host}".rstrip("/")
+
+
+def _cleanup_oauth_state(now: float | None = None) -> None:
+    """Bound public OAuth state and discard expired entries opportunistically."""
+    current = _time_mod.time() if now is None else now
+    for client_id, data in list(_oauth_clients.items()):
+        if not isinstance(data, dict) or (
+            "expires" in data and data.get("expires", 0) <= current
+        ):
+            _oauth_clients.pop(client_id, None)
+    for code, data in list(_oauth_codes.items()):
+        if not isinstance(data, dict) or data.get("expires", 0) <= current:
+            _oauth_codes.pop(code, None)
+    for token, expiry in list(_mcp_tokens.items()):
+        if not isinstance(expiry, (int, float)) or expiry <= current:
+            _mcp_tokens.pop(token, None)
+            _mcp_token_resources.pop(token, None)
+    for token, data in list(_mcp_refresh_tokens.items()):
+        if not isinstance(data, dict) or data.get("expires", 0) <= current:
+            _mcp_refresh_tokens.pop(token, None)
+
+
+def _valid_redirect_uri(value: object) -> bool:
+    if not isinstance(value, str) or not 1 <= len(value) <= _MAX_REDIRECT_URI_CHARS:
+        return False
+    try:
+        parsed = _urlparse.urlsplit(value)
+    except Exception:
+        return False
+    scheme = parsed.scheme.lower()
+    if not scheme or parsed.fragment or scheme in _FORBIDDEN_REDIRECT_SCHEMES:
+        return False
+    if scheme == "https":
+        return bool(parsed.netloc and parsed.hostname and not parsed.username and not parsed.password)
+    if scheme == "http":
+        if not parsed.netloc or not parsed.hostname or parsed.username or parsed.password:
+            return False
+        hostname = parsed.hostname.lower()
+        if hostname == "localhost":
+            return True
+        try:
+            return _ipaddress.ip_address(hostname).is_loopback
+        except ValueError:
+            return False
+    # RFC 8252 native clients may use a private-use URI scheme. It still must
+    # be absolute and must not be one of the browser-executable schemes above.
+    return bool(parsed.netloc or parsed.path)
+
+
+def _normalize_client_registration(body: object) -> tuple[dict | None, str]:
+    if not isinstance(body, dict):
+        return None, "registration body must be a JSON object"
+    redirect_uris = body.get("redirect_uris")
+    if (
+        not isinstance(redirect_uris, list)
+        or not 1 <= len(redirect_uris) <= _MAX_REDIRECT_URIS
+        or any(not _valid_redirect_uri(uri) for uri in redirect_uris)
+    ):
+        return None, "redirect_uris must contain 1-10 safe absolute callback URIs"
+    client_name = body.get("client_name", "MCP Client")
+    if not isinstance(client_name, str):
+        return None, "client_name must be a string"
+    client_name = client_name.strip()[:_MAX_CLIENT_NAME_CHARS] or "MCP Client"
+    return {
+        "redirect_uris": list(dict.fromkeys(redirect_uris)),
+        "client_name": client_name,
+    }, ""
+
+
+def _valid_scope(scope: object) -> bool:
+    return isinstance(scope, str) and set(scope.split()) == {_MCP_SCOPE}
+
+
+def _valid_pkce_value(value: object) -> bool:
+    return isinstance(value, str) and bool(_PKCE_PATTERN.fullmatch(value))
 
 
 def _normalize_resource(resource: str) -> str:
@@ -162,21 +275,23 @@ def _save_mcp_tokens() -> None:
             and isinstance(data.get("expires"), (int, float))
             and data["expires"] > now
         }
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            _json_lib.dump({
+        sh._atomic_write_private_json(
+            path,
+            {
                 "access_tokens": active,
                 "refresh_tokens": active_refresh,
-            }, f)
-        os.replace(tmp, path)
+            },
+        )
     except Exception as e:
         logger.warning(f"[oauth] failed to save mcp tokens: {e}")
 
 
 def _verify_pkce(code_verifier: str, code_challenge: str) -> bool:
+    if not _valid_pkce_value(code_verifier) or not _valid_pkce_value(code_challenge):
+        return False
     digest = _hashlib_oauth.sha256(code_verifier.encode()).digest()
     computed = _base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
-    return computed == code_challenge
+    return _hmac.compare_digest(computed, code_challenge)
 
 
 def _is_valid_mcp_token(token: str, resource: str = "") -> bool:
@@ -194,6 +309,7 @@ def _is_valid_mcp_token(token: str, resource: str = "") -> bool:
 
 
 def _issue_mcp_access_token(resource: str = "") -> str:
+    _cleanup_oauth_state()
     token = secrets.token_urlsafe(32)
     _mcp_tokens[token] = _time_mod.time() + _MCP_TOKEN_TTL
     if resource:
@@ -202,6 +318,7 @@ def _issue_mcp_access_token(resource: str = "") -> str:
 
 
 def _issue_mcp_refresh_token(client_id: str, resource: str = "") -> str:
+    _cleanup_oauth_state()
     refresh_token = secrets.token_urlsafe(32)
     _mcp_refresh_tokens[refresh_token] = {
         "expires": _time_mod.time() + _MCP_REFRESH_TOKEN_TTL,
@@ -237,6 +354,7 @@ def _mcp_auth_check(request: Request):
 
 def _validate_authorize_redirect(client_id: str, redirect_uri: str) -> tuple[bool, str]:
     """Validate OAuth dynamic client and exact redirect_uri before asking for a password."""
+    _cleanup_oauth_state()
     if not client_id:
         return False, "missing client_id"
     if not redirect_uri:
@@ -258,6 +376,9 @@ def _oauth_authorize_html(client_id: str, redirect_uri: str, state: str,
     except ImportError:  # pragma: no cover
         from ..utils import get_ai_name  # type: ignore
     ai_name = e(get_ai_name())
+    client_info = _oauth_clients.get(client_id, {})
+    client_name = e(str(client_info.get("client_name") or "MCP Client"))
+    callback = e(redirect_uri[:240])
     err_html = f'<p style="color:#ff6b6b;font-size:13px;margin-top:12px;">{e(error)}</p>' if error else ""
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -280,6 +401,7 @@ button:hover{{background:#d4b87a}}
 <body><div class="card">
 <h2>◐ Ombre Brain</h2>
 <p class="sub">授权 {ai_name} 连接 MCP</p>
+<p class="note">请求方：{client_name}<br>回调：{callback}</p>
 <form method="POST">
 <input type="hidden" name="client_id" value="{e(client_id)}">
 <input type="hidden" name="redirect_uri" value="{e(redirect_uri)}">
@@ -297,27 +419,39 @@ button:hover{{background:#d4b87a}}
 
 def register(mcp) -> None:
     """注册 /.well-known/* 与 /oauth/* 路由，并在装配时载入持久化 token。"""
-    _load_mcp_tokens()   # 启动时恢复持久化 token，Docker 重启不再强制重新 OAuth
+    # Keep discovery aligned with the start-time middleware snapshot. Dashboard
+    # config edits require a restart, so they must not change metadata early.
+    oauth_required = _oauth_required_from_config()
+    if oauth_required:
+        _load_mcp_tokens()   # Docker 重启后恢复 token，不强制重新 OAuth
 
     @mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
     @mcp.custom_route("/.well-known/oauth-protected-resource/{resource_path:path}", methods=["GET"])
     async def oauth_protected_resource(request: Request) -> Response:
         from starlette.responses import JSONResponse
+        if not oauth_required:
+            return _oauth_not_found()
+
         base = _public_base_url(request)
-        # 带路径时（如 /mcp-extra）按请求路径动态返回对应 resource，
-        # 以便 Claude.ai 的严格 resource 匹配通过；无路径时返回根资源。
-        sub = request.path_params.get("resource_path", "")
+        # Ombre exposes one MCP endpoint. Do not let retired or invented paths
+        # complete OAuth discovery and appear connected before failing at use.
+        sub = str(request.path_params.get("resource_path", "") or "").strip("/")
+        if sub and sub != "mcp":
+            return _oauth_not_found()
         resource = f"{base}/{sub}" if sub else base
         return JSONResponse({
             "resource": resource,
             "authorization_servers": [base],
             "bearer_methods_supported": ["header"],
             "scopes_supported": [_MCP_SCOPE],
-        })
+        }, headers={"Cache-Control": "no-store"})
 
     @mcp.custom_route("/.well-known/oauth-authorization-server", methods=["GET"])
     async def oauth_authorization_server(request: Request) -> Response:
         from starlette.responses import JSONResponse
+        if not oauth_required:
+            return _oauth_not_found()
+
         base = _public_base_url(request)
         return JSONResponse({
             "issuer": base,
@@ -334,20 +468,42 @@ def register(mcp) -> None:
     @mcp.custom_route("/oauth/register", methods=["POST"])
     async def oauth_register(request: Request) -> Response:
         from starlette.responses import JSONResponse
+        if not oauth_required:
+            return _oauth_not_found()
+
         try:
             body = await request.json()
         except Exception:
-            body = {}
+            return JSONResponse(
+                {"error": "invalid_client_metadata", "error_description": "invalid JSON"},
+                status_code=400,
+            )
+        registration, registration_error = _normalize_client_registration(body)
+        if registration is None:
+            return JSONResponse(
+                {
+                    "error": "invalid_client_metadata",
+                    "error_description": registration_error,
+                },
+                status_code=400,
+            )
+        _cleanup_oauth_state()
+        if len(_oauth_clients) >= _MAX_OAUTH_CLIENTS:
+            return JSONResponse(
+                {"error": "temporarily_unavailable"},
+                status_code=429,
+                headers={"Retry-After": "60"},
+            )
         client_id = secrets.token_urlsafe(16)
         _oauth_clients[client_id] = {
-            "redirect_uris": body.get("redirect_uris", []),
-            "client_name": body.get("client_name", "MCP Client"),
+            **registration,
+            "expires": _time_mod.time() + _OAUTH_CLIENT_TTL,
         }
         return JSONResponse({
             "client_id": client_id,
             "client_id_issued_at": int(_time_mod.time()),
-            "redirect_uris": body.get("redirect_uris", []),
-            "client_name": body.get("client_name", "MCP Client"),
+            "redirect_uris": registration["redirect_uris"],
+            "client_name": registration["client_name"],
             "token_endpoint_auth_method": "none",
             "grant_types": ["authorization_code", "refresh_token"],
             "response_types": ["code"],
@@ -356,6 +512,9 @@ def register(mcp) -> None:
     @mcp.custom_route("/oauth/authorize", methods=["GET", "POST"])
     async def oauth_authorize(request: Request) -> Response:
         from starlette.responses import HTMLResponse, RedirectResponse
+        if not oauth_required:
+            return _oauth_not_found()
+
         if request.method == "GET":
             p = dict(request.query_params)
             ok, err = _validate_authorize_redirect(
@@ -366,8 +525,10 @@ def register(mcp) -> None:
                 ok, err = False, "resource 与当前 MCP 地址不匹配"
             if ok and p.get("response_type", "code") != "code":
                 ok, err = False, "unsupported response_type"
-            if ok and not p.get("code_challenge"):
-                ok, err = False, "missing PKCE code_challenge"
+            if ok and not _valid_scope(p.get("scope", _MCP_SCOPE)):
+                ok, err = False, "unsupported scope"
+            if ok and not _valid_pkce_value(p.get("code_challenge")):
+                ok, err = False, "invalid PKCE code_challenge"
             if ok and p.get("code_challenge_method", "S256") != "S256":
                 ok, err = False, "仅支持 PKCE S256"
             if ok and sh._is_setup_needed():
@@ -378,7 +539,10 @@ def register(mcp) -> None:
                 resource=resource, scope=p.get("scope", _MCP_SCOPE), error=err,
             ), status_code=200 if ok else (503 if sh._is_setup_needed() else 400))
         # POST
-        form = await request.form()
+        try:
+            form = await request.form()
+        except Exception:
+            return HTMLResponse("Invalid authorization request", status_code=400)
         password     = str(form.get("password", ""))
         client_id    = str(form.get("client_id", ""))
         redirect_uri = str(form.get("redirect_uri", ""))
@@ -391,8 +555,10 @@ def register(mcp) -> None:
         resource_ok, resource = _mcp_resource(request, requested_resource)
         if ok and not resource_ok:
             ok, err = False, "resource 与当前 MCP 地址不匹配"
-        if ok and not code_challenge:
-            ok, err = False, "missing PKCE code_challenge"
+        if ok and not _valid_scope(scope):
+            ok, err = False, "unsupported scope"
+        if ok and not _valid_pkce_value(code_challenge):
+            ok, err = False, "invalid PKCE code_challenge"
         if not ok:
             return HTMLResponse(_oauth_authorize_html(
                 client_id, redirect_uri, state, code_challenge,
@@ -404,12 +570,44 @@ def register(mcp) -> None:
                 resource=resource, scope=scope,
                 error="尚未设置 Dashboard 密码，请先打开 Dashboard 完成初始化",
             ), status_code=503)
+        retry = sh._login_retry_after(request)
+        if retry:
+            return HTMLResponse(
+                _oauth_authorize_html(
+                    client_id, redirect_uri, state, code_challenge,
+                    resource=resource, scope=scope,
+                    error=f"尝试过于频繁，请 {retry} 秒后再试",
+                ),
+                status_code=429,
+                headers={"Retry-After": str(retry)},
+            )
+        if len(password) > 1024:
+            sh._record_login_failure(request)
+            return HTMLResponse(
+                _oauth_authorize_html(
+                    client_id, redirect_uri, state, code_challenge,
+                    resource=resource, scope=scope, error="密码格式无效",
+                ),
+                status_code=400,
+            )
         if not sh._verify_any_password(password):
+            sh._record_login_failure(request)
             return HTMLResponse(_oauth_authorize_html(
                 client_id, redirect_uri, state, code_challenge,
                 resource=resource, scope=scope, error="密码错误，请重试"
             ), status_code=401)
 
+        sh._record_login_success(request)
+        _cleanup_oauth_state()
+        if len(_oauth_codes) >= _MAX_OAUTH_CODES:
+            return HTMLResponse(
+                _oauth_authorize_html(
+                    client_id, redirect_uri, state, code_challenge,
+                    resource=resource, scope=scope,
+                    error="授权请求过多，请稍后重试",
+                ),
+                status_code=503,
+            )
         code = secrets.token_urlsafe(32)
         _oauth_codes[code] = {
             "client_id": client_id,
@@ -428,6 +626,9 @@ def register(mcp) -> None:
     @mcp.custom_route("/oauth/token", methods=["POST"])
     async def oauth_token(request: Request) -> Response:
         from starlette.responses import JSONResponse
+        if not oauth_required:
+            return _oauth_not_found()
+
         content_type = request.headers.get("content-type", "")
         try:
             if "json" in content_type:
@@ -437,6 +638,9 @@ def register(mcp) -> None:
                 body = dict(form)
         except Exception:
             return JSONResponse({"error": "invalid_request"}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        _cleanup_oauth_state()
 
         grant_type = body.get("grant_type")
         if grant_type not in ("authorization_code", "refresh_token"):
@@ -444,6 +648,8 @@ def register(mcp) -> None:
 
         if grant_type == "refresh_token":
             refresh_token = str(body.get("refresh_token", ""))
+            if len(refresh_token) > 256:
+                return JSONResponse({"error": "invalid_grant"}, status_code=400)
             refresh_data = _mcp_refresh_tokens.get(refresh_token)
             now = _time_mod.time()
             if not isinstance(refresh_data, dict):
@@ -500,6 +706,7 @@ def register(mcp) -> None:
 
         if code_data.get("code_challenge"):
             if not code_verifier or not _verify_pkce(code_verifier, code_data["code_challenge"]):
+                _oauth_codes.pop(code, None)
                 return JSONResponse({"error": "invalid_grant", "error_description": "PKCE verification failed"}, status_code=400)
 
         _oauth_codes.pop(code, None)

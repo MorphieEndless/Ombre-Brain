@@ -284,12 +284,16 @@ def register(mcp) -> None:
         if err:
             return err
         try:
-            body = await request.json()
+            body = await sh._read_json_object(request)
         except Exception:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
         ids = body.get("ids") or []
         if not isinstance(ids, list) or not ids:
             return JSONResponse({"error": "ids must be a non-empty list"}, status_code=400)
+        if len(ids) > 500:
+            return JSONResponse({"error": "ids exceeds the 500-item batch limit"}, status_code=400)
+        if any(not isinstance(bid, str) or not bid or len(bid) > 128 for bid in ids):
+            return JSONResponse({"error": "each id must be a non-empty string up to 128 characters"}, status_code=400)
         if "dont_surface" not in body:
             return JSONResponse({"error": "dont_surface (bool) required"}, status_code=400)
         try:
@@ -337,7 +341,7 @@ def register(mcp) -> None:
                 "temperature": float(sampling.get("temperature") or 0.7),
             })
         try:
-            body = await request.json()
+            body = await sh._read_json_object(request)
         except Exception:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
         # Validate ranges; reject silently-corrupt inputs at the boundary
@@ -404,10 +408,13 @@ def register(mcp) -> None:
         if request.method == "GET":
             return JSONResponse({"human": sh.config.get("human", "人类")})
         try:
-            body = await request.json()
+            body = await sh._read_json_object(request)
         except Exception:
             return JSONResponse({"error": "invalid JSON body"}, status_code=400)
-        human = body.get("human", "").strip()
+        human_raw = body.get("human", "")
+        if not isinstance(human_raw, str):
+            return JSONResponse({"error": "human name must be a string"}, status_code=400)
+        human = human_raw.strip()
         if not human:
             human = "人类"
         if len(human) > 20:
@@ -449,10 +456,15 @@ def register(mcp) -> None:
         if err:
             return err
         try:
-            body = await request.json()
+            body = await sh._read_json_object(request)
         except Exception:
-            body = {}
-        from_term = (body.get("from") or "用户").strip()
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        from_raw = body.get("from") or "用户"
+        if not isinstance(from_raw, str):
+            return JSONResponse({"error": "from must be a string"}, status_code=400)
+        from_term = from_raw.strip()
+        if len(from_term) > 100:
+            return JSONResponse({"error": "from must be at most 100 characters"}, status_code=400)
         cur = (sh.config.get("human") or "人类").strip() or "人类"
         if not from_term:
             return JSONResponse({"error": "缺少要替换的旧称呼"}, status_code=400)
@@ -518,6 +530,8 @@ def register(mcp) -> None:
         target = None
         try:
             body = await request.json()
+            if not isinstance(body, dict):
+                return JSONResponse({"error": "JSON body must be an object"}, status_code=400)
             if "value" in body:
                 target = parse_bool(body["value"])
         except ValueError as e:

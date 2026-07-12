@@ -1317,7 +1317,7 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 | 类型 (`type`) | 目录 | importance | 衰减分 | 普通 breath 浮现 | 参与合并 | 参与 dream | 自动归档 |
 |---|---|---|---|---|---|---|---|
 | `dynamic` | `dynamic/{domain}/` | 1~10 | 公式计算 | ✅ | ✅ | ✅ | ✅ |
-| `permanent`（含 `pinned`） | `permanent/{domain}/` | 锁 10 | 999 | 作为「核心准则」始终展示 | ❌ | ❌ | ❌ |
+| `permanent`（可独立于 `pinned`） | `permanent/{domain}/` | 显式 permanent 为 1~10；pinned 锁 10 | 999 | 作为固化记忆展示 | ❌ | ❌ | ❌ |
 | `feel` | `feel/沉淀物/` | 5 | 50 | ❌（仅 `domain="feel"`） | ❌ | 仅参与结晶检测 | ❌ |
 | `plan` | `plans/active/` | 7 | 50 | ❌（仅 dream 末尾 active 段） | ❌ | dream 列出 | ❌ |
 | `letter` | `letters/history/` | 10 | 50 | ❌（仅 `/breath-hook` 末尾各最新一封） | ❌ | ❌ | ❌ |
@@ -1325,7 +1325,7 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 
 **新建时初始字段**：`activation_count = 0`（B-04 修复值；曾经是 1 导致冷启动检测失效）；`resolved/pinned/digested` 不显式写入，仅在变更时才出现在 frontmatter 中。
 
-**permanent 与 pinned 的配额关系**：`_count_pinned()` 同时数 `pinned=True` 与 `type=="permanent"` 两类，二者合并受 `limits.max_pinned`（默认 20）约束。手工把文件才进 `permanent/{domain}/` 目录的老桶也计入。`feel` / `plan` / `letter` 均不占该配额。
+**permanent 与 pinned 的配额关系**：配额唯一真相是 `metadata.pinned=True`。`type=="permanent"` 是独立的固化类型，不会仅因目录或 type 占用 `limits.max_pinned`（默认 20）；只有真正 pinned 的桶占配额并锁定 importance=10。`feel` / `plan` / `letter` 同样不占该配额。
 
 (实现注意：`pinned` 和 `protected` 在代码里几乎等价处理，但 `protected` 是历史遗留字段，新桶不应再写；UI 只暴露 pinned。)
 
@@ -1366,7 +1366,9 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 | `hooks.token` | `""` | `/breath-hook`、`/dream-hook` 的共享 token；也可用 `OMBRE_HOOK_TOKEN` |
 | `hooks.allow_public` | `false` | 是否允许 hook 无鉴权访问；也可用 `OMBRE_HOOK_ALLOW_PUBLIC=true`，仅建议在外层已有鉴权时开启 |
 | `limits.max_bucket_bytes` | `51200` (50KB) | 单桶内容字节上限（iter 1.6 §5）；0 禁用 |
-| `limits.max_pinned` | `20` | pinned 桶数量上限（iter 1.6 §5）；permanent 桶同计；0 禁用 |
+| `limits.max_pinned` | `20` | `metadata.pinned=True` 桶数量上限；显式 permanent 不占；0 禁用 |
+| `limits.max_mcp_request_bytes` | `4194304` | `/mcp` 请求体上限；0 禁用 |
+| `limits.max_management_request_bytes` | `4194304` | Dashboard/OAuth 普通写请求上限；导入上传使用独立上限；0 禁用 |
 | `bucket_type_defaults.{type}.{field}` | （空） | iter 1.9：按桶类型覆盖 importance/valence/arousal 默认值。例：`bucket_type_defaults.feel.importance: 5`。`bucket_manager.create()` 在不传入该字段时查此表 |
 | `surfacing.breath_max_tokens` | `10000` | 覆盖 `breath` 默认 max_tokens |
 | `surfacing.breath_max_results` | `20` | 覆盖 `breath` 默认 max_results |
@@ -1571,6 +1573,7 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 | keepalive 失败 | `server.py` | `_keepalive_loop`；检查 `OMBRE_PORT` 实际监听端口 |
 | Webhook 不推送 | `server.py` | `_fire_webhook`；检查 `OMBRE_HOOK_URL` 和 `OMBRE_HOOK_SKIP` |
 | 配置热更新 dehydrator 没生效 | `web/config_api.py` | `api_config_update` 中 dehydrator 字段直接赋值 + 重建 `AsyncOpenAI` 客户端 |
+| 同版本重建镜像仍运行旧代码 | `entrypoint.sh` + `ombrebrain/maintenance/code_fingerprint.py` | 播种同时比较 `VERSION` 与镜像代码指纹；查看 `code-state` 日志，不直接以任意 `_app/VERSION` 判断活动代码 |
 
 ### 11.5 import / 历史导入类
 

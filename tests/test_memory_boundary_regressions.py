@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -164,7 +165,13 @@ async def test_long_breath_dehydrates_once_then_uses_model_scoped_cache(
 
     async def call_haiku(raw):
         calls.append(("haiku", raw))
-        return "Haiku 缓存摘要"
+        return json.dumps({
+            "core_facts": ["Haiku 缓存事实"],
+            "emotion_state": "平静",
+            "todos": [],
+            "keywords": ["Haiku"],
+            "summary": "Haiku 缓存摘要",
+        }, ensure_ascii=False)
 
     monkeypatch.setattr(haiku, "_api_dehydrate", call_haiku)
     first = await haiku.dehydrate(content)
@@ -178,7 +185,13 @@ async def test_long_breath_dehydrates_once_then_uses_model_scoped_cache(
 
     async def call_sonnet(raw):
         calls.append(("sonnet", raw))
-        return "Sonnet 新摘要"
+        return json.dumps({
+            "core_facts": ["Sonnet 新事实"],
+            "emotion_state": "平静",
+            "todos": [],
+            "keywords": ["Sonnet"],
+            "summary": "Sonnet 新摘要",
+        }, ensure_ascii=False)
 
     monkeypatch.setattr(sonnet, "_api_dehydrate", call_sonnet)
     changed_model = await sonnet.dehydrate(content)

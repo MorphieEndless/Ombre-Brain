@@ -49,6 +49,9 @@ def register(mcp) -> None:
         if err:
             return err
         author = request.query_params.get("author", "").strip()
+        metadata_error = check_metadata_size(author=author)
+        if metadata_error:
+            return JSONResponse({"error": metadata_error}, status_code=400)
         try:
             all_b = await sh.bucket_mgr.list_all(include_archive=False)
             letters = [b for b in all_b if b["metadata"].get("type") == "letter"]
@@ -90,9 +93,12 @@ def register(mcp) -> None:
         if err:
             return err
         try:
-            body = await request.json()
+            body = await sh._read_json_object(request)
         except Exception:
             return JSONResponse({"error": "invalid JSON"}, status_code=400)
+        string_fields = ("author", "content", "user_name", "title", "date", "ai_name")
+        if any(key in body and not isinstance(body[key], str) for key in string_fields):
+            return JSONResponse({"error": "letter fields must be strings"}, status_code=400)
         raw_author = (body.get("author") or "").strip()
         content = (body.get("content") or "").strip()
         if not raw_author:
@@ -171,10 +177,16 @@ def register(mcp) -> None:
         if not bucket or bucket["metadata"].get("type") != "letter":
             return JSONResponse({"error": "letter not found"}, status_code=404)
         try:
-            body = await request.json()
+            body = await sh._read_json_object(request)
         except Exception:
             return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
+        editable_string_fields = ("content", "title", "author", "user_name", "date")
+        if any(
+            key in body and not isinstance(body[key], str)
+            for key in editable_string_fields
+        ):
+            return JSONResponse({"error": "letter fields must be strings"}, status_code=400)
         updates: dict = {}
         if "content" in body and isinstance(body["content"], str) and body["content"].strip():
             size_err = check_content_size(body["content"])

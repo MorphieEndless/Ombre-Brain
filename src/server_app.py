@@ -20,10 +20,15 @@ import httpx
 from starlette.middleware.cors import CORSMiddleware
 
 from utils import parse_bool
-from web.request_limits import MCPRequestBodyLimitMiddleware
+from web.request_limits import (
+    MCPRequestBodyLimitMiddleware,
+    ManagementRequestBodyLimitMiddleware,
+    is_mcp_endpoint_path,
+)
 
 
 DEFAULT_MAX_MCP_REQUEST_BYTES = 4 * 1024 * 1024
+DEFAULT_MAX_MANAGEMENT_REQUEST_BYTES = 4 * 1024 * 1024
 DEFAULT_HEALTH_PROBE_TIMEOUT_SECONDS = 5.0
 DEFAULT_KEEPALIVE_INITIAL_DELAY_SECONDS = 10.0
 DEFAULT_KEEPALIVE_INTERVAL_SECONDS = 60.0
@@ -38,6 +43,7 @@ class HTTPRuntimeSettings:
 
     auth_required: bool
     max_request_bytes: int
+    max_management_request_bytes: int = DEFAULT_MAX_MANAGEMENT_REQUEST_BYTES
 
     @classmethod
     def from_config(
@@ -49,19 +55,26 @@ class HTTPRuntimeSettings:
         limits = config.get("limits")
         if not isinstance(limits, Mapping):
             limits = {}
-        try:
-            max_request_bytes = int(
-                limits.get("max_mcp_request_bytes", default_max_request_bytes)
-            )
-        except (TypeError, ValueError, OverflowError):
-            max_request_bytes = default_max_request_bytes
-        if max_request_bytes < 0:
-            max_request_bytes = default_max_request_bytes
+        def body_limit(key: str, default: int) -> int:
+            try:
+                value = int(limits.get(key, default))
+            except (TypeError, ValueError, OverflowError):
+                return default
+            return default if value < 0 else value
+
+        max_request_bytes = body_limit(
+            "max_mcp_request_bytes", default_max_request_bytes
+        )
+        max_management_request_bytes = body_limit(
+            "max_management_request_bytes",
+            DEFAULT_MAX_MANAGEMENT_REQUEST_BYTES,
+        )
         return cls(
             auth_required=parse_bool(
                 config.get("mcp_require_auth", True), default=True
             ),
             max_request_bytes=max_request_bytes,
+            max_management_request_bytes=max_management_request_bytes,
         )
 
 
@@ -113,7 +126,11 @@ class MCPAuthMiddleware:
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
         path = str(scope.get("path", ""))
-        if scope.get("type") == "http" and self.auth_required and path.startswith("/mcp"):
+        if (
+            scope.get("type") == "http"
+            and self.auth_required
+            and is_mcp_endpoint_path(path)
+        ):
             headers = {key.lower(): value for key, value in scope.get("headers", [])}
             auth = headers.get(b"authorization", b"").decode("latin-1")
             resource, base = _request_resource(scope, headers)
@@ -166,7 +183,9 @@ class MCPAcceptShim:
         self.app = app
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
-        if scope.get("type") == "http" and str(scope.get("path", "")).startswith("/mcp"):
+        if scope.get("type") == "http" and is_mcp_endpoint_path(
+            scope.get("path")
+        ):
             headers = list(scope.get("headers", []))
             accept_index = next(
                 (
@@ -367,6 +386,10 @@ def build_http_app(
     app.add_middleware(
         MCPRequestBodyLimitMiddleware,
         max_bytes=settings.max_request_bytes,
+    )
+    app.add_middleware(
+        ManagementRequestBodyLimitMiddleware,
+        max_bytes=settings.max_management_request_bytes,
     )
     app.add_middleware(MCPAcceptShim)
     app.add_middleware(

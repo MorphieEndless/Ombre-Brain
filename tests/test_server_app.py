@@ -7,6 +7,7 @@ import pytest
 from starlette.applications import Starlette
 
 from server_app import (
+    DEFAULT_MAX_MANAGEMENT_REQUEST_BYTES,
     DEFAULT_MAX_MCP_REQUEST_BYTES,
     HTTPRuntimeSettings,
     MCPAcceptShim,
@@ -77,6 +78,24 @@ def test_http_runtime_settings_are_normalized(config, auth_required, limit):
     assert settings.max_request_bytes == limit
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, DEFAULT_MAX_MANAGEMENT_REQUEST_BYTES),
+        (0, 0),
+        ("2048", 2048),
+        (-1, DEFAULT_MAX_MANAGEMENT_REQUEST_BYTES),
+        ("bad", DEFAULT_MAX_MANAGEMENT_REQUEST_BYTES),
+    ],
+)
+def test_management_request_limit_is_normalized(raw, expected):
+    limits = {} if raw is None else {"max_management_request_bytes": raw}
+
+    settings = HTTPRuntimeSettings.from_config({"limits": limits})
+
+    assert settings.max_management_request_bytes == expected
+
+
 def test_merge_mcp_tool_registries_keeps_one_public_manifest():
     primary = SimpleNamespace(
         _tool_manager=SimpleNamespace(_tools={"breath": object()})
@@ -110,12 +129,13 @@ async def test_accept_shim_adds_both_mcp_media_types():
 
 
 @pytest.mark.asyncio
-async def test_accept_shim_leaves_non_mcp_routes_unchanged():
+@pytest.mark.parametrize("path", ["/health", "/mcp-extra", "/mcp-retired"])
+async def test_accept_shim_leaves_non_mcp_routes_unchanged(path):
     downstream = RecordingASGIApp()
     middleware = MCPAcceptShim(downstream)
     scope = {
         "type": "http",
-        "path": "/health",
+        "path": path,
         "headers": [(b"accept", b"application/json")],
     }
 
@@ -152,6 +172,30 @@ async def test_auth_middleware_rejects_missing_token_with_canonical_metadata_url
     assert payload["resource_metadata"] == (
         "https://ombre.example/.well-known/oauth-protected-resource/mcp"
     )
+
+
+@pytest.mark.asyncio
+async def test_auth_middleware_does_not_challenge_retired_mcp_extra_path():
+    downstream = RecordingASGIApp()
+    middleware = MCPAuthMiddleware(
+        downstream,
+        auth_required=True,
+        token_validator=lambda *_args, **_kwargs: pytest.fail(
+            "retired routes must reach the router without OAuth validation"
+        ),
+    )
+    messages = []
+    scope = {
+        "type": "http",
+        "scheme": "https",
+        "path": "/mcp-extra",
+        "headers": [(b"host", b"ombre.example")],
+    }
+
+    await middleware(scope, _empty_receive, _collect_into(messages))
+
+    assert downstream.scopes == [scope]
+    assert messages[0]["status"] == 204
 
 
 @pytest.mark.asyncio
@@ -364,6 +408,7 @@ def test_build_http_app_uses_same_managed_stack_for_both_http_transports(transpo
     assert middleware_names >= {
         "CORSMiddleware",
         "MCPRequestBodyLimitMiddleware",
+        "ManagementRequestBodyLimitMiddleware",
         "MCPAcceptShim",
         "MCPAuthMiddleware",
     }

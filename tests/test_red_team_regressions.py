@@ -21,6 +21,7 @@ from tools._common import (
 from tools.breath._verbatim import render_stored_bucket
 from utils import positive_float
 from web.request_limits import MCPRequestBodyLimitMiddleware
+from web.search import _unit_query_float
 
 
 def _append_wal_range(path: str, start: int, count: int) -> None:
@@ -140,6 +141,18 @@ def test_nonfinite_helpers_fall_back_instead_of_poisoning_config():
     assert bundle.items[0].past_affect == "unknown"
 
 
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf", "-0.1", "1.1", "not-a-number"])
+def test_web_emotion_query_rejects_nonfinite_and_out_of_range(value):
+    with pytest.raises(ValueError, match="finite number"):
+        _unit_query_float(value, "valence")
+
+
+def test_web_emotion_query_accepts_unit_interval_edges():
+    assert _unit_query_float("0", "valence") == 0.0
+    assert _unit_query_float("1", "valence") == 1.0
+    assert _unit_query_float(None, "valence") is None
+
+
 def test_zero_limit_configuration_is_not_replaced_by_default(monkeypatch):
     monkeypatch.setattr(rt, "config", {"limits": {"max_bucket_bytes": 0}})
     assert max_bucket_bytes() == 0
@@ -221,6 +234,38 @@ async def test_mcp_body_limit_rejects_declared_and_chunked_payloads():
         send,
     )
     assert sent[0]["status"] == 413
+
+
+@pytest.mark.asyncio
+async def test_mcp_body_limit_does_not_treat_retired_mcp_extra_as_live_mcp():
+    calls = []
+    sent = []
+
+    async def app(scope, _receive, send):
+        calls.append(scope["path"])
+        await send({"type": "http.response.start", "status": 404, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        sent.append(message)
+
+    middleware = MCPRequestBodyLimitMiddleware(app, max_bytes=10)
+    await middleware(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/mcp-extra",
+            "headers": [(b"content-length", b"1000")],
+        },
+        receive,
+        send,
+    )
+
+    assert calls == ["/mcp-extra"]
+    assert sent[0]["status"] == 404
 
 
 def test_write_memory_uses_structured_frontmatter_and_atomic_output(tmp_path, monkeypatch):

@@ -257,10 +257,17 @@ def register(mcp) -> None:
             return err
 
         try:
-            body = await request.json()
+            body = await sh._read_json_object(request)
         except Exception:
             return JSONResponse({"ok": False, "error": "invalid JSON"}, status_code=400)
 
+        migration_fields = (
+            "target_backend", "api_format", "api_key", "base_url", "model"
+        )
+        if any(key in body and not isinstance(body[key], str) for key in migration_fields):
+            return JSONResponse({"ok": False, "error": "migration fields must be strings"}, status_code=400)
+        if any(len(body.get(key, "")) > 8192 for key in migration_fields):
+            return JSONResponse({"ok": False, "error": "migration field is too large"}, status_code=400)
         target_backend_raw = str(body.get("target_backend", "")).strip().lower()
         # local/ollama 底层也是 openai_compat（backend=api），用 api_format 区分云端/本地
         target_backend = "api" if target_backend_raw in ("api", "gemini", "local", "ollama", "") else target_backend_raw
@@ -576,8 +583,17 @@ def register(mcp) -> None:
             body = await request.json()
         except Exception:
             body = {}
+        if not isinstance(body, dict):
+            return JSONResponse({"ok": False, "error": "JSON body must be an object"}, status_code=400)
+        if any(
+            key in body and not isinstance(body[key], str)
+            for key in ("model", "mirror")
+        ):
+            return JSONResponse({"ok": False, "error": "model and mirror must be strings"}, status_code=400)
         model = (str(body.get("model") or "bge-m3")).strip()
         mirror_raw = (str(body.get("mirror") or "official")).strip()
+        if len(model) > 512 or len(mirror_raw) > 2048:
+            return JSONResponse({"ok": False, "error": "model or mirror is too large"}, status_code=400)
         prefix = _OLLAMA_MIRRORS.get(mirror_raw, mirror_raw if mirror_raw not in ("", "official") else "")
         name = f"{prefix}{model}" if prefix else model
         base = _ollama_base()

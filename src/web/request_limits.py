@@ -11,24 +11,30 @@ _Send = Callable[[dict], Awaitable[None]]
 _REJECTION_DRAIN_MULTIPLIER = 2
 
 
-class _RequestBodyTooLarge(Exception):
-    def __init__(self, *, request_ended: bool) -> None:
-        super().__init__("request body too large")
-        self.request_ended = request_ended
+def is_mcp_endpoint_path(path: object) -> bool:
+    """Match the one public MCP endpoint without accepting prefix lookalikes."""
+    return str(path or "").rstrip("/") == "/mcp"
 
 
 class MCPRequestBodyLimitMiddleware:
     """Reject oversized MCP requests before JSON-RPC parsing or tool dispatch."""
 
-    def __init__(self, app, *, max_bytes: int) -> None:
+    def __init__(
+        self,
+        app,
+        *,
+        max_bytes: int,
+        path_matcher: Callable[[object], bool] = is_mcp_endpoint_path,
+    ) -> None:
         self.app = app
         self.max_bytes = max(0, int(max_bytes))
+        self.path_matcher = path_matcher
 
     async def __call__(self, scope: dict, receive: _Receive, send: _Send) -> None:
         if (
             self.max_bytes <= 0
             or scope.get("type") != "http"
-            or not str(scope.get("path", "")).startswith("/mcp")
+            or not self.path_matcher(scope.get("path"))
             or str(scope.get("method", "GET")).upper() not in {"POST", "PUT", "PATCH"}
         ):
             await self.app(scope, receive, send)
@@ -57,33 +63,36 @@ class MCPRequestBodyLimitMiddleware:
                 return
 
         received = 0
-        response_started = False
-
-        async def limited_receive() -> dict:
-            nonlocal received
+        buffered: list[dict] = []
+        while True:
             message = await receive()
+            if not isinstance(message, dict):
+                return
+            if message.get("type") == "http.disconnect":
+                return
             if message.get("type") == "http.request":
                 received += len(message.get("body", b""))
                 if received > self.max_bytes:
-                    raise _RequestBodyTooLarge(
-                        request_ended=not message.get("more_body", False)
-                    )
-            return message
+                    if message.get("more_body", False):
+                        await self._drain_request(receive, max_bytes=self.max_bytes)
+                    await self._send_too_large(send)
+                    return
+                buffered.append(message)
+                if not message.get("more_body", False):
+                    break
 
-        async def tracked_send(message: dict) -> None:
-            nonlocal response_started
-            if message.get("type") == "http.response.start":
-                response_started = True
-            await send(message)
+        buffered_iter = iter(buffered)
 
-        try:
-            await self.app(scope, limited_receive, tracked_send)
-        except _RequestBodyTooLarge as exc:
-            if response_started:
-                raise
-            if not exc.request_ended:
-                await self._drain_request(receive, max_bytes=self.max_bytes)
-            await self._send_too_large(send)
+        async def replay_receive() -> dict:
+            try:
+                return next(buffered_iter)
+            except StopIteration:
+                # Long-lived MCP transports keep reading after the request body
+                # to observe the real disconnect. Replaying synthetic empty
+                # requests forever creates a tight CPU loop.
+                return await receive()
+
+        await self.app(scope, replay_receive, send)
 
     @staticmethod
     async def _drain_request(receive: _Receive, *, max_bytes: int) -> bool:
@@ -123,3 +132,31 @@ class MCPRequestBodyLimitMiddleware:
             }
         )
         await send({"type": "http.response.body", "body": body, "more_body": False})
+
+
+_LARGE_UPLOAD_PATHS = {
+    "/api/import/preflight",
+    "/api/import/upload",
+    "/api/migrate/upload",
+}
+
+
+class ManagementRequestBodyLimitMiddleware(MCPRequestBodyLimitMiddleware):
+    """Bound normal Dashboard/OAuth mutations while preserving large upload APIs."""
+
+    def __init__(self, app, *, max_bytes: int) -> None:
+        def should_limit(path: object) -> bool:
+            normalized = str(path or "").rstrip("/") or "/"
+            return (
+                not is_mcp_endpoint_path(normalized)
+                and normalized not in _LARGE_UPLOAD_PATHS
+            )
+
+        super().__init__(app, max_bytes=max_bytes, path_matcher=should_limit)
+
+    async def _send_too_large(self, send: _Send) -> None:
+        await self._send_json(
+            send,
+            413,
+            f"management request body exceeds {self.max_bytes} bytes",
+        )

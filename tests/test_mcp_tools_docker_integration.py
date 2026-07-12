@@ -36,7 +36,7 @@ EXPECTED_TOOLS = {
 class MCPClient:
     def __init__(self, url: str):
         self.url = url
-        self.client = httpx.Client(timeout=30.0)
+        self.client = httpx.Client(timeout=30.0, trust_env=False)
         self.session_id = ""
         self.request_id = 0
 
@@ -107,6 +107,15 @@ class MCPClient:
         text_parts = [part.get("text", "") for part in result.get("content", []) if part.get("type") == "text"]
         assert text_parts, result
         return "\n".join(text_parts)
+
+
+class MCPClientContext(MCPClient):
+    def __enter__(self):
+        self.initialize()
+        return self
+
+    def __exit__(self, *_args):
+        self.close()
 
 
 @pytest.fixture(scope="module")
@@ -313,3 +322,33 @@ def test_concurrent_identical_hold_calls_converge_on_one_bucket():
     with ThreadPoolExecutor(max_workers=8) as pool:
         bucket_ids = list(pool.map(write_once, range(8)))
     assert len(set(bucket_ids)) == 1
+
+
+def test_concurrent_trace_updates_never_corrupt_the_bucket():
+    marker = _marker("concurrent-trace")
+    with MCPClientContext(MCP_URL) as creator:
+        bucket_id = _hold(creator, marker)
+
+    def update_once(index):
+        client = MCPClient(MCP_URL)
+        try:
+            client.initialize()
+            return client.call(
+                "trace",
+                {"bucket_id": bucket_id, "importance": 2 + (index % 7)},
+            )
+        finally:
+            client.close()
+
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        results = list(pool.map(update_once, range(12)))
+
+    assert all(bucket_id in result for result in results)
+    verifier = MCPClient(MCP_URL)
+    try:
+        verifier.initialize()
+        recalled = verifier.call("breath", {"query": marker, "max_results": 5})
+    finally:
+        verifier.close()
+    assert bucket_id in recalled
+    assert marker in recalled

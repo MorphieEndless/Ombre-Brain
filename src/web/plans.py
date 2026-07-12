@@ -118,9 +118,11 @@ def register(mcp) -> None:
             bucket_id = request.path_params.get("bucket_id", "").strip()
             if not bucket_id:
                 return JSONResponse({"error": "missing bucket_id"}, status_code=400)
-            # await request.json() 会把 body 当作 JSON 解析，类型改错会报 ValueError
-            body = await request.json()
-            action = (body.get("action") or "").strip().lower()
+            body = await sh._read_json_object(request)
+            action_raw = body.get("action") or ""
+            if not isinstance(action_raw, str):
+                return JSONResponse({"error": "action must be a string"}, status_code=400)
+            action = action_raw.strip().lower()
             bucket = await sh.bucket_mgr.get(bucket_id)
             if not bucket:
                 return JSONResponse({"error": f"plan not found: {bucket_id}"}, status_code=404)
@@ -182,5 +184,7 @@ def register(mcp) -> None:
                 "updates": {k: v for k, v in updates.items() if k != "change_log"},
                 "cascaded_resolved": cascaded,
             })
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=500)

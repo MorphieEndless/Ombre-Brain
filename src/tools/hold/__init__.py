@@ -17,7 +17,7 @@ core（普通存入 + 自动合并）。
 - 不返回结构化数据，统一返回供模型阅读的中文短句
 
 对外暴露：dispatch(content, tags, importance, pinned, feel, source_bucket,
-                   valence, arousal, why_remembered) → str
+                   valence, arousal, why_remembered, meaning, media) → str
 ========================================
 """
 
@@ -45,6 +45,8 @@ async def dispatch(
     valence: Optional[float] = -1,
     arousal: Optional[float] = -1,
     why_remembered: Optional[str] = "",
+    meaning: Optional[str] = "",
+    media: Optional[list] = None,
 ) -> str:
     content = "" if content is None else str(content)
     if tags is None:
@@ -64,6 +66,11 @@ async def dispatch(
     if why_remembered is None:
         why_remembered = ""
     why_remembered = str(why_remembered).strip()[:500]
+    if meaning is None:
+        meaning = ""
+    meaning = str(meaning).strip()
+    if media is not None and not isinstance(media, list):
+        media = None
     try:
         importance = int(importance)
     except (TypeError, ValueError, OverflowError):
@@ -81,6 +88,7 @@ async def dispatch(
         tags=tags,
         source_bucket=source_bucket,
         why_remembered=why_remembered,
+        meaning=meaning,
     )
     if metadata_err:
         return metadata_err
@@ -159,6 +167,8 @@ async def dispatch(
             arousal=arousal,
             source_bucket=source_bucket,
             why_remembered=why_remembered,
+            meaning=meaning,
+            media=media,
         )
         return result
 
@@ -169,6 +179,8 @@ async def dispatch(
             valence=valence,
             arousal=arousal,
             why_remembered=why_remembered,
+            meaning=meaning,
+            media=media,
         )
         return result
 
@@ -179,5 +191,7 @@ async def dispatch(
         valence=valence,
         arousal=arousal,
         why_remembered=why_remembered,
+        meaning=meaning,
+        media=media,
     )
     return result

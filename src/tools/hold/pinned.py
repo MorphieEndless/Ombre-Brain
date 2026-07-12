@@ -18,7 +18,7 @@ permanent 目录，不衰减、不会被合并掉。
 - 不允许 importance < 10：钉选意味着最高重要度
 
 对外暴露：store_pinned(content, extra_tags, valence, arousal,
-                       why_remembered) → str
+                       why_remembered, meaning, media) → str
 ========================================
 """
 
@@ -32,6 +32,8 @@ async def store_pinned(
     valence: float,
     arousal: float,
     why_remembered: str,
+    meaning: str = "",
+    media: list | None = None,
 ) -> str:
     try:
         analysis = await rt.dehydrator.analyze(content)
@@ -70,5 +72,7 @@ async def store_pinned(
         why_remembered=why_remembered,
         source_tool="hold",
         allow_embedding_fallback=True,
+        meaning=meaning,
+        media=media,
     )
     return f"📌钉选→{bucket_id} {','.join(str(d) for d in domain if d is not None)}"

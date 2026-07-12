@@ -54,6 +54,9 @@
     letter-spacing: 0.02em;
     -webkit-font-smoothing: antialiased;
   }
+  /* 字体统一：表单控件默认用系统字体（不继承 body），会让按钮/输入框看起来「另一种字体」。
+     强制它们继承 body 的字体，全站功能文字统一为一套，避免割裂。标题的衬线体(h1/h3)另有专属规则，不受影响。 */
+  button, input, select, textarea { font-family: inherit; }
 
   .header {
     padding: 28px 40px 20px;
@@ -210,6 +213,16 @@
   }
 
   .bucket-list { display: flex; flex-direction: column; gap: 8px; }
+  /* 记忆桶翻页器 / bucket pager */
+  .bucket-pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 18px 0 4px; }
+  .pager-btn {
+    padding: 6px 14px; font-size: 12.5px; border-radius: 10px; cursor: pointer; font-family: inherit;
+    border: 1px solid var(--border-strong); background: var(--surface-solid); color: var(--text);
+    box-shadow: 2px 2px 6px var(--shadow-dark-subtle), -2px -2px 5px var(--shadow-light); transition: color .15s;
+  }
+  .pager-btn:hover:not(:disabled) { color: var(--accent); }
+  .pager-btn:disabled { opacity: .4; cursor: default; box-shadow: inset 2px 2px 5px var(--shadow-dark-subtle); }
+  .pager-info { font-family: 'Share Tech Mono', monospace; font-size: 12px; color: var(--text-dim); }
   .bucket-row {
     display: flex;
     flex-direction: column;
@@ -372,6 +385,18 @@
     color: var(--accent);
     margin-bottom: 16px;
     letter-spacing: 0.3px;
+  }
+  /* 设置段标题的英文副标题（双语规范：中文主 + 英文小字灰，参照「记忆桶 / Buckets」） */
+  .config-section h3 .sec-en {
+    font-family: 'Share Tech Mono', monospace;
+    font-weight: 400; font-size: 11.5px; color: var(--text-dim);
+    letter-spacing: 0.05em; margin-left: 4px;
+  }
+  /* 通用行内英文小字（子标题 / 按钮 / 标签的双语副本），随主文字大小自适应 */
+  .en {
+    font-family: 'Share Tech Mono', monospace;
+    font-weight: 400; font-size: 0.82em; color: var(--text-dim);
+    opacity: 0.8; letter-spacing: 0.03em; margin-left: 4px;
   }
   .config-row, .form-row {
     display: flex;
@@ -869,6 +894,26 @@
   }
   #settings-view a[href^="#sec-"]:hover { transform: translateY(-1px); color: var(--accent) !important; }
 
+  /* ====== P3 设置分组子 tab / settings sub-groups ====== */
+  .settings-subtabs { display: flex; gap: 6px; margin: 2px 0 14px; flex-wrap: wrap; }
+  .settings-subtab {
+    flex: 1 1 auto; text-align: center; padding: 9px 14px; border-radius: 12px;
+    cursor: pointer; user-select: none; font-size: 13px; color: var(--text-dim);
+    background: var(--surface-solid);
+    box-shadow: inset 2px 2px 5px var(--shadow-dark-subtle), inset -2px -2px 4px var(--shadow-light);
+    transition: color .15s, box-shadow .15s;
+  }
+  .settings-subtab .en { display: block; font-size: 10px; color: var(--text-light); margin-top: 1px; letter-spacing: .05em; }
+  .settings-subtab.active {
+    color: var(--accent); font-weight: 600;
+    box-shadow: 3px 3px 8px var(--shadow-dark-subtle), -2px -2px 6px var(--shadow-light);
+  }
+  .settings-subtab.active .en { color: var(--accent); opacity: .7; }
+  /* 按当前激活分组显隐各设置段（隐藏的段塌陷掉，可见顺序即为分组顺序） */
+  #settings-view[data-active-sgroup="basics"]   .config-section[data-sgroup]:not([data-sgroup="basics"])   { display: none !important; }
+  #settings-view[data-active-sgroup="advanced"] .config-section[data-sgroup]:not([data-sgroup="advanced"]) { display: none !important; }
+  #settings-view[data-active-sgroup="backup"]   .config-section[data-sgroup]:not([data-sgroup="backup"])   { display: none !important; }
+
   /* ============ 输入 / 下拉 / 文本域：统一内凹 LCD 输入槽 ============ */
   input[type=text], input[type=password], input[type=number], input[type=date],
   select, textarea, .config-row input, .config-row select,
@@ -1148,13 +1193,16 @@
   .tool-card .meta .t { font-weight:600; font-size:13px; color: var(--text); }
   .tool-card .meta .d { font-size:12px; color:var(--text-dim); line-height:1.6; margin-top:2px; }
 
-  /* ============ 危险区：内凹警示凹槽 + 安全保护盖质感 ============ */
-  #sec-danger {
-    background: linear-gradient(180deg, rgba(190,90,65,0.05), var(--surface)) !important;
+  /* ============ 备份与迁移：从「危险区」正名而来，鼓励常用而非吓退用户 ============ */
+  /* 这里全是可逆、安全的操作（导出 / 查重 / 迁移导入），零破坏性操作，
+     因此用暖金邀请式外壳，不再套红色危险样式。真·破坏性操作若日后出现，
+     应另起一个真正的危险区并复用 .danger-hold-btn 长按确认。 */
+  #sec-backup {
+    background: linear-gradient(180deg, rgba(194,152,47,0.05), var(--surface)) !important;
     box-shadow: 8px 8px 22px var(--shadow-dark-subtle), -7px -7px 16px var(--shadow-light),
-                inset 0 0 0 2px rgba(190,90,65,0.30) !important;
+                inset 0 0 0 2px rgba(194,152,47,0.24) !important;
   }
-  #sec-danger h3 { color: var(--negative) !important; }
+  #sec-backup h3 { color: var(--accent) !important; }
   .btn-danger {
     border: none !important;
     border-radius: 12px !important;
@@ -1330,8 +1378,8 @@
   /* ====== Embedding 未配置警告 banner ====== */
   #embed-warn-banner {
     display: none;
-    position: sticky;
-    top: 56px;
+    /* 去 sticky：常驻置顶交给 #status-banner，避免两条同位置重叠（向量化未配置时二者都会出现） */
+    position: relative;
     z-index: 39;
     padding: 9px 20px;
     background: rgba(184,151,98,0.12);
@@ -1357,6 +1405,50 @@
     flex-shrink: 0;
   }
   .embed-warn-btn:hover { background: rgba(184,151,98,0.18); }
+
+  /* ====== P1 常驻系统状态条 / persistent system status bar ====== */
+  #status-banner {
+    position: sticky; top: 56px; z-index: 40;
+    font-size: 12.5px; color: var(--text);
+    background: rgba(253,252,240,0.85); backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--border);
+  }
+  #status-banner[data-state="hidden"] { display: none; }
+  .sb-bar { display: flex; align-items: center; gap: 10px; padding: 9px 20px; cursor: pointer; user-select: none; }
+  .sb-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; background: var(--text-light); transition: background .25s; }
+  #status-banner[data-state="ok"]    .sb-dot { background: var(--positive); }
+  #status-banner[data-state="warn"]  .sb-dot { background: var(--warning); }
+  #status-banner[data-state="error"] .sb-dot { background: var(--negative); box-shadow: 0 0 0 4px rgba(190,90,65,0.14); }
+  .sb-text { flex: 1; line-height: 1.5; }
+  .sb-count { font-family: 'Share Tech Mono', monospace; color: var(--text-dim); font-size: 11.5px; }
+  .sb-chevron { color: var(--text-dim); font-size: 10px; transition: transform .2s; }
+  #status-banner[data-state="ok"] .sb-chevron { transform: rotate(-90deg); }
+  #status-banner.open .sb-chevron { transform: rotate(180deg); }
+  .sb-body { display: none; padding: 2px 20px 12px; flex-direction: column; gap: 8px; }
+  #status-banner.open .sb-body { display: flex; }
+  .sb-card {
+    border-left: 3px solid var(--c, var(--warning));
+    background: var(--surface-solid); border-radius: 8px; padding: 9px 12px;
+    display: flex; align-items: flex-start; gap: 10px;
+    box-shadow: inset 1px 1px 3px var(--shadow-dark-subtle), inset -1px -1px 3px var(--shadow-light);
+  }
+  .sb-card-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex: none; background: var(--c, var(--warning)); }
+  .sb-card-main { flex: 1; min-width: 0; }
+  .sb-card-title { font-weight: 600; font-size: 13px; }
+  .sb-card-msg { color: var(--text-dim); margin-top: 2px; line-height: 1.55; word-break: break-word; }
+  .sb-card-btn {
+    flex-shrink: 0; align-self: center; padding: 5px 13px; font-size: 12px; border-radius: 8px;
+    cursor: pointer; border: none; color: #fffdf5; background: var(--accent); font-family: inherit; white-space: nowrap;
+  }
+  .sb-card-btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--border-strong); }
+  .sb-card-btn:hover { filter: brightness(1.06); }
+  /* 直达字段高亮闪烁 / flash the field the user was sent to */
+  @keyframes field-flash {
+    0%,100% { box-shadow: 0 0 0 0 rgba(194,152,47,0); }
+    25%,75% { box-shadow: 0 0 0 3px var(--accent-glow); }
+  }
+  .field-flash { animation: field-flash 1.6s ease-in-out; border-radius: 8px; }
+  @media (prefers-reduced-motion: reduce) { .field-flash { animation: none; outline: 2px solid var(--accent); } }
 
   /* ====== ⓪ 版本 & 更新 面板 ====== */
   #sec-version { background: rgba(194,152,47,0.03); border: 1px solid rgba(194,152,47,0.22); }
@@ -1765,12 +1857,12 @@
     </span>
   </div>
   <div class="search-bar">
-    <input type="text" id="search-input" placeholder="搜索记忆… / 粘贴完整 bucket id 精确定位" onkeydown="if(event.key==='Enter')doSearch()" />
+    <input type="text" id="search-input" placeholder="搜索记忆 / Search memories… （粘贴完整 bucket id 可精确定位）" onkeydown="if(event.key==='Enter')doSearch()" />
     <button onclick="doSearch()" title="搜索"><i data-lucide="search"></i></button>
   </div>
   <div class="header-actions">
-    <button onclick="openFeedback()" title="给作者反馈" style="height:32px;padding:0 12px;gap:5px;display:inline-flex;align-items:center;white-space:nowrap;font-size:12px;"><i data-lucide="message-circle"></i> 反馈</button>
-    <button onclick="doLogout()" title="退出登录 / Log out" style="height:32px;padding:0 12px;gap:5px;display:inline-flex;align-items:center;white-space:nowrap;font-size:12px;"><i data-lucide="log-out"></i> 退出</button>
+    <button onclick="openFeedback()" title="给作者反馈 / Feedback" style="height:32px;padding:0 12px;gap:5px;display:inline-flex;align-items:center;white-space:nowrap;font-size:12px;"><i data-lucide="message-circle"></i> 反馈 Feedback</button>
+    <button onclick="doLogout()" title="退出登录 / Log out" style="height:32px;padding:0 12px;gap:5px;display:inline-flex;align-items:center;white-space:nowrap;font-size:12px;"><i data-lucide="log-out"></i> 退出 Exit</button>
   </div>
 </div>
 
@@ -1778,7 +1870,6 @@
   <div class="tab active" data-tab="list"><span>记忆桶</span><span class="tab-en">Buckets</span></div>
   <div class="tab" data-tab="breath"><span>Breath 模拟</span><span class="tab-en">Breath Trace</span></div>
   <div class="tab" data-tab="network"><span>记忆网络</span><span class="tab-en">Network</span></div>
-  <div class="tab" data-tab="tools"><span>工具箱</span><span class="tab-en">Toolbox</span></div>
   <div class="tab" data-tab="plan"><span>计划</span><span class="tab-en">Plans</span></div>
   <div class="tab" data-tab="letters"><span>信</span><span class="tab-en">Letters</span></div>
   <div class="tab" data-tab="anchors"><span>锚点</span><span class="tab-en">Anchors</span></div>
@@ -1803,17 +1894,28 @@
   <button class="embed-warn-btn" onclick="gotoEmbedLocal()">⬡ 本地向量化</button>
 </div>
 
+<!-- P1 常驻系统状态条：全绿收成一行；有问题才展开「需处理」卡片，按钮直达对应设置字段 -->
+<div id="status-banner" data-state="hidden">
+  <div class="sb-bar" onclick="toggleStatusBanner()">
+    <span class="sb-dot"></span>
+    <span class="sb-text" id="sb-text">体检中…</span>
+    <span class="sb-count" id="sb-count"></span>
+    <span class="sb-chevron">▾</span>
+  </div>
+  <div class="sb-body" id="sb-body"></div>
+</div>
+
 <div class="content" id="list-view">
   <div class="filters" id="filters"></div>
   <div class="bucket-list" id="bucket-list">
-    <div class="loading">加载中…</div>
+    <div class="loading">加载中… / Loading…</div>
   </div>
   <!-- iter 1.9 C: 已主动遗忘的桶折叠区 / collapsible voluntary-forgotten group -->
   <details id="forgotten-group" style="margin-top:18px;display:none;">
     <summary style="cursor:pointer;font-size:13px;color:var(--text-dim);padding:6px 0;">
       <i data-lucide="moon-off" style="width:14px;height:14px;vertical-align:-2px;"></i>
-      已主动遗忘 <span id="forgotten-count">0</span> 条
-      <button onclick="event.preventDefault(); bucketsForgetAllow();" title="全部允许浮现" style="margin-left:12px;font-size:11px;padding:3px 8px;"><i data-lucide="eye"></i></button>
+      已主动遗忘 <span id="forgotten-count">0</span> 条 <span class="en">Forgotten</span>
+      <button onclick="event.preventDefault(); bucketsForgetAllow();" title="全部允许浮现 / Allow all to surface" style="margin-left:12px;font-size:11px;padding:3px 8px;"><i data-lucide="eye"></i></button>
     </summary>
     <div id="forgotten-list" style="margin-top:10px;"></div>
   </details>
@@ -1821,15 +1923,15 @@
 
 <div class="content" id="breath-view" style="display:none">
   <div class="breath-flow" id="breath-flow">
-    <div class="flow-step" id="fs-input">① 输入<br><small>query / valence / arousal</small></div>
+    <div class="flow-step" id="fs-input">① 输入 Input<br><small>query / valence / arousal</small></div>
     <span class="flow-arrow">→</span>
-    <div class="flow-step" id="fs-candidates">② 候选池<br><small id="fs-cand-n">— 桶</small></div>
+    <div class="flow-step" id="fs-candidates">② 候选池 Candidates<br><small id="fs-cand-n">— 桶</small></div>
     <span class="flow-arrow">→</span>
-    <div class="flow-step" id="fs-scoring">③ 四维评分<br><small>topic×4 + emotion×2 + time×2.5 + imp×1</small></div>
+    <div class="flow-step" id="fs-scoring">③ 四维评分 Scoring<br><small>topic×4 + emotion×2 + time×2.5 + imp×1</small></div>
     <span class="flow-arrow">→</span>
-    <div class="flow-step" id="fs-threshold">④ 阈值过滤<br><small id="fs-thresh-n">≥50 → — 通过</small></div>
+    <div class="flow-step" id="fs-threshold">④ 阈值过滤 Threshold<br><small id="fs-thresh-n">≥50 → — 通过</small></div>
     <span class="flow-arrow">→</span>
-    <div class="flow-step" id="fs-sort">⑤ 降序排列<br><small>返回 top N</small></div>
+    <div class="flow-step" id="fs-sort">⑤ 降序排列 Sort<br><small>返回 top N</small></div>
   </div>
 
   <div class="breath-controls">
@@ -1839,12 +1941,12 @@
     <input type="number" id="breath-valence" placeholder="0~1" min="0" max="1" step="0.1" style="width:80px" />
     <label>Arousal</label>
     <input type="number" id="breath-arousal" placeholder="0~1" min="0" max="1" step="0.1" style="width:80px" />
-    <button onclick="runBreathDebug()" title="模拟 Breath" style="padding:0 12px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="wind"></i> 模拟</button>
+    <button onclick="runBreathDebug()" title="模拟 Breath" style="padding:0 12px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="wind"></i> 模拟 Simulate</button>
   </div>
 
   <div class="breath-info" id="breath-info" style="display:none"></div>
   <div id="breath-results">
-    <div class="loading">输入 query 后点击「模拟 Breath」查看评分链路</div>
+    <div class="loading">输入 query 后点击「模拟」查看评分链路 · Enter a query and click Simulate</div>
   </div>
 </div>
 
@@ -1852,10 +1954,10 @@
   <div class="network-legend">
     <div class="legend-item"><span class="legend-dot" style="background:#B85C3C"></span> [[双链]]</div>
     <div class="legend-item"><span class="legend-dot" style="background:#4A7C59"></span> #tag</div>
-    <div class="legend-item"><span class="legend-dot" style="background:#9A7B4F"></span> 既是双链也是 tag</div>
-    <div class="legend-item" style="margin-left:18px;"><span style="display:inline-block;width:18px;height:2px;background:#8A8070;margin-right:6px;vertical-align:middle;"></span> 共现（同一桶里出现）</div>
+    <div class="legend-item"><span class="legend-dot" style="background:#9A7B4F"></span> 既是双链也是 tag <span class="en">Both</span></div>
+    <div class="legend-item" style="margin-left:18px;"><span style="display:inline-block;width:18px;height:2px;background:#8A8070;margin-right:6px;vertical-align:middle;"></span> 共现 <span class="en">Co-occurrence</span></div>
     <label style="margin-left:auto;font-size:11px;color:var(--text-dim);display:inline-flex;align-items:center;gap:6px;">
-      模式
+      模式 Mode
       <select id="network-mode" onchange="loadNetwork()" style="font-size:11px;padding:2px 6px;background:var(--surface);border:1px solid var(--border);color:var(--text);">
         <option value="concept">概念 / Concept</option>
         <option value="embedding">桶相似度 / Embedding</option>
@@ -1863,64 +1965,19 @@
     </label>
   </div>
   <canvas id="network-canvas"></canvas>
-  <div id="network-terminal">SYSTEM READY · 等待载入记忆网络…</div>
+  <div id="network-terminal">SYSTEM READY · 等待载入记忆网络… / Waiting for network…</div>
 </div>
 
-<!-- 工具箱 / Toolbox：真实开关做成硬件拨片 + LED -->
-<div class="content" id="tools-view" style="display:none">
-  <div style="max-width:680px;margin:0 auto;">
-    <div class="config-section">
-      <h3>工具箱 / Toolbox</h3>
-      <p style="font-size:12px;color:var(--text-dim);line-height:1.7;margin-bottom:18px;">
-        每个工具一个硬件拨片开关；右侧 LED 亮绿 = 已开启。拨动立即生效，看不懂的底层参数都收在下方折叠层里。
-      </p>
-
-      <!-- 加权采样（/api/settings/sampling） -->
-      <div class="tool-card">
-        <span class="hw-led" id="led-sampling"></span>
-        <div class="meta">
-          <div class="t">记忆加权采样 <span style="font-family:'Share Tech Mono',monospace;color:var(--text-light);font-weight:400;">/ Breath Sampling</span></div>
-          <div class="d">开：中等分数的记忆也有机会浮现，不总是返回最高分。关：永远只返回得分最高的那条。</div>
-        </div>
-        <span class="hw-switch" id="sw-sampling" role="switch" aria-checked="false" tabindex="0" onclick="toolToggleSampling()"></span>
-      </div>
-
-      <!-- 外网访问 Cloudflare Tunnel（/api/tunnel/*） -->
-      <div class="tool-card">
-        <span class="hw-led" id="led-tunnel"></span>
-        <div class="meta">
-          <div class="t">外网访问 <span style="font-family:'Share Tech Mono',monospace;color:var(--text-light);font-weight:400;">/ Cloudflare Tunnel</span></div>
-          <div class="d">开：可以从外网访问这个面板。关：仅本机 / 局域网。需先在「设置 → ⑥」保存 Token。</div>
-        </div>
-        <span class="hw-switch" id="sw-tunnel" role="switch" aria-checked="false" tabindex="0" onclick="toolToggleTunnel()"></span>
-      </div>
-
-      <div id="tools-msg" style="font-size:12px;min-height:18px;margin:4px 2px 14px;color:var(--text-dim);"></div>
-
-      <!-- 主功能键（momentary） -->
-      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
-        <button class="btn-primary" onclick="toolTestBreath()" title="试一次 breath" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:6px;"><i data-lucide="wind"></i> 试Breath</button>
-        <button onclick="toolGithubSync()" title="立即备份到 GitHub" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:6px;"><i data-lucide="upload-cloud"></i> 备份</button>
-        <button onclick="loadToolsPanel()" title="刷新状态 / Refresh status" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:6px;"><i data-lucide="refresh-cw"></i> 刷新</button>
-      </div>
-      <div id="tools-action-result" style="margin-top:12px;font-size:12px;color:var(--text-dim);line-height:1.8;"></div>
-
-      <details style="margin-top:18px;">
-        <summary style="cursor:pointer;font-size:12px;color:var(--text-dim);">底层参数 / 原始数据 ▸</summary>
-        <pre id="tools-raw" style="margin-top:10px;padding:14px;font-size:11px;line-height:1.6;background:var(--surface-solid);border-radius:10px;box-shadow:inset 3px 3px 7px var(--shadow-dark-subtle), inset -3px -3px 6px var(--shadow-light);white-space:pre-wrap;word-break:break-all;">—</pre>
-      </details>
-    </div>
-  </div>
-</div>
+<!-- 工具箱已合并进「设置」：采样开关→桶行为、外网访问→我、立即备份→GitHub。见方案 A。 -->
 
 <div class="content" id="import-view" style="display:none">
   <div style="max-width:720px;margin:0 auto;">
-    <h3>历史对话导入</h3>
+    <h3>历史对话导入 <span class="en">Import Conversations</span></h3>
     <p style="color:var(--text-dim);font-size:13px;">支持 Claude JSON、ChatGPT 导出、DeepSeek、Markdown、纯文本格式</p>
 
     <div id="import-upload-zone" style="border:2px dashed var(--border);border-radius:16px;padding:40px;text-align:center;cursor:pointer;margin:20px 0;transition:border-color .2s;">
       <div style="font-size:32px;margin-bottom:8px;color:var(--text-dim);"><i data-lucide="folder-up" style="width:32px;height:32px;"></i></div>
-      <div>拖拽文件到此处，或 <span style="color:var(--accent);text-decoration:underline;">点击选择</span></div>
+      <div>拖拽文件到此处，或 <span style="color:var(--accent);text-decoration:underline;">点击选择</span> <span class="en">Drop a file or click to choose</span></div>
       <input type="file" id="import-file-input" accept=".json,.txt,.md,.jsonl" style="display:none" />
     </div>
 
@@ -1928,7 +1985,7 @@
       <div class="hw-toggle-row" style="gap:10px;align-items:center;">
         <span class="hw-switch" id="import-preserve-raw-sw" role="switch" aria-checked="false"
           onclick="syncHwSwitch(this,'import-preserve-raw')"></span>
-        <span style="font-size:13px;color:var(--text);cursor:pointer;" onclick="document.getElementById('import-preserve-raw-sw').click()">保留原文模式（特殊情境/暗号/仪式性内容不摘要）</span>
+        <span style="font-size:13px;color:var(--text);cursor:pointer;" onclick="document.getElementById('import-preserve-raw-sw').click()">保留原文模式 <span class="en">Keep Raw</span><span style="font-size:11px;color:var(--text-light);">（特殊情境/暗号/仪式性内容不摘要）</span></span>
         <input type="checkbox" id="import-preserve-raw" style="display:none"
           onchange="syncSwFromCb('import-preserve-raw','import-preserve-raw-sw','')">
       </div>
@@ -1936,15 +1993,15 @@
 
     <div id="import-preflight-panel" style="display:none;margin:14px 0;padding:12px 14px;background:var(--surface-solid);border-radius:8px;font-size:12px;line-height:1.7;box-shadow:inset 2px 2px 5px var(--shadow-dark-subtle),inset -2px -2px 4px var(--shadow-light);">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
-        <strong style="font-size:13px;">导入预检</strong>
+        <strong style="font-size:13px;">导入预检 <span class="en">Preflight</span></strong>
         <span id="import-preflight-file" style="color:var(--text-light);word-break:break-all;"></span>
       </div>
       <div id="import-preflight-summary" style="color:var(--text-dim);">等待文件…</div>
       <div id="import-preflight-warnings" style="display:none;color:var(--warning);margin-top:6px;"></div>
       <pre id="import-preflight-preview" style="display:none;margin-top:8px;padding:10px;background:var(--surface);border-radius:6px;max-height:160px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:11px;color:var(--text-dim);font-family:'Share Tech Mono','SF Mono',Consolas,monospace;"></pre>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;">
-        <button id="import-start-confirm-btn" onclick="confirmStartImport()" style="display:inline-flex;align-items:center;gap:5px;padding:0 12px;height:32px;"><i data-lucide="play"></i> 开始导入</button>
-        <button onclick="clearImportPreflight()" style="display:inline-flex;align-items:center;gap:5px;padding:0 12px;height:32px;"><i data-lucide="x"></i> 取消</button>
+        <button id="import-start-confirm-btn" onclick="confirmStartImport()" style="display:inline-flex;align-items:center;gap:5px;padding:0 12px;height:32px;"><i data-lucide="play"></i> 开始导入 Start</button>
+        <button onclick="clearImportPreflight()" style="display:inline-flex;align-items:center;gap:5px;padding:0 12px;height:32px;"><i data-lucide="x"></i> 取消 Cancel</button>
       </div>
     </div>
 
@@ -1957,26 +2014,26 @@
         <div id="import-progress-bar" class="progress-fill"></div>
       </div>
       <div style="display:flex;gap:16px;margin-top:8px;font-size:13px;color:var(--text-dim);">
-        <span>API调用: <b id="import-api-calls">0</b></span>
-        <span>新建: <b id="import-created">0</b></span>
-        <span>合并: <b id="import-merged">0</b></span>
-        <span>原文: <b id="import-raw">0</b></span>
+        <span>API调用 Calls: <b id="import-api-calls">0</b></span>
+        <span>新建 New: <b id="import-created">0</b></span>
+        <span>合并 Merged: <b id="import-merged">0</b></span>
+        <span>原文 Raw: <b id="import-raw">0</b></span>
       </div>
       <div style="margin-top:12px;">
-        <button id="import-pause-btn" onclick="pauseImport()" style="display:none;align-items:center;gap:4px;"><svg class="icon" aria-hidden="true"><use href="#i-pause"></use></svg> 暂停</button>
+        <button id="import-pause-btn" onclick="pauseImport()" style="display:none;align-items:center;gap:4px;"><svg class="icon" aria-hidden="true"><use href="#i-pause"></use></svg> 暂停 Pause</button>
       </div>
     </div>
 
     <div id="import-errors" style="display:none;margin:12px 0;padding:12px;background:var(--surface);border-radius:8px;font-size:12px;color:var(--negative);max-height:120px;overflow-y:auto;"></div>
 
     <div id="import-results-section" style="margin:20px 0;">
-      <h3>已导入记忆 <button onclick="loadImportResults()" title="刷新" style="font-size:12px;padding:2px 8px;"><i data-lucide="refresh-cw"></i></button></h3>
+      <h3>已导入记忆 <span class="en">Imported</span> <button onclick="loadImportResults()" title="刷新 / Refresh" style="font-size:12px;padding:2px 8px;"><i data-lucide="refresh-cw"></i></button></h3>
       <div id="import-results-list" style="max-height:500px;overflow-y:auto;"></div>
     </div>
 
     <hr style="border-color:var(--border);margin:24px 0;" />
 
-    <h3>高频模式检测</h3>
+    <h3>高频模式检测 <span class="en">Frequent Patterns</span></h3>
     <button onclick="detectPatterns()" class="icon-btn"><i data-lucide="activity"></i> 检测高频模式</button>
     <div id="import-patterns" style="margin-top:16px;"></div>
   </div>
@@ -1996,7 +2053,7 @@
 <div class="content" id="logs-view" style="display:none">
   <div style="max-width:920px;margin:0 auto;">
     <div class="config-section">
-      <h3>服务日志</h3>
+      <h3>服务日志 <span class="en">Service Logs</span></h3>
       <div class="config-row">
         <label>级别</label>
         <select id="logs-level" style="flex:0 0 200px;">
@@ -2016,7 +2073,7 @@
 
     <!-- 统一错误日志面板（rule.md §11 OB-* 错误码体系）-->
     <div class="config-section">
-      <h3>错误日志 / Error Codes</h3>
+      <h3>错误日志 <span class="en">Error Codes</span></h3>
       <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.6;">
         统一收录所有 W 级以上错误（OB-W*/OB-E*/OB-F*）与自动降级提示（OB-I*）。<br>
         每条带时间戳 + 一键复制（含错误码 + 描述 + 建议 + 最近 15 条 log）。
@@ -2034,7 +2091,7 @@
         <span id="errors-meta" style="font-size:11px;color:var(--text-dim);margin-left:auto;"></span>
       </div>
       <div id="errors-list" style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">
-        <div style="text-align:center;color:var(--text-dim);padding:24px 0;font-size:12px;">点击「刷新」加载…</div>
+        <div style="text-align:center;color:var(--text-dim);padding:24px 0;font-size:12px;">点击「刷新」加载… / Click Refresh to load…</div>
       </div>
     </div>
   </div>
@@ -2066,14 +2123,14 @@
 <div class="content" id="plan-view" style="display:none">
   <div style="max-width:920px;margin:0 auto;">
     <div class="config-section">
-      <h3>计划 / Plans <span style="font-size:11px;color:var(--text-light);font-style:italic;font-family:'Cormorant Garamond',serif;">— what I promised, what I'm carrying</span></h3>
+      <h3>计划 <span class="en">Plans</span> <span style="font-size:11px;color:var(--text-light);font-style:italic;font-family:'Cormorant Garamond',serif;">— what I promised, what I'm carrying</span></h3>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
         <button class="btn-secondary" onclick="loadPlans()" title="刷新" style="padding:6px 10px;font-size:12px;"><i data-lucide="refresh-cw"></i></button>
         <span id="plan-stats" style="font-size:12px;color:var(--text-dim);"></span>
-        <span style="margin-left:auto;font-size:11px;color:var(--text-light);display:inline-flex;align-items:center;gap:4px;"><svg class="icon icon-ok" aria-hidden="true"><use href="#i-check"></use></svg> 完成 / <svg class="icon icon-err" aria-hidden="true"><use href="#i-x"></use></svg> 放弃 / <svg class="icon" aria-hidden="true" style="transform:scaleX(-1)"><use href="#i-clock"></use></svg> 重新激活</span>
+        <span style="margin-left:auto;font-size:11px;color:var(--text-light);display:inline-flex;align-items:center;gap:4px;"><svg class="icon icon-ok" aria-hidden="true"><use href="#i-check"></use></svg> 完成 Done / <svg class="icon icon-err" aria-hidden="true"><use href="#i-x"></use></svg> 放弃 Dropped / <svg class="icon" aria-hidden="true" style="transform:scaleX(-1)"><use href="#i-clock"></use></svg> 重新激活 Reopened</span>
       </div>
       <div id="plan-board" style="display:flex;flex-direction:column;gap:24px;">
-        <div style="text-align:center;color:var(--text-dim);padding:36px 0;font-size:13px;">点击「刷新」加载…</div>
+        <div style="text-align:center;color:var(--text-dim);padding:36px 0;font-size:13px;">点击「刷新」加载… / Click Refresh to load…</div>
       </div>
     </div>
   </div>
@@ -2083,7 +2140,7 @@
 <div class="content" id="about-view" style="display:none">
   <div style="max-width:680px;margin:0 auto;padding:20px 0;">
     <div id="about-content" style="font-family:'Noto Serif SC',Georgia,serif;line-height:1.95;color:var(--text);">
-      <div style="text-align:center;color:var(--text-dim);padding:36px 0;font-size:13px;">加载中…</div>
+      <div style="text-align:center;color:var(--text-dim);padding:36px 0;font-size:13px;">加载中… / Loading…</div>
     </div>
   </div>
 </div>
@@ -2092,36 +2149,36 @@
 <div class="content" id="letters-view" style="display:none">
   <div style="max-width:920px;margin:0 auto;">
     <div class="config-section">
-      <h3>写一封</h3>
+      <h3>写一封 <span class="en">Write a Letter</span></h3>
       <div class="config-row">
-        <label>身份</label>
+        <label>身份 <span class="en">From</span></label>
         <select id="letter-author" style="flex:0 0 140px;">
           <option value="user">user</option>
           <option value="ai">AI</option>
         </select>
         <input type="text" id="letter-username" placeholder="署名 name（可选）" />
         <button type="button" class="date-pill" style="flex:0 0 180px;" onclick="openDatePicker()">
-          <span id="letter-date-label">请选择日期</span>
+          <span id="letter-date-label">请选择日期 / Pick a date</span>
           <input type="date" id="letter-date" onchange="syncDateLabel()" oninput="syncDateLabel()"
                  style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;left:14px;bottom:0;" />
         </button>
       </div>
       <div class="config-row">
-        <label>标题</label>
-        <input type="text" id="letter-title" placeholder="标题（可选）" />
+        <label>标题 <span class="en">Title</span></label>
+        <input type="text" id="letter-title" placeholder="标题（可选）/ Title (optional)" />
       </div>
       <div class="config-row" style="align-items:flex-start;">
-        <label style="padding-top:10px;">正文</label>
+        <label style="padding-top:10px;">正文 <span class="en">Body</span></label>
         <textarea id="letter-content" placeholder="…" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:12px 14px;border-radius:2px;font-family:inherit;font-size:13px;line-height:1.7;min-height:180px;resize:vertical;box-shadow:inset 2px 2px 4px var(--shadow-dark-subtle), inset -2px -2px 4px var(--shadow-light);"></textarea>
       </div>
       <div style="display:flex;gap:14px;align-items:center;margin-top:6px;">
-        <button class="btn-primary" onclick="sendLetter()" title="寄出" style="padding:0 16px;height:36px;display:inline-flex;align-items:center;gap:6px;"><i data-lucide="send"></i> 寄出</button>
+        <button class="btn-primary" onclick="sendLetter()" title="寄出 / Send" style="padding:0 16px;height:36px;display:inline-flex;align-items:center;gap:6px;"><i data-lucide="send"></i> 寄出 Send</button>
         <span id="letter-status" style="font-size:12px;color:var(--text-dim);"></span>
       </div>
     </div>
 
     <div class="config-section">
-      <h3>信件时间线</h3>
+      <h3>信件时间线 <span class="en">Letter Timeline</span></h3>
       <div class="config-row">
         <label>筛选</label>
         <select id="letter-filter" onchange="loadLetters()" style="flex:0 0 200px;">
@@ -2150,19 +2207,26 @@
       </p>
       <div style="font-size:13px;margin-bottom:10px;">当前：<span id="anchors-count-text">…</span></div>
       <div id="anchors-list" style="display:flex;flex-direction:column;gap:10px;">
-        <div style="color:var(--text-dim);font-size:12px;">加载中…</div>
+        <div style="color:var(--text-dim);font-size:12px;">加载中… / Loading…</div>
       </div>
       <button class="btn-secondary" onclick="loadAnchorsView()" title="刷新" style="margin-top:14px;padding:6px 12px;font-size:12px;"><i data-lucide="refresh-cw"></i></button>
     </div>
   </div>
 </div>
 
-<div class="content" id="settings-view" style="display:none">
+<div class="content" id="settings-view" style="display:none" data-active-sgroup="basics">
   <div style="max-width:680px;margin:0 auto;">
 
+    <!-- 设置分组子 tab：常规 / 高级 / 备份与迁移 -->
+    <div class="settings-subtabs">
+      <div class="settings-subtab active" data-sgroup="basics"  onclick="showSettingsGroup('basics')">常规<span class="en">Basics</span></div>
+      <div class="settings-subtab"        data-sgroup="advanced" onclick="showSettingsGroup('advanced')">高级<span class="en">Advanced</span></div>
+      <div class="settings-subtab"        data-sgroup="backup"   onclick="showSettingsGroup('backup')">备份与迁移<span class="en">Backup</span></div>
+    </div>
+
     <!-- ⓪ 版本 & 更新 -->
-    <div class="config-section" id="sec-version">
-      <h3>⓪ 版本 & 更新</h3>
+    <div class="config-section" id="sec-version" data-sgroup="basics">
+      <h3>版本 & 更新 <span class="sec-en">Version &amp; Update</span></h3>
       <div class="ver-status-row">
         <span style="font-size:13px;">当前版本：<b id="ver-local-disp">…</b></span>
         <button class="btn-secondary" onclick="checkGitHubVersion()" id="btn-check-ver" style="height:30px;padding:0 14px;font-size:12px;display:inline-flex;align-items:center;gap:5px;">
@@ -2221,30 +2285,12 @@
       </div>
     </div>
 
-    <!-- 顶部引导 + 锚点 -->
-    <div class="config-section" style="background:rgba(0,0,0,0.025);">
-      <div style="font-size:13px;color:var(--text-dim);line-height:1.7;">
-        所有项都直接显示当前生效的值，可以在此处改。每一组下方的「保存」按钮会立刻写入 .env / config.yaml / 各设置接口。
-      </div>
-      <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:6px;font-size:12px;">
-        <a href="#sec-version" style="padding:4px 10px;border:1px solid rgba(194,152,47,0.4);border-radius:14px;text-decoration:none;color:var(--accent);">⓪ 版本 & 更新</a>
-        <a href="#sec-me" style="padding:4px 10px;border:1px solid var(--border,#ddd);border-radius:14px;text-decoration:none;color:var(--text);">① 我</a>
-        <a href="#sec-service" style="padding:4px 10px;border:1px solid var(--border,#ddd);border-radius:14px;text-decoration:none;color:var(--text);">② 服务</a>
-        <a href="#sec-engine" style="padding:4px 10px;border:1px solid var(--border,#ddd);border-radius:14px;text-decoration:none;color:var(--text);">③ 引擎</a>
-        <a href="#sec-bucket" style="padding:4px 10px;border:1px solid var(--border,#ddd);border-radius:14px;text-decoration:none;color:var(--text);">④ 桶行为</a>
-        <a href="#sec-env" style="padding:4px 10px;border:1px solid var(--border,#ddd);border-radius:14px;text-decoration:none;color:var(--text);">⑤ 环境变量</a>
-        <a href="#sec-mcp" style="padding:4px 10px;border:1px solid var(--border,#ddd);border-radius:14px;text-decoration:none;color:var(--text);">⑥ MCP 配置</a>
-        <a href="#sec-github" style="padding:4px 10px;border:1px solid var(--border,#ddd);border-radius:14px;text-decoration:none;color:var(--text);">⑦ GitHub 同步</a>
-        <a href="#sec-danger" style="padding:4px 10px;border:1px solid rgba(184,92,60,0.5);border-radius:14px;text-decoration:none;color:var(--accent);">⑧ 危险区</a>
-      </div>
-    </div>
-
     <!-- ① 我 -->
-    <div class="config-section" id="sec-me">
-      <h3>① 我</h3>
+    <div class="config-section" id="sec-me" data-sgroup="basics">
+      <h3>我 <span class="sec-en">Me</span></h3>
 
       <div style="margin-bottom:18px;">
-        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">称呼 / 昵称</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">称呼 / 昵称 <span class="en">Name</span></div>
         <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;line-height:1.6;">
           系统通知 + 记忆里对你的称呼（如你的名字或昵称）。留空 = 默认「人类」。<br>
           保存时会把已有记忆里的旧称呼一并换成新名（标题 / 正文 / 备注），新旧不再并存。
@@ -2254,7 +2300,7 @@
           <input type="text" id="settings-human-name" placeholder="人类" maxlength="20" style="width:180px;" />
         </div>
         <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
-          <button class="btn-primary" onclick="saveHumanName()" title="保存 / Save" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存</button>
+          <button class="btn-primary" onclick="saveHumanName()" title="保存 / Save" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存 Save</button>
           <span id="settings-human-msg" style="font-size:12px;color:var(--text-dim);"></span>
         </div>
         <div style="font-size:12px;color:var(--text-dim);margin:10px 0 6px;line-height:1.6;">
@@ -2268,7 +2314,7 @@
       </div>
 
       <div style="margin-bottom:18px;">
-        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">账户密码</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">账户密码 <span class="en">Password</span></div>
         <div id="settings-env-notice" style="display:none;font-size:12px;color:var(--warning);margin-bottom:8px;">
           <svg class="icon icon-warn" aria-hidden="true"><use href="#i-warn"></use></svg> 当前使用环境变量 OMBRE_DASHBOARD_PASSWORD，请直接修改环境变量。
         </div>
@@ -2282,12 +2328,12 @@
       </div>
 
       <div>
-        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">急救安全问题</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">急救安全问题 <span class="en">Recovery Question</span></div>
         <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">忘记密码时，凭此问题重置密码进入急救模式。</div>
         <div id="settings-qa-form">
           <div class="config-row"><label>安全问题</label><input type="text" id="settings-qa-q" placeholder="例：我第一只猫叫什么" /></div>
           <div class="config-row"><label>答案</label><input type="text" id="settings-qa-a" placeholder="答案（不区分大小写）" /></div>
-          <button class="btn-primary" onclick="saveSecurityQuestion()" title="保存急救问题 / Save security question" style="margin-top:4px;padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="shield"></i> 保存</button>
+          <button class="btn-primary" onclick="saveSecurityQuestion()" title="保存急救问题 / Save security question" style="margin-top:4px;padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="shield"></i> 保存 Save</button>
           <div id="settings-qa-msg" style="margin-top:10px;font-size:13px;"></div>
         </div>
       </div>
@@ -2347,28 +2393,28 @@
       </div>
 
       <div>
-        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">退出登录</div>
-        <button class="btn-danger" onclick="doLogout()" title="退出登录 / Log out" style="padding:0 14px;height:36px;font-size:12px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="log-out"></i> 退出登录</button>
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">退出登录 <span class="en">Log Out</span></div>
+        <button class="btn-danger" onclick="doLogout()" title="退出登录 / Log out" style="padding:0 14px;height:36px;font-size:12px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="log-out"></i> 退出登录 Log Out</button>
       </div>
     </div>
 
     <!-- ② 服务 -->
-    <div class="config-section" id="sec-service">
-      <h3>② 服务</h3>
+    <div class="config-section" id="sec-service" data-sgroup="advanced">
+      <h3>服务 <span class="sec-en">Service</span></h3>
 
       <div style="margin-bottom:18px;">
-        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">服务状态</div>
-        <div id="settings-status" style="font-size:13px;color:var(--text-dim);line-height:2;">加载中…</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">服务状态 <span class="en">Service Status</span></div>
+        <div id="settings-status" style="font-size:13px;color:var(--text-dim);line-height:2;">加载中… / Loading…</div>
         <button onclick="loadSettingsStatus()" title="刷新 / Refresh" style="margin-top:8px;font-size:12px;padding:0 12px;height:32px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="refresh-cw"></i> 刷新</button>
       </div>
 
       <div style="margin-bottom:18px;">
-        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">系统体检</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">系统体检 <span class="en">Diagnostics</span></div>
         <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;line-height:1.6;">
           快速检查本地配置、数据目录、向量化、GitHub 备份和访问控制，不会主动请求外部 API。
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-          <button onclick="loadSystemDiagnostics()" title="运行体检 / Run diagnostics" style="font-size:12px;padding:0 12px;height:32px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="activity"></i> 一键体检</button>
+          <button onclick="loadSystemDiagnostics()" title="运行体检 / Run diagnostics" style="font-size:12px;padding:0 12px;height:32px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="activity"></i> 一键体检 Run</button>
           <span id="system-diagnostics-summary" style="font-size:12px;color:var(--text-dim);">尚未运行</span>
           <span id="system-diagnostics-updated" style="font-size:11px;color:var(--text-light);"></span>
         </div>
@@ -2376,7 +2422,7 @@
       </div>
 
       <div style="margin-bottom:18px;">
-        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">修复钉选计数</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">修复钉选计数 <span class="en">Fix Pinned Count</span></div>
         <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;line-height:1.6;">
           若「永久桶计数」明显大于面板里实际的钉选数（取消钉选后计数不减、钉新桶老报上限），
           点这里清理残留的孤儿固化桶：把它们降级回动态桶，释放配额、解开权重卡死。安全幂等，可重复点。
@@ -2388,7 +2434,7 @@
       </div>
 
       <div>
-        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">宿主机记忆桶目录 (Docker)</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">宿主机记忆桶目录 (Docker) <span class="en">Host Buckets Dir</span></div>
         <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;line-height:1.6;">
           docker-compose 将 <code>${OMBRE_HOST_VAULT_DIR:-./buckets}</code> 挂到容器的 <code>/app/buckets</code>。留空 = compose 文件旁的 <code>./buckets</code>。
           <span style="color:var(--warning);"><svg class="icon icon-warn" aria-hidden="true"><use href="#i-warn"></use></svg> 容器运行后不能修改宿主机挂载；请编辑 compose 文件旁的 <code>.env</code>，再执行 <code>docker compose up -d --force-recreate</code>。</span>
@@ -2398,7 +2444,7 @@
           <input type="text" id="settings-host-vault" placeholder="例如 /Users/you/Obsidian/Ombre Brain" style="flex:1;" />
         </div>
         <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
-          <button id="settings-host-vault-save" class="btn-primary" onclick="saveHostVault()" title="保存 / Save" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存</button>
+          <button id="settings-host-vault-save" class="btn-primary" onclick="saveHostVault()" title="保存 / Save" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存 Save</button>
           <button onclick="loadHostVault()" title="重新加载 / Reload" style="font-size:12px;padding:0 12px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="refresh-cw"></i> 重载</button>
           <span id="settings-host-vault-msg" style="font-size:12px;"></span>
         </div>
@@ -2406,11 +2452,11 @@
     </div>
 
     <!-- ③ 引擎 -->
-    <div class="config-section" id="sec-engine">
-      <h3>③ 引擎</h3>
+    <div class="config-section" id="sec-engine" data-sgroup="advanced">
+      <h3>引擎 <span class="sec-en">Engine</span></h3>
 
       <div style="margin-bottom:18px;">
-        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">脱水 / 打标 LLM</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">脱水 / 打标 LLM <span class="en">Compression LLM</span></div>
         <div class="config-row" style="align-items:center;">
           <label>服务商预设</label>
           <select id="dehy-preset" onchange="applyDehyPreset()" style="flex:1;">
@@ -2444,7 +2490,7 @@
         <div class="config-row" style="align-items:center;">
           <label>API Key</label>
           <input type="password" id="cfg-dehy-key" placeholder="当前: 加载中…" style="flex:1;" />
-          <button type="button" onclick="saveCompressKey()" title="保存 Key / Save key" style="margin-left:8px;padding:0 10px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="key"></i> 保存</button>
+          <button type="button" onclick="saveCompressKey()" title="保存 Key / Save key" style="margin-left:8px;padding:0 10px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="key"></i> 保存 Save</button>
           <button type="button" onclick="testDehydrationKey()" title="测试连接 / Test connection" style="margin-left:4px;padding:0 10px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="zap"></i> 测试</button>
           <span id="dehy-key-msg" style="margin-left:8px;font-size:11px;"></span>
         </div>
@@ -2454,7 +2500,7 @@
       </div>
 
       <div>
-        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">向量化 Embedding</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">向量化 <span class="en">Embedding</span></div>
         <div class="config-row" style="align-items:center;">
           <label>服务商预设</label>
           <select id="emb-preset" onchange="applyEmbedPreset()" style="flex:1;">
@@ -2484,7 +2530,7 @@
         <div class="config-row" style="align-items:center;">
           <label>API Key</label>
           <input type="password" id="cfg-emb-api-key" placeholder="当前: 加载中…" style="flex:1;" />
-          <button type="button" onclick="saveEmbedKey()" title="保存 Key / Save key" style="margin-left:8px;padding:0 10px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="key"></i> 保存</button>
+          <button type="button" onclick="saveEmbedKey()" title="保存 Key / Save key" style="margin-left:8px;padding:0 10px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="key"></i> 保存 Save</button>
           <button type="button" onclick="testEmbeddingKey()" title="测试向量化连接 / Test embedding connection" style="margin-left:4px;padding:0 10px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="zap"></i> 测试</button>
           <span id="emb-key-msg" style="margin-left:8px;font-size:11px;"></span>
         </div>
@@ -2552,11 +2598,12 @@
             <input type="text" id="local-emb-binmirror-custom" placeholder="或自定义前缀 URL（如 https://mymirror/ollama）" style="flex:1;margin-left:8px;" />
           </div>
 
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-            <button type="button" class="btn-primary" onclick="oneClickLocal()" style="padding:7px 14px;display:inline-flex;align-items:center;gap:6px;"><svg class="icon" aria-hidden="true"><use href="#i-rocket"></use></svg> 一键本地化（装 + 起 + 下模型 + 切换）</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px;align-items:center;">
+            <button type="button" class="btn-primary" onclick="oneClickLocal()" style="padding:7px 14px;display:inline-flex;align-items:center;gap:6px;"><svg class="icon" aria-hidden="true"><use href="#i-rocket"></use></svg> 一键本地化 <span class="en">Localize</span></button>
             <button type="button" onclick="switchEmbedding('gemini')" title="切回云端 / Switch back to cloud" style="padding:7px 10px;"><i data-lucide="cloud"></i></button>
             <button type="button" onclick="loadLocalEmbStatus()" title="刷新状态 / Refresh status" style="padding:7px 10px;"><i data-lucide="refresh-cw"></i></button>
           </div>
+          <div style="font-size:11px;color:var(--text-light);line-height:1.6;margin-bottom:8px;">自动完成：安装运行时 → 启动 → 下载 bge-m3 模型 → 切到本地。想分步操作见下方「分步操作 / 高级」。</div>
 
           <details style="margin-bottom:6px;">
             <summary style="cursor:pointer;font-size:12px;color:var(--text-light);">分步操作 / 高级（逐步：装运行时 → 启动 → 下模型 → 切换）</summary>
@@ -2590,17 +2637,18 @@
         <button class="btn-primary" onclick="saveConfig(true)" title="保存配置 / Save config" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存配置</button>
         <span id="config-status" style="font-size:13px;"></span>
       </div>
-      <div style="margin-top:6px;font-size:11px;color:var(--text-light);">注：本「保存」按钮同时提交「③ 引擎」与「④ 桶行为」中除采样外的所有字段（同一个 /api/config 接口），并立即写入 config.yaml。</div>
+      <div style="margin-top:6px;font-size:11px;color:var(--text-light);">注：本「保存」按钮同时提交「引擎」与「桶行为」中除采样外的所有字段（同一个 /api/config 接口），并立即写入 config.yaml。</div>
     </div>
 
     <!-- ④ 桶行为 -->
-    <div class="config-section" id="sec-bucket">
-      <h3>④ 桶行为</h3>
+    <div class="config-section" id="sec-bucket" data-sgroup="basics">
+      <h3>桶行为 <span class="sec-en">Bucket Behavior</span></h3>
 
       <div style="margin-bottom:18px;">
         <div style="font-weight:600;font-size:13px;margin-bottom:6px;">呼吸采样 <span style="font-size:11px;color:var(--text-dim);font-weight:400;">/ Breath Sampling</span></div>
-        <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.6;">
-          关掉 = breath 永远返回得分最高的那条；打开 = 按 score^(1/温度) 加权采样，让中等分数的桶也有机会浮现。温度越高越随机；候选不足时自动回退。
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.7;">
+          <b>关</b>：breath 永远返回得分最高的那条。<br>
+          <b>开</b>：按 score^(1/温度) 加权采样，中等分数的桶也有机会浮现（温度越高越随机；候选不足时自动回退）。
         </div>
         <div class="config-row" style="align-items:center;">
           <label>启用加权采样</label>
@@ -2620,7 +2668,7 @@
                  style="flex:1;" oninput="document.getElementById('sampling-temp-val').textContent=this.value;" />
         </div>
         <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
-          <button class="btn-primary" onclick="saveSamplingSettings()" title="保存 / Save" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存</button>
+          <button class="btn-primary" onclick="saveSamplingSettings()" title="保存 / Save" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存 Save</button>
           <button onclick="testSamplingBreath()" title="试一次 breath / Try a breath" style="font-size:12px;padding:0 12px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="wind"></i> 试Breath</button>
           <span id="sampling-msg" style="font-size:12px;"></span>
         </div>
@@ -2628,7 +2676,7 @@
       </div>
 
       <div>
-        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">默认参数（与「③ 引擎」共用「保存」按钮）</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">默认参数 <span class="en">Defaults</span><span style="font-weight:400;font-size:11px;color:var(--text-light);margin-left:6px;">（与「引擎」共用「保存」按钮）</span></div>
         <div class="config-row"><label>合并阈值</label><input type="number" id="cfg-merge" min="0" max="100" /></div>
         <div style="margin-top:-4px;padding-left:122px;font-size:11px;color:var(--text-light);">0-100，越高越难合并相似桶</div>
         <div class="config-row"><label>breath 默认桶数</label><input type="number" id="cfg-sf-breath-results" min="1" max="50" /></div>
@@ -2641,8 +2689,8 @@
     </div>
 
     <!-- ⑤ 环境变量 -->
-    <div class="config-section" id="sec-env">
-      <h3>⑤ 环境变量</h3>
+    <div class="config-section" id="sec-env" data-sgroup="advanced">
+      <h3>环境变量 <span class="sec-en">Environment Variables</span></h3>
       <p style="font-size:12px;color:var(--text-light);margin:0 0 16px;line-height:1.6;">
         这里改完保存会立即生效并写入 <code>config.yaml</code> / <code>.env</code>（重启后仍有效）。<br>
         API Key 字段显示脱敏值；输入新值才会覆盖，留空 = 不动。
@@ -2701,7 +2749,7 @@
       </div>
 
       <div style="display:flex;gap:12px;align-items:center;margin-bottom:20px;">
-        <button class="btn-primary" onclick="saveEnvConfig()" title="保存环境配置 / Save environment config" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存</button>
+        <button class="btn-primary" onclick="saveEnvConfig()" title="保存环境配置 / Save environment config" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存 Save</button>
         <span id="env-config-status" style="font-size:13px;"></span>
       </div>
 
@@ -2722,13 +2770,13 @@
 
       <details style="margin-top:12px;">
         <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text-dim);">系统信息（点击展开）</summary>
-        <div id="config-readonly" style="margin-top:10px;font-size:13px;color:var(--text-dim);line-height:1.8;">加载中…</div>
+        <div id="config-readonly" style="margin-top:10px;font-size:13px;color:var(--text-dim);line-height:1.8;">加载中… / Loading…</div>
       </details>
     </div>
 
     <!-- ⑥ MCP 配置 -->
-    <div class="config-section" id="sec-mcp">
-      <h3>⑥ MCP 配置</h3>
+    <div class="config-section" id="sec-mcp" data-sgroup="advanced">
+      <h3>MCP 配置 <span class="sec-en">MCP Setup</span></h3>
       <div style="font-size:12px;color:var(--text-dim);margin-bottom:16px;line-height:1.7;">
         生成 Claude Desktop / claude.ai 的 MCP 连接配置。12 个工具全在一个端点 /mcp 上，只需连这一条。
       </div>
@@ -2751,7 +2799,7 @@
 
       <!-- 公网域名输入（仅公网模式显示） -->
       <div id="mcp-public-domain-row" style="display:none;margin-bottom:16px;">
-        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">公网域名</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">公网域名 <span class="en">Public Domain</span></div>
         <div style="display:flex;gap:8px;align-items:center;">
           <input type="text" id="mcp-custom-domain" placeholder="例：https://ob.example.com"
             style="flex:1;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 14px;border-radius:2px;font-family:monospace;font-size:12px;"
@@ -2800,7 +2848,7 @@
             <option value="true">开启 OAuth（Claude.ai 网页版 / Claude Code 远程需要）</option>
             <option value="false">关闭 · 免认证直连（自有前端 / GPT / GLM）</option>
           </select>
-          <button type="button" onclick="saveMcpAuth()" title="保存并写入 config.yaml / Save &amp; write to config.yaml" style="margin-left:8px;padding:0 12px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="save"></i> 保存</button>
+          <button type="button" onclick="saveMcpAuth()" title="保存并写入 config.yaml / Save &amp; write to config.yaml" style="margin-left:8px;padding:0 12px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="save"></i> 保存 Save</button>
           <span id="mcp-auth-msg" style="margin-left:8px;font-size:11px;"></span>
         </div>
         <div style="margin-top:6px;font-size:11px;color:var(--text-light);line-height:1.7;">
@@ -2814,7 +2862,7 @@
         <div class="config-row" style="align-items:center;">
           <label>对外端口</label>
           <input type="number" id="cfg-host-port" min="1" max="65535" placeholder="18001" style="width:140px;" />
-          <button type="button" onclick="saveHostPort()" title="保存端口 / Save port" style="margin-left:8px;padding:0 12px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="save"></i> 保存</button>
+          <button type="button" onclick="saveHostPort()" title="保存端口 / Save port" style="margin-left:8px;padding:0 12px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="save"></i> 保存 Save</button>
           <span id="host-port-msg" style="margin-left:8px;font-size:11px;"></span>
         </div>
         <div id="host-port-hint" style="margin-top:6px;font-size:11px;color:var(--text-light);line-height:1.7;"></div>
@@ -2833,8 +2881,8 @@
     </div>
 
     <!-- ⑦ GitHub 同步 -->
-    <div class="config-section" id="sec-github">
-      <h3>⑦ GitHub 同步</h3>
+    <div class="config-section" id="sec-github" data-sgroup="backup">
+      <h3>GitHub 同步 <span class="sec-en">GitHub Sync</span></h3>
       <p style="font-size:12px;color:var(--text-light);margin:0 0 16px;line-height:1.7;">
         把你的记忆备份到自己的 GitHub 仓库，等于一份云端存档——换电脑、服务器挂了都能从这里拉回来。<br>
         <b>同步</b>＝把本地记忆<b>上传</b>到 GitHub；<b>导入</b>＝把 GitHub 上的记忆<b>拉回</b>本地。两个方向别搞反。<br>
@@ -2874,7 +2922,7 @@
       </div>
 
       <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;">
-        <button type="button" onclick="saveGithubConfig()" title="保存配置 / Save config" style="padding:0 14px;height:36px;font-size:13px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存</button>
+        <button type="button" onclick="saveGithubConfig()" title="保存配置 / Save config" style="padding:0 14px;height:36px;font-size:13px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存 Save</button>
         <button type="button" onclick="validateGithub()" title="验证连接 / Verify connection" style="padding:0 14px;height:36px;font-size:13px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="shield-check"></i> 验证</button>
         <button type="button" class="btn-primary" onclick="runGithubSync()" id="gh-sync-btn" title="立即同步 / Sync now" style="padding:0 14px;height:36px;font-size:13px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="upload-cloud"></i> 同步</button>
         <button type="button" onclick="runGithubImport()" id="gh-import-btn" title="从 GitHub 拉回记忆（会覆盖本地同名记忆）/ Import from GitHub (overwrites local memories with the same name)" style="padding:0 14px;height:36px;font-size:13px;display:inline-flex;align-items:center;gap:5px;border:1px solid var(--accent,#b85c3c);color:var(--accent,#b85c3c);"><i data-lucide="download-cloud"></i> 从 GitHub 导入</button>
@@ -2897,12 +2945,16 @@
       </div>
     </div>
 
-    <!-- ⑧ 危险区 -->
-    <div class="config-section" id="sec-danger" style="border:1px solid rgba(184,92,60,0.55);background:rgba(184,92,60,0.04);margin-top:40px;">
-      <h3 style="color:var(--accent);">⑧ 危险区</h3>
+    <!-- ⑧ 数据备份与迁移（从「危险区」正名：这里全是安全、可逆的操作，鼓励常用） -->
+    <div class="config-section" id="sec-backup" data-sgroup="backup" style="margin-top:40px;">
+      <h3>数据备份与迁移 <span class="sec-en">Backup &amp; Migration</span></h3>
+
+      <div style="margin-bottom:14px;font-size:12px;color:var(--text-dim);line-height:1.7;padding:9px 12px;background:rgba(194,152,47,0.06);border-radius:8px;">
+        这里的操作都<strong>安全、可逆</strong>——定期导出备份是保护记忆最简单的方式，建议养成习惯。
+      </div>
 
       <div style="margin-bottom:18px;">
-        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">数据导出 / 健康</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">导出备份 / 检查重复 <span class="en">Export / Dedup</span></div>
         <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.6;">
           导出打包当前所有 bucket markdown + embeddings.db（<strong>不包含 config / 密钥</strong>），可用于本地备份或跨设备迁移。<br>
           重复桶：每次 hold/grow 后系统会标记相似度 &gt; 0.95 的对，下面可逐对处理。
@@ -2914,7 +2966,7 @@
 
       <!-- 记忆包导入（zip 迁移） -->
       <div style="margin-bottom:18px;padding-top:14px;border-top:1px solid var(--border);">
-        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">从 zip 包导入（完整记忆迁移）</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">从 zip 包导入 <span class="en">Import from Zip</span><span style="font-weight:400;font-size:11px;color:var(--text-light);margin-left:6px;">（完整记忆迁移）</span></div>
         <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.6;">
           上传从另一个 Ombre Brain 实例导出的 <code>.zip</code> 文件。系统会增量合并，遇到 ID 冲突时由你决定如何处理。<br>
           若导入包的 embedding 模型与当前不一致，向量数据将被丢弃并在导入后自动重新向量化。
@@ -2939,8 +2991,8 @@
           </div>
 
           <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <button class="btn-primary" id="migrate-apply-btn" onclick="applyMigrate()" style="display:inline-flex;align-items:center;gap:6px;"><svg class="icon" aria-hidden="true"><use href="#i-upload"></use></svg> 开始导入</button>
-            <button class="btn-secondary" onclick="resetMigrate()" style="font-size:12px;padding:4px 12px;">取消</button>
+            <button class="btn-primary" id="migrate-apply-btn" onclick="applyMigrate()" style="display:inline-flex;align-items:center;gap:6px;"><svg class="icon" aria-hidden="true"><use href="#i-upload"></use></svg> 开始导入 Start</button>
+            <button class="btn-secondary" onclick="resetMigrate()" style="font-size:12px;padding:4px 12px;">取消 Cancel</button>
           </div>
         </div>
 
@@ -3460,22 +3512,77 @@ function diagnosticStatusColor(status) {
   return 'var(--text-dim)';
 }
 
+// 体检项标签中文化：后端 id → 中文（主）+ 英文（小字）。普通人看不懂 surface context /
+// migration preservation 这类词，面板里一律给中文；英文留作小字副标题，方便对照日志。
+var DIAG_LABELS = {
+  storage:                   ['数据目录', 'Storage'],
+  buckets:                   ['记忆桶', 'Buckets'],
+  ledger:                    ['事件账本', 'Ledger'],
+  observability_boundary:    ['可观测性边界', 'Observability'],
+  public_tool_manifest:      ['公开工具清单', 'Tool Manifest'],
+  adr_requirements:          ['架构决策记录', 'ADR'],
+  code_standards:            ['代码规范', 'Code Standards'],
+  red_lines:                 ['红线约束', 'Red Lines'],
+  crash_recovery:            ['崩溃恢复', 'Crash Recovery'],
+  replication_contract:      ['复制契约', 'Replication'],
+  migration_preservation:    ['迁移保真', 'Migration'],
+  surface_context:           ['浮现上下文', 'Surface Context'],
+  preflight_cli_diagnostics: ['预检 CLI', 'Preflight CLI'],
+  vnext_preflight:           ['vNext 预检', 'vNext Preflight'],
+  preflight_report_self:     ['预检自检', 'Preflight Self'],
+  vnext_coverage:            ['vNext 覆盖率', 'vNext Coverage'],
+  llm:                       ['压缩 / 打标 LLM', 'Compression LLM'],
+  embedding:                 ['向量化', 'Embedding'],
+  integrity:                 ['数据完整性', 'Integrity'],
+  github:                    ['GitHub 备份', 'GitHub Backup'],
+  auth:                      ['访问控制', 'Access Control'],
+  runtime:                   ['运行时', 'Runtime'],
+};
+function diagLabelHtml(check) {
+  var m = DIAG_LABELS[check.id];
+  if (m) return esc(m[0]) + ' <span class="en">' + esc(m[1]) + '</span>';
+  return esc(check.label || check.id || '检查项');
+}
+
+// 开发者 vs 用户：这些是内部工程/契约检查（事件账本、契约、vNext 迁移预检、代码规范、ADR…），
+// 检的是我们开发者的东西，跟用户的记忆好不好无关 → 不在用户面板正文露出，折叠进「开发者诊断」。
+// 用户相关的只有：数据目录 / 记忆桶 / 压缩LLM / 向量化 / 数据完整性 / GitHub备份 / 访问控制 / 运行时。
+var DIAG_DEV_IDS = {
+  ledger: 1, observability_boundary: 1, public_tool_manifest: 1, adr_requirements: 1,
+  code_standards: 1, red_lines: 1, crash_recovery: 1, replication_contract: 1,
+  migration_preservation: 1, surface_context: 1, preflight_cli_diagnostics: 1,
+  vnext_preflight: 1, preflight_report_self: 1, vnext_coverage: 1,
+};
+function isDevCheck(c) { return !!DIAG_DEV_IDS[c && c.id]; }
+
+// 面板只回答「好不好」：状态灯 + 一句人话 + 建议。
+// 所有原始 details（schema 名、字段路径、missing_files、嵌套 JSON）都属于日志，
+// 一律折叠进「查看详情」，绝不内联到面板主体，也绝不出现 [object Object]。
 function renderDiagnosticCheck(check) {
   const color = diagnosticStatusColor(check.status);
   const details = check.details || {};
-  const detailText = Object.keys(details).map(function (key) {
-    const val = details[key];
-    if (val === null || val === undefined || val === '') return '';
-    return '<span><b>' + esc(key) + '</b>: ' + esc(String(val)) + '</span>';
-  }).filter(Boolean).join(' · ');
+  let hasDetails = false;
+  for (const k in details) {
+    const v = details[k];
+    if (v !== null && v !== undefined && v !== '') { hasDetails = true; break; }
+  }
+  let detailBlock = '';
+  if (hasDetails) {
+    let pretty = '';
+    try { pretty = JSON.stringify(details, null, 2); } catch (e) { pretty = ''; }
+    detailBlock = '<details style="margin-top:5px;">'
+      + '<summary style="cursor:pointer;color:var(--accent);font-size:11px;user-select:none;">查看详情 · Details</summary>'
+      + '<pre style="margin-top:5px;padding:8px 10px;background:var(--surface);border-radius:6px;max-height:180px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:11px;color:var(--text-dim);font-family:\'Share Tech Mono\',\'SF Mono\',Consolas,monospace;">'
+      + esc(pretty) + '</pre></details>';
+  }
   return '<div style="border-left:3px solid ' + color + ';padding:9px 11px;background:var(--surface-solid);border-radius:8px;font-size:12px;line-height:1.6;box-shadow:inset 1px 1px 3px var(--shadow-dark-subtle),inset -1px -1px 3px var(--shadow-light);">'
     + '<div style="display:flex;align-items:center;gap:8px;justify-content:space-between;flex-wrap:wrap;">'
-    + '<strong style="font-size:13px;color:var(--text);">' + esc(check.label || check.id || '检查项') + '</strong>'
+    + '<strong style="font-size:13px;color:var(--text);">' + diagLabelHtml(check) + '</strong>'
     + '<span style="color:' + color + ';font-weight:600;">' + diagnosticStatusLabel(check.status) + '</span>'
     + '</div>'
     + '<div style="color:var(--text-dim);margin-top:3px;">' + esc(check.message || '') + '</div>'
     + (check.action ? '<div style="color:var(--accent);margin-top:3px;">建议：' + esc(check.action) + '</div>' : '')
-    + (detailText ? '<div style="color:var(--text-light);margin-top:4px;word-break:break-all;">' + detailText + '</div>' : '')
+    + detailBlock
     + '</div>';
 }
 
@@ -3491,19 +3598,143 @@ async function loadSystemDiagnostics() {
     const resp = await authFetch('/api/system/diagnostics');
     if (!resp) return;
     const d = await readJsonSafe(resp);
-    const s = d.summary || {};
     const checks = d.checks || [];
-    const ok = d.ok !== false;
-    summaryEl.style.color = ok ? 'var(--positive,#87A987)' : 'var(--negative,#BE5A41)';
-    summaryEl.innerHTML = (ok ? _SV.ok + ' ' : _SV.warn + ' ')
-      + '正常 ' + (s.ok || 0) + ' · 提醒 ' + (s.warning || 0) + ' · 需处理 ' + (s.error || 0);
-    listEl.innerHTML = checks.length
-      ? checks.map(renderDiagnosticCheck).join('')
+    const userChecks = checks.filter(function (c) { return !isDevCheck(c); });
+    const devChecks = checks.filter(isDevCheck);
+    // 用户摘要只统计用户相关项（开发者项不该影响用户看到的「好不好」）
+    var us = { ok: 0, warning: 0, error: 0 };
+    userChecks.forEach(function (c) { if (us[c.status] != null) us[c.status]++; });
+    const allOk = us.error === 0 && us.warning === 0;
+    summaryEl.style.color = allOk ? 'var(--positive,#87A987)' : 'var(--negative,#BE5A41)';
+    summaryEl.innerHTML = (allOk ? _SV.ok + ' ' : _SV.warn + ' ')
+      + '正常 ' + us.ok + ' · 提醒 ' + us.warning + ' · 需处理 ' + us.error;
+    var html = userChecks.length
+      ? userChecks.map(renderDiagnosticCheck).join('')
       : '<div style="font-size:12px;color:var(--text-dim);">没有返回体检项。</div>';
+    // 开发者诊断：折叠到底部，普通用户不受打扰，devs 需要时点开
+    if (devChecks.length) {
+      var devOk = devChecks.filter(function (c) { return c.status === 'ok'; }).length;
+      html += '<details style="margin-top:14px;">'
+        + '<summary style="cursor:pointer;color:var(--text-light);font-size:12px;user-select:none;">开发者诊断 · Developer checks（' + devOk + '/' + devChecks.length + ' 正常）</summary>'
+        + '<div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">'
+        + devChecks.map(renderDiagnosticCheck).join('')
+        + '</div></details>';
+    }
+    listEl.innerHTML = html;
     if (updatedEl) updatedEl.textContent = '刚刚刷新 ' + new Date().toLocaleTimeString();
   } catch(e) {
     summaryEl.style.color = 'var(--negative)';
     summaryEl.textContent = '体检失败：' + (e && e.message ? e.message : e);
+  }
+}
+
+// ====== P1 常驻系统状态条 / persistent system status bar ======
+// 只有这几项对应用户能自己动手改的设置字段；其余（契约 / 开发类检查）一律「查看详情」跳到设置体检。
+const SB_ACTION_TARGETS = {
+  embedding: { field: 'cfg-emb-api-key' },   // 向量化 Key
+  llm:       { field: 'cfg-dehy-key' },       // 压缩 / 打标 LLM Key
+  github:    { field: 'sec-github' },          // GitHub 备份区
+};
+
+// P3 设置分组子 tab：切换「常规 / 高级 / 备份与迁移」。
+function showSettingsGroup(name) {
+  const view = document.getElementById('settings-view');
+  if (!view) return;
+  view.setAttribute('data-active-sgroup', name);
+  document.querySelectorAll('.settings-subtab').forEach(function (t) {
+    t.classList.toggle('active', t.getAttribute('data-sgroup') === name);
+  });
+}
+// 找到某元素所在的设置分组并激活它——「前往处理」的目标字段可能藏在「高级」分组里，
+// 隐藏的元素无法 scrollIntoView，必须先把它所在的分组切出来。
+function ensureSettingsGroupFor(el) {
+  const sec = (el && el.closest) ? el.closest('.config-section[data-sgroup]') : null;
+  if (sec) showSettingsGroup(sec.getAttribute('data-sgroup'));
+}
+
+// 跳到设置里某个具体字段并高亮闪烁——把「需处理」卡片直接落到该改的地方。
+function scrollToField(elId) {
+  document.querySelector('[data-tab=settings]')?.click();
+  setTimeout(function () {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    ensureSettingsGroupFor(el);   // 先切到该字段所在分组，再滚动
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.remove('field-flash');
+    void el.offsetWidth; // 强制 reflow，重启动画
+    el.classList.add('field-flash');
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) {
+      try { el.focus({ preventScroll: true }); } catch (e) {}
+    }
+    setTimeout(function () { el.classList.remove('field-flash'); }, 1900);
+  }, 260);
+}
+
+// 「查看详情」：跳到设置 → 系统体检，并跑一次完整体检。
+function gotoDiagnostics() {
+  document.querySelector('[data-tab=settings]')?.click();
+  setTimeout(function () {
+    const s = document.getElementById('sec-service');
+    if (s) { ensureSettingsGroupFor(s); s.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    if (typeof loadSystemDiagnostics === 'function') loadSystemDiagnostics();
+  }, 260);
+}
+
+function toggleStatusBanner() {
+  const b = document.getElementById('status-banner');
+  if (!b) return;
+  if (b.getAttribute('data-state') === 'ok') { gotoDiagnostics(); return; }
+  b.classList.toggle('open');
+}
+
+function renderStatusBannerCard(check) {
+  const color = check.status === 'error' ? 'var(--negative)' : 'var(--warning)';
+  const target = SB_ACTION_TARGETS[check.id];
+  const btn = (target && target.field)
+    ? '<button class="sb-card-btn" onclick="scrollToField(\'' + target.field + '\')">前往处理</button>'
+    : '<button class="sb-card-btn ghost" onclick="gotoDiagnostics()">查看详情</button>';
+  return '<div class="sb-card" style="--c:' + color + '">'
+    + '<span class="sb-card-dot"></span>'
+    + '<div class="sb-card-main">'
+    + '<div class="sb-card-title">' + diagLabelHtml(check) + '</div>'
+    + '<div class="sb-card-msg">' + esc(check.message || '') + '</div>'
+    + '</div>' + btn + '</div>';
+}
+
+async function loadStatusBanner() {
+  const banner = document.getElementById('status-banner');
+  if (!banner) return;
+  const textEl = document.getElementById('sb-text');
+  const countEl = document.getElementById('sb-count');
+  const bodyEl = document.getElementById('sb-body');
+  banner.setAttribute('data-state', 'loading');
+  banner.classList.remove('open');
+  textEl.textContent = '体检中… / Checking…';
+  countEl.textContent = '';
+  bodyEl.innerHTML = '';
+  try {
+    const resp = await authFetch('/api/system/diagnostics');
+    if (!resp) { banner.setAttribute('data-state', 'hidden'); return; }
+    const d = await readJsonSafe(resp);
+    // 状态条只看用户相关项：开发者契约检查不该让用户「需处理」告警
+    const checks = (d.checks || []).filter(function (c) { return !isDevCheck(c); });
+    const total = checks.length;
+    const problems = checks.filter(function (c) { return c.status === 'error' || c.status === 'warning'; });
+    problems.sort(function (a, b) { return (a.status === 'error' ? 0 : 1) - (b.status === 'error' ? 0 : 1); });
+    if (problems.length === 0) {
+      banner.setAttribute('data-state', 'ok');
+      textEl.innerHTML = '<b>系统正常</b> · OK';
+      countEl.textContent = total + ' 项检查全部通过';
+      return;
+    }
+    const nErr = problems.filter(function (c) { return c.status === 'error'; }).length;
+    banner.setAttribute('data-state', nErr ? 'error' : 'warn');
+    textEl.innerHTML = '<b>' + problems.length + ' 项需处理</b> · Action Needed';
+    countEl.textContent = '其余 ' + (total - problems.length) + ' 项正常';
+    bodyEl.innerHTML = problems.map(renderStatusBannerCard).join('');
+    banner.classList.add('open');
+  } catch (e) {
+    banner.setAttribute('data-state', 'hidden');
   }
 }
 
@@ -3667,123 +3898,8 @@ async function testSamplingBreath() {
   }
 }
 
-// ============================================================
-// 工具箱 / Toolbox — 仅接「自包含、不会误伤其它配置」的真实开关
-//   · 加权采样  → /api/settings/sampling (GET/POST)
-//   · 外网访问  → /api/tunnel/{status,start,stop}
-// 动作键：试一次 breath → /api/breath；备份 → /api/github/sync
-// ============================================================
-function _setSwitch(swId, ledId, on) {
-  var sw = document.getElementById(swId), led = document.getElementById(ledId);
-  if (sw) sw.setAttribute('aria-checked', on ? 'true' : 'false');
-  if (led) led.classList.toggle('on', !!on);
-}
-function _toolsMsg(text, kind) {
-  var el = document.getElementById('tools-msg'); if (!el) return;
-  el.style.color = kind === 'err' ? 'var(--negative)' : (kind === 'ok' ? 'var(--accent)' : 'var(--text-dim)');
-  el.textContent = text || '';
-}
-
-var _toolsSampling = null;  // 缓存采样完整参数，翻转 enabled 时原样回传，避免丢字段
-async function loadToolsPanel() {
-  _toolsMsg('读取状态…');
-  var raw = {};
-  var errs = [];
-  try {
-    var r1 = await authFetch('/api/settings/sampling');
-    if (r1 && r1.ok) {
-      var s = await r1.json();
-      _toolsSampling = s;
-      _setSwitch('sw-sampling', 'led-sampling', !!s.enabled);
-      raw.sampling = s;
-    }
-  } catch (e) { errs.push('采样配置: ' + (e.message || e)); }
-  try {
-    var r2 = await authFetch('/api/tunnel/status');
-    if (r2 && r2.ok) {
-      var t = await r2.json();
-      _setSwitch('sw-tunnel', 'led-tunnel', !!t.running);
-      raw.tunnel = { running: t.running, token_set: t.token_set, auto_start: t.auto_start, last_error: t.last_error || '' };
-    }
-  } catch (e) { errs.push('隧道状态: ' + (e.message || e)); }
-  var pre = document.getElementById('tools-raw');
-  if (pre) pre.textContent = JSON.stringify(raw, null, 2);
-  if (errs.length) _toolsMsg('部分状态读取失败 — ' + errs.join('；'), 'err');
-  else _toolsMsg('');
-}
-
-async function toolToggleSampling() {
-  var sw = document.getElementById('sw-sampling');
-  var willOn = sw.getAttribute('aria-checked') !== 'true';
-  var base = _toolsSampling || { top_k: 12, sample_k: 3, temperature: 0.7 };
-  _toolsMsg('保存中… / Saving…');
-  try {
-    var resp = await authFetch('/api/settings/sampling', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled: willOn, top_k: base.top_k, sample_k: base.sample_k, temperature: base.temperature })
-    });
-    if (resp && resp.ok) {
-      _setSwitch('sw-sampling', 'led-sampling', willOn);
-      if (_toolsSampling) _toolsSampling.enabled = willOn;
-      setHwSwitch('sampling-enabled', willOn);  // 同步设置页
-      _toolsMsg(willOn ? '已开启加权采样' : '已关闭加权采样', 'ok');
-    } else { _toolsMsg('保存失败', 'err'); }
-  } catch (e) { _toolsMsg('保存失败: ' + e, 'err'); }
-}
-
-async function toolToggleTunnel() {
-  var sw = document.getElementById('sw-tunnel');
-  var willOn = sw.getAttribute('aria-checked') !== 'true';
-  if (willOn) {
-    _toolsMsg('启动中… / Starting…');
-    try {
-      var st = await authFetch('/api/tunnel/status');
-      var sd = st && st.ok ? await st.json() : {};
-      if (!sd.token_set) { _toolsMsg('请先到「设置 → ⑥」保存 Cloudflare Token', 'err'); return; }
-      var resp = await authFetch('/api/tunnel/start', { method: 'POST' });
-      if (resp && resp.ok) { _toolsMsg('已请求启动，连接需几秒，稍后自动刷新', 'ok'); }
-      else { var d = resp ? await resp.json().catch(function(){return{};}) : {}; _toolsMsg('启动失败: ' + (d.error || ''), 'err'); }
-    } catch (e) { _toolsMsg('启动失败: ' + e, 'err'); }
-  } else {
-    _toolsMsg('停止中… / Stopping…');
-    try {
-      var resp2 = await authFetch('/api/tunnel/stop', { method: 'POST' });
-      if (resp2 && resp2.ok) { _setSwitch('sw-tunnel', 'led-tunnel', false); _toolsMsg('已停止外网访问', 'ok'); }
-      else { _toolsMsg('停止失败', 'err'); }
-    } catch (e) { _toolsMsg('停止失败: ' + e, 'err'); }
-  }
-  setTimeout(loadToolsPanel, 1500);  // tunnel 启动是异步的，回查真实状态
-}
-
-async function toolTestBreath() {
-  var out = document.getElementById('tools-action-result');
-  if (window.ObPet) ObPet.react('breath');   // 电子宠物：breath 反应
-  out.textContent = 'breath 中…';
-  try {
-    var resp = await authFetch('/api/breath?n=5');
-    if (!resp) return;
-    var d = await readJsonSafe(resp);
-    var items = (d.buckets || d.results || []).slice(0, 5);
-    if (!items.length) { out.textContent = '没有候选桶（库可能是空的）'; return; }
-    out.innerHTML = '<b style="color:var(--accent)">本次浮现：</b><br>' + items.map(function (b, i) {
-      var nm = esc(b.name || b.id || '(无名)');
-      var sc = (b.score != null) ? ' · ' + Number(b.score).toFixed(3) : '';
-      return (i + 1) + '. ' + nm + sc;
-    }).join('<br>');
-  } catch (e) { out.textContent = '失败: ' + e; }
-}
-
-async function toolGithubSync() {
-  var out = document.getElementById('tools-action-result');
-  out.textContent = '同步到 GitHub 中…';
-  try {
-    var resp = await authFetch('/api/github/sync', { method: 'POST' });
-    if (!resp) return;
-    var d = await resp.json().catch(function(){return{};});
-    if (resp.ok) { out.innerHTML = _SV.ok + ' <b style="color:var(--positive)">已备份</b> ' + esc(d.message || d.commit || ''); }
-    else { out.innerHTML = '<span style="color:var(--negative)">同步失败：' + esc(d.error || '请先在「设置 → ⑦」配置 GitHub') + '</span>'; }
-  } catch (e) { out.textContent = '失败: ' + e; }
-}
+// 工具箱已合并进「设置」（方案 A）：采样开关在「桶行为」、外网访问在「我」、
+// 立即备份在「GitHub 同步」。原 tool* 开关/动作函数连同 Toolbox tab 一并移除。
 
 async function loadHostVault() {
   const input = document.getElementById('settings-host-vault');
@@ -3893,7 +4009,6 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.getElementById('list-view').style.display = target === 'list' ? '' : 'none';
     document.getElementById('breath-view').style.display = target === 'breath' ? '' : 'none';
     document.getElementById('network-view').style.display = target === 'network' ? '' : 'none';
-    document.getElementById('tools-view').style.display = target === 'tools' ? '' : 'none';
     document.getElementById('plan-view').style.display = target === 'plan' ? '' : 'none';
     document.getElementById('import-view').style.display = target === 'import' ? '' : 'none';
     document.getElementById('logs-view').style.display = target === 'logs' ? '' : 'none';
@@ -3904,7 +4019,6 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.getElementById('about-view').style.display = target === 'about' ? '' : 'none';
     if (target !== 'network' && _netRAF) { cancelAnimationFrame(_netRAF); _netRAF = null; }
     if (target === 'network') loadNetwork();
-    if (target === 'tools') loadToolsPanel();
     if (target === 'plan') loadPlans();
     if (target === 'import') { pollImportStatus(); loadImportResults(); }
     if (target === 'logs') { loadLogs(); loadOBErrors(); }
@@ -4017,18 +4131,51 @@ function filterBuckets(buckets) {
   return buckets;
 }
 
+// 翻页状态：renderBuckets 每次换新数据集时重置到第 1 页；gotoBucketPage 只翻页不重置。
+var bucketPage = 1;
+var _curBuckets = [];
+var BUCKETS_PER_PAGE = 10;
+
 function renderBuckets(buckets) {
+  _curBuckets = buckets || [];
+  bucketPage = 1;
+  _paintBuckets();
+}
+
+function gotoBucketPage(n) {
+  bucketPage = n;
+  _paintBuckets();
+  var list = document.getElementById('bucket-list');
+  if (list) list.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function _bucketPagerHtml(total, totalPages) {
+  if (totalPages <= 1) return '';
+  return '<div class="bucket-pager">' +
+    '<button class="pager-btn"' + (bucketPage <= 1 ? ' disabled' : '') + ' onclick="gotoBucketPage(' + (bucketPage - 1) + ')">‹ 上一页</button>' +
+    '<span class="pager-info">' + bucketPage + ' / ' + totalPages + ' 页 · 共 ' + total + '</span>' +
+    '<button class="pager-btn"' + (bucketPage >= totalPages ? ' disabled' : '') + ' onclick="gotoBucketPage(' + (bucketPage + 1) + ')">下一页 ›</button>' +
+  '</div>';
+}
+
+function _paintBuckets() {
   var list = document.getElementById('bucket-list');
   // iter 1.9 C: 把已主动遗忘的桶单独折叠到下方区域，主列表只显示活跃的
   // Split forgotten ones into the dedicated <details>; the main list stays clean.
-  var forgotten = buckets.filter(function(b) { return b.dont_surface; });
-  var visible = buckets.filter(function(b) { return !b.dont_surface; });
+  var forgotten = _curBuckets.filter(function(b) { return b.dont_surface; });
+  var visible = _curBuckets.filter(function(b) { return !b.dont_surface; });
   renderForgottenGroup(forgotten);
   if (!visible.length) {
-    list.innerHTML = '<div class="loading">没有记忆桶</div>';
+    list.innerHTML = '<div class="loading">没有记忆桶 / No buckets</div>';
     return;
   }
-  list.innerHTML = visible.map(function(b) {
+  // 分页：每页 BUCKETS_PER_PAGE 个，底部翻页
+  var totalPages = Math.ceil(visible.length / BUCKETS_PER_PAGE);
+  if (bucketPage > totalPages) bucketPage = totalPages;
+  if (bucketPage < 1) bucketPage = 1;
+  var startIdx = (bucketPage - 1) * BUCKETS_PER_PAGE;
+  var pageItems = visible.slice(startIdx, startIdx + BUCKETS_PER_PAGE);
+  list.innerHTML = pageItems.map(function(b) {
     // iter 1.8: dont_surface = 主动遗忘（仍在磁盘） / first_of_kind = 首次出现的标签组合
     // 图标：feel→计算表情、letter→信封、pinned→可发光的钉、其余沿用原逻辑
     var iconCls = 'icon', iconHtml;
@@ -4065,24 +4212,51 @@ function renderBuckets(buckets) {
       '</div>' +
       '<div class="bucket-row-bottom"><span class="preview">' + esc(b.content_preview) + '</span></div>' +
     '</div>';
-  }).join('');
+  }).join('') + _bucketPagerHtml(visible.length, totalPages);
   if (window.lucide) lucide.createIcons();
 }
 
+// 本地匹配：桶名 / 预览 / 域 / 标签支持「子串」+「模糊（子序列）」，桶 id 支持子串精确定位。
+// 即时可得、离线可用；桶名匹配优先排在最前，正好满足「直接搜桶名」。
+function _localBucketMatches(query) {
+  var q = query.trim().toLowerCase();
+  if (!q) return [];
+  function sub(text) { return text && String(text).toLowerCase().indexOf(q) !== -1; }
+  function fuzzy(text) {
+    if (!text) return false;
+    var t = String(text).toLowerCase();
+    if (t.indexOf(q) !== -1) return true;           // 子串直接命中
+    var i = 0;                                        // 子序列：q 的字符按序出现在 t 中
+    for (var j = 0; j < t.length && i < q.length; j++) { if (t[j] === q[i]) i++; }
+    return i === q.length;
+  }
+  var name = [], other = [];
+  (allBuckets || []).forEach(function(b) {
+    if (fuzzy(b.name)) { name.push(b); return; }      // 桶名命中优先
+    if (sub(b.id) || fuzzy(b.content_preview) ||
+        fuzzy((b.domain || []).join(' ')) || fuzzy((b.tags || []).join(' '))) other.push(b);
+  });
+  return name.concat(other);                          // 桶名匹配排最前
+}
+
 async function searchBuckets(query) {
+  var seen = {}, merged = [];
+  _localBucketMatches(query).forEach(function(b) { if (!seen[b.id]) { seen[b.id] = 1; merged.push(b); } });
+  // 服务端语义搜索：补充本地字面没匹配到、但语义相关的桶（向量化未开启时会失败，自动退化为纯本地）
   try {
     var res = await fetch(BASE + '/api/search?q=' + encodeURIComponent(query));
-    var results = await res.json();
-    renderBuckets(results);
-  } catch (e) {
-    console.error('Search failed:', e);
-  }
+    if (res.ok) {
+      var results = await res.json();
+      if (Array.isArray(results)) results.forEach(function(b) { if (!seen[b.id]) { seen[b.id] = 1; merged.push(b); } });
+    }
+  } catch (e) { /* 离线 / 无向量化：退化为纯本地字面 + 模糊匹配 */ }
+  renderBuckets(merged);
 }
 
 async function showDetail(id) {
   var panel = document.getElementById('detail-panel');
   var content = document.getElementById('detail-content');
-  content.innerHTML = '<div class="loading">加载中…</div>';
+  content.innerHTML = '<div class="loading">加载中… / Loading…</div>';
   panel.classList.add('open');
 
   try {
@@ -4847,6 +5021,10 @@ function drawBucketNetwork(ctx, W, H, data) {
 
 function esc(s) {
   if (!s) return '';
+  // 兜底：意外传入对象/数组时输出可读 JSON，绝不让 [object Object] 露到任何用户可见处。
+  if (typeof s === 'object') {
+    try { s = JSON.stringify(s); } catch (e) { s = ''; }
+  }
   var d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
@@ -6181,12 +6359,17 @@ async function refreshEnvShadowWarning() {
     var items = shadowed.map(function (v) {
       return '<code>' + v.name + '</code>（' + LABELS[v.name] + '）';
     }).join('、');
+    // 分级：一句话结论 → 框住的变量清单（二级条目）→ 分点说明。不再一坨粘在一起。
     box.innerHTML =
-      '<strong>⚠ 这些字段由平台环境变量提供，重启后会覆盖你在此保存的值：</strong><br>' +
-      items + '<br>' +
-      '它们的优先级高于 <code>config.yaml</code>，所以即便这里改成别的服务商、保存生效了，' +
-      '下次重启/重新部署仍会被平台 env 打回。<br>' +
-      '彻底解决：到平台（如 Zeabur）的环境变量里<strong>删除上述变量</strong>，让 config.yaml/此面板成为唯一来源。';
+      '<strong>⚠ 这些字段由平台环境变量接管，在此保存的值下次重启会被覆盖。</strong>' +
+      '<div style="margin:8px 0;padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;line-height:1.9;">'
+        + items +
+      '</div>' +
+      '<div style="line-height:1.8;">' +
+        '1. 它们的优先级高于 <code>config.yaml</code> 和此面板。<br>' +
+        '2. 即便这里改成别的服务商并保存生效，下次重启 / 重新部署仍会被平台 env 打回。<br>' +
+        '3. 彻底解决：到平台（如 Zeabur）的环境变量里<strong>删除上述变量</strong>，让此面板成为唯一来源。' +
+      '</div>';
     box.style.display = 'block';
   } catch (e) { /* 告警是增益信息，失败就静默不挡主流程 */ }
 }
@@ -6330,7 +6513,7 @@ async function saveConfig(persist) {
   }
 }
 
-checkAuth().then(authed => { if (authed) loadBuckets(); });
+checkAuth().then(authed => { if (authed) { loadBuckets(); loadStatusBanner(); } });
 
 // ====== iter 1.7: version badge, plan kanban, about page ======
 var _obLocalVersion = null;
@@ -6633,7 +6816,7 @@ function _planCard(p) {
 async function loadPlans() {
   const board = document.getElementById('plan-board');
   const stats = document.getElementById('plan-stats');
-  board.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:24px 0;font-size:13px;">加载中…</div>';
+  board.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:24px 0;font-size:13px;">加载中… / Loading…</div>';
   try {
     const resp = await authFetch('/api/plans');
     if (!resp) return;
@@ -6696,7 +6879,7 @@ async function planEdit(id) {
 
 async function loadAbout() {
   const el = document.getElementById('about-content');
-  el.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:24px 0;font-size:13px;">加载中…</div>';
+  el.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:24px 0;font-size:13px;">加载中… / Loading…</div>';
   try {
     const r = await fetch(BASE + '/api/author');
     const d = await r.json();
@@ -6771,7 +6954,7 @@ async function checkEmptyMemoryBanner() {
     bar.innerHTML = '<b>⚠️ 检测到当前没有任何记忆</b>'
       + (ghOk
           ? '<span>可从 GitHub 备份恢复（会写入本地，导入前自动备份）。</span><button onclick="runGithubImport()" style="background:#fff;color:#b85c3c;border:none;border-radius:4px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">从 GitHub 恢复记忆</button>'
-          : '<span>若你在 GitHub 备份过记忆，去「⑦ GitHub 同步」填好配置后即可一键恢复。</span>')
+          : '<span>若你在 GitHub 备份过记忆，去「GitHub 同步」填好配置后即可一键恢复。</span>')
       + '<button onclick="this.parentNode.remove()" style="margin-left:auto;background:transparent;color:#fff;border:1px solid rgba(255,255,255,.6);border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;">忽略</button>';
     document.body.insertBefore(bar, document.body.firstChild);
   } catch (e) { /* ignore */ }
@@ -6948,7 +7131,7 @@ async function pauseImport() {
 
 async function loadImportResults() {
   const container = document.getElementById('import-results-list');
-  container.innerHTML = '<div class="loading">加载中…</div>';
+  container.innerHTML = '<div class="loading">加载中… / Loading…</div>';
   try {
     const res = await fetch(BASE + '/api/import/results?limit=30');
     const data = await res.json();
@@ -7168,7 +7351,7 @@ async function loadOBErrors() {
   const box = document.getElementById('errors-list');
   const meta = document.getElementById('errors-meta');
   const minLvl = document.getElementById('errors-min-level').value || 'W';
-  box.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px 0;font-size:12px;">加载中…</div>';
+  box.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px 0;font-size:12px;">加载中… / Loading…</div>';
   try {
     const r = await fetch(BASE + '/api/errors/recent?min_level=' + encodeURIComponent(minLvl) + '&limit=100');
     const d = await r.json();
@@ -7602,7 +7785,7 @@ function resetMigrate() {
 
 async function loadDuplicates() {
   const box = document.getElementById('duplicates-list');
-  box.innerHTML = '<div class="loading">加载中…</div>';
+  box.innerHTML = '<div class="loading">加载中… / Loading…</div>';
   try {
     const r = await fetch(BASE + '/api/duplicates');
     const d = await r.json();
@@ -7728,13 +7911,14 @@ function gotoEmbedCloud() {
   document.querySelector('[data-tab=settings]')?.click();
   setTimeout(() => {
     const el = document.getElementById('cfg-emb-api-key');
-    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); }
+    if (el) { ensureSettingsGroupFor(el); el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); }
   }, 250);
 }
 function gotoEmbedLocal() {
   document.querySelector('[data-tab=settings]')?.click();
   setTimeout(() => {
-    document.getElementById('local-emb-status')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const el = document.getElementById('local-emb-status');
+    if (el) { ensureSettingsGroupFor(el); el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
   }, 250);
 }
 
@@ -7770,7 +7954,7 @@ function _escapeAnchorHtml(s) {
 async function loadAnchorsView() {
   const list = document.getElementById('anchors-list');
   const cnt = document.getElementById('anchors-count-text');
-  list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;">加载中…</div>';
+  list.innerHTML = '<div style="color:var(--text-dim);font-size:12px;">加载中… / Loading…</div>';
   try {
     const resp = await authFetch('/api/anchors');
     if (!resp || !resp.ok) { list.innerHTML = '<div style="color:#c33;">加载失败</div>'; return; }
@@ -7836,7 +8020,7 @@ async function loadLetters() {
   const filter = document.getElementById('letter-filter').value;
   const list = document.getElementById('letters-list');
   const cnt = document.getElementById('letter-count');
-  list.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:24px;">加载中…</div>';
+  list.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:24px;">加载中… / Loading…</div>';
   try {
     const url = BASE + '/api/letters' + (filter ? '?author=' + filter : '');
     const r = await fetch(url);
@@ -7887,7 +8071,7 @@ function openDatePicker() {
 function syncDateLabel() {
   const inp = document.getElementById('letter-date');
   const lbl = document.getElementById('letter-date-label');
-  if (inp && lbl) lbl.textContent = inp.value || '请选择日期';
+  if (inp && lbl) lbl.textContent = inp.value || '请选择日期 / Pick a date';
 }
 
 async function sendLetter() {
@@ -8210,7 +8394,7 @@ async function syncExistingHuman() {
     <button class="self-filter-btn" data-aspect="stance" onclick="setSelfFilter(this)">stance</button>
   </div>
   <div class="self-panel-body" id="self-panel-body">
-    <div class="self-panel-empty">加载中…</div>
+    <div class="self-panel-empty">加载中… / Loading…</div>
   </div>
 </div>
 

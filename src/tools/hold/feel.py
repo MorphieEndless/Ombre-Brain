@@ -21,7 +21,7 @@ tools/hold/feel.py — hold(feel=True) 分支
 - 不做 importance 校准：feel 一律 importance=5
 
 对外暴露：store_feel(content, extra_tags, valence, arousal, source_bucket,
-                     why_remembered) → str
+                     why_remembered, meaning, media) → str
 ========================================
 """
 
@@ -48,6 +48,8 @@ async def store_feel(
     arousal: float,
     source_bucket: str,
     why_remembered: str,
+    meaning: str = "",
+    media: list | None = None,
 ) -> str:
     feel_valence = valence if 0 <= valence <= 1 else 0.5
     feel_arousal = arousal if 0 <= arousal <= 1 else 0.3
@@ -66,6 +68,8 @@ async def store_feel(
         source_tool="hold",
         bucket_id_override=_build_feel_id(feel_valence),
         allow_embedding_fallback=True,
+        meaning=meaning,
+        media=media,
     )
     if source_bucket and source_bucket.strip():
         try:

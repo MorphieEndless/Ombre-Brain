@@ -140,6 +140,18 @@ _MAX_TAGS = 64
 _MAX_TAG_CHARS = 128
 _MAX_DOMAINS = 16
 _MAX_DOMAIN_CHARS = 128
+
+# --- Miss：meaning / media（hold 的体验锚定扩展）---
+# meaning 存储为 list[str]：同一条记忆可能在不同时刻被反复触动，每次 hold
+# 传入的是新增的一条，追加到列表，不覆盖已有的（见 tools/_common.py merge_or_create）。
+_MEANING_ITEM_MAX = 2000        # 单条 meaning 的长度上限
+_MEANING_LIST_MAX_ITEMS = 50    # 一个桶最多累积多少条 meaning
+_MEDIA_MAX_ITEMS = 20           # 单条记忆最多关联多少个 media 引用
+_MEDIA_PATH_MAX = 500
+_MEDIA_TITLE_MAX = 200
+_MEDIA_TYPE_MAX = 32
+_MEDIA_NOTE_MAX = 500
+
 _METADATA_TEXT_LIMITS = {
     "status": 32,
     "type": 32,
@@ -469,6 +481,64 @@ class BucketManager:
                 break
         return normalized
 
+    @classmethod
+    def _normalize_meaning_item(cls, text) -> str:
+        """裁剪单条 meaning 文本；不是摘要，只做长度上限保护。"""
+        if not text:
+            return ""
+        return cls._sanitize_text(str(text)).strip()[:_MEANING_ITEM_MAX]
+
+    @classmethod
+    def _normalize_meaning_list(cls, values) -> list[str]:
+        """整体替换用：逐条裁剪 + 丢空条目 + 裁总数上限。
+
+        不去重：同一句话在不同时刻写下也是信息，去重会抹掉这个时间差。
+        """
+        if not values:
+            return []
+        if isinstance(values, str):
+            values = [values]
+        normalized: list[str] = []
+        for v in values:
+            item = cls._normalize_meaning_item(v)
+            if item:
+                normalized.append(item)
+            if len(normalized) >= _MEANING_LIST_MAX_ITEMS:
+                break
+        return normalized
+
+    @classmethod
+    def _normalize_media(cls, media) -> list[dict]:
+        """校验/裁剪 media 引用列表。path 是唯一必填项，其余字段可选透传。
+
+        系统不解析、不存储、不迁移文件本身，只保存不透明的引用字符串。
+        """
+        if not media:
+            return []
+        if not isinstance(media, list):
+            media = [media]
+        normalized: list[dict] = []
+        for item in media:
+            if not isinstance(item, dict):
+                continue
+            path = cls._sanitize_text(str(item.get("path") or "")).strip()[:_MEDIA_PATH_MAX]
+            if not path:
+                continue
+            entry: dict = {"path": path}
+            title = item.get("title")
+            if title:
+                entry["title"] = cls._sanitize_text(str(title)).strip()[:_MEDIA_TITLE_MAX]
+            media_type = item.get("type")
+            if media_type:
+                entry["type"] = cls._sanitize_text(str(media_type)).strip()[:_MEDIA_TYPE_MAX]
+            note = item.get("note")
+            if note:
+                entry["note"] = cls._sanitize_text(str(note)).strip()[:_MEDIA_NOTE_MAX]
+            normalized.append(entry)
+            if len(normalized) >= _MEDIA_MAX_ITEMS:
+                break
+        return normalized
+
     # ---------------------------------------------------------
     # Internal: keep embedding index in sync with markdown storage
     # 内部：保证向量索引与 markdown 存储层一致
@@ -482,6 +552,26 @@ class BucketManager:
         return bool(
             await self.embedding_engine.generate_and_store(bucket_id, content)
         )
+
+    async def _sync_meaning_embedding(self, bucket_id: str, meaning_list: list[str]) -> None:
+        """Best-effort: embed the most recent meaning entry, separate from content.
+
+        取列表最后一条：最新的感受通常最贴近当前语境。没有专门的 outbox/重试
+        队列——meaning 向量失败不影响记忆本身已经落盘，稍后可通过再次
+        hold/trace 追加新 meaning 时重新尝试。
+        """
+        if not meaning_list:
+            return
+        engine = self.embedding_engine
+        if not engine or not getattr(engine, "enabled", False):
+            return
+        store_meaning = getattr(engine, "generate_and_store_meaning", None)
+        if not callable(store_meaning):
+            return
+        try:
+            await store_meaning(bucket_id, meaning_list[-1])
+        except Exception as exc:
+            logger.warning(f"meaning embedding failed for {bucket_id}: {exc}")
 
     async def _index_after_write(self, bucket_id: str, content: str) -> None:
         """Queue derived indexing after Markdown is safely on disk.
@@ -733,6 +823,8 @@ class BucketManager:
         grow_batch_id: str = "",
         bucket_id_override: str = "",
         allow_embedding_fallback: bool = False,
+        meaning: str = "",
+        media: Optional[list[dict]] = None,
     ) -> str:
         """
         Create a new memory bucket, return bucket ID.
@@ -848,6 +940,16 @@ class BucketManager:
         # triggered_by = 触发这条 feel 的源 bucket_id。1.9 会做 UI 联动。
         if triggered_by:
             metadata["triggered_by"] = str(triggered_by).strip()[:_TRIGGERED_BY_MAX]
+        # --- Miss: meaning / media —— 我自己觉得这条记忆为什么值得被想起 ---
+        # meaning 是 list[str]：新建时只有一条（这次 hold 传入的那句）；后续
+        # 每次 hold/trace 追加都会往这个列表里继续加。media 是不透明的外部引用列表。
+        # 两者都可选，互不依赖，也不参与打分。
+        meaning_item = self._normalize_meaning_item(meaning)
+        if meaning_item:
+            metadata["meaning"] = [meaning_item]
+        normalized_media = self._normalize_media(media)
+        if normalized_media:
+            metadata["media"] = normalized_media
         # --- iter 1.8: plan 的「承诺重量」0.0-1.0，与 importance 不同 ---
         # importance = 这件事多重要；weight = 这件事压在我心头多重。
         if bucket_type == "plan" and weight is not None:
@@ -931,6 +1033,11 @@ class BucketManager:
         # Markdown is committed before any derived-index work. The managed
         # server enqueues and returns immediately; standalone mode tries once.
         await self._index_after_write(bucket_id, linked_content)
+        # Miss: meaning 独立生成一份 embedding（不是拼进 content 里合并生成一份）。
+        # 拼接会让长 content 主导向量、稀释掉一句话 meaning 的信号；分开存，
+        # 检索时取两者相似度的较高值，一句感受也能被单独检索命中。
+        # 最佳努力：失败只记警告，不影响桶已经落盘的事实。
+        await self._sync_meaning_embedding(bucket_id, metadata.get("meaning") or [])
         self._invalidate_bm25()
         self._record_v3_bucket_event(
             "create",
@@ -1074,6 +1181,18 @@ class BucketManager:
                 max_items=_MAX_DOMAINS,
                 max_chars=_MAX_DOMAIN_CHARS,
             ) or [_DEFAULT_DOMAIN_NAME]
+        if "media" in kwargs:
+            # Miss: media 是整体覆盖写入（trace 的 media_replace）。传空列表即清空该字段。
+            kwargs["media"] = self._normalize_media(kwargs["media"])
+        if "media_append" in kwargs:
+            # Miss: media_append 是追加写入（trace 的 media_append / hold 每次调用）。
+            kwargs["media_append"] = self._normalize_media(kwargs["media_append"])
+        if "meaning" in kwargs:
+            # Miss: meaning 整体覆盖写入（trace 的 meaning_replace，用于纠错/清理）。
+            kwargs["meaning"] = self._normalize_meaning_list(kwargs["meaning"])
+        if "meaning_append" in kwargs:
+            # Miss: meaning_append 是追加一条新 meaning（trace 的 meaning_append / hold 每次调用）。
+            kwargs["meaning_append"] = self._normalize_meaning_item(kwargs["meaning_append"])
 
         try:
             post = frontmatter.load(file_path)
@@ -1116,6 +1235,32 @@ class BucketManager:
             post["digested"] = kwargs["digested"]
         if "model_valence" in kwargs:
             post["model_valence"] = _clamp01(kwargs["model_valence"], _DEFAULT_VALENCE)
+        if "media" in kwargs:
+            # Miss: 整体覆盖写入（trace media_replace）；空列表清空该字段。
+            if kwargs["media"]:
+                post["media"] = kwargs["media"]
+            else:
+                post.metadata.pop("media", None)
+        if "media_append" in kwargs and kwargs["media_append"]:
+            # Miss: 追加写入，去重同 path 的旧引用（trace media_append / hold 每次调用）。
+            existing_media = post.get("media") or []
+            existing_paths = {m.get("path") for m in existing_media if isinstance(m, dict)}
+            appended = existing_media + [
+                m for m in kwargs["media_append"] if m.get("path") not in existing_paths
+            ]
+            post["media"] = appended[:_MEDIA_MAX_ITEMS]
+        if "meaning" in kwargs:
+            # Miss: 整体覆盖写入（trace meaning_replace，用于纠错/清理）；空列表清空该字段。
+            if kwargs["meaning"]:
+                post["meaning"] = kwargs["meaning"]
+            else:
+                post.metadata.pop("meaning", None)
+        if "meaning_append" in kwargs and kwargs["meaning_append"]:
+            # Miss: 追加一条新 meaning，不覆盖已有的（trace meaning_append / hold 每次调用）。
+            existing_meaning = post.get("meaning") or []
+            if isinstance(existing_meaning, str):
+                existing_meaning = [existing_meaning]
+            post["meaning"] = (list(existing_meaning) + [kwargs["meaning_append"]])[:_MEANING_LIST_MAX_ITEMS]
         # --- Pass-through fields for plan/letter lifecycle ---
         # --- plan/letter/iter1.7 生命周期相关字段直接透传到 frontmatter ---
         # 这一组字段没有「校验/转换」逻辑，给什么写什么。新增字段往这个元组里加即可。
@@ -1235,6 +1380,9 @@ class BucketManager:
         # turning provider failure into a false "memory write failed" result.
         if "content" in kwargs:
             await self._index_after_write(bucket_id, post.content or "")
+        # Miss: meaning 有独立的 embedding，content 和 meaning 改动分别触发各自的重生成。
+        if "meaning" in kwargs or "meaning_append" in kwargs:
+            await self._sync_meaning_embedding(bucket_id, post.get("meaning") or [])
         self._invalidate_bm25()
         self._record_v3_bucket_event(
             "update",

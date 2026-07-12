@@ -535,6 +535,8 @@ async def merge_or_create(
     why_remembered: str = "",
     source_tool: str = "",
     grow_batch_id: str = "",
+    meaning: str = "",
+    media: list | None = None,
 ) -> Tuple[str, bool, str]:
     """
     检查是否有相似桶可合并，有则合并，无则新建。返回 (桶ID或名称, 是否合并, embed警告信息)。
@@ -548,6 +550,9 @@ async def merge_or_create(
     - grow_batch_id: 仅 grow 路径会传，新建时写入；合并路径不覆盖原桶的 batch_id
       （原桶可能来自上一次 grow 或 hold，硬覆盖会丢失最初批次信息）。
 
+    Miss：meaning/media 是我自己的体验锚定，不是摘要。新建时直接写入；
+    合并到老桶时两条 meaning 都保留（拼接），media 追加而不是覆盖。
+
     F-01 / F-08 fix：整个 search→create 路径在 per-content-hash Lock 下串行执行。
     同内容并发调用时后到的协程会阻塞，等前者写完后直接走合并分支，不产生重复桶。
     """
@@ -556,7 +561,7 @@ async def merge_or_create(
             content=content, tags=tags, importance=importance, domain=domain,
             valence=valence, arousal=arousal, name=name, raw_merge=raw_merge,
             why_remembered=why_remembered, source_tool=source_tool,
-            grow_batch_id=grow_batch_id,
+            grow_batch_id=grow_batch_id, meaning=meaning, media=media,
         )
 
 
@@ -572,6 +577,8 @@ async def _merge_or_create_inner(
     why_remembered: str = "",
     source_tool: str = "",
     grow_batch_id: str = "",
+    meaning: str = "",
+    media: list | None = None,
 ) -> Tuple[str, bool, str]:
     """实际的 search→merge/create 逻辑，由 merge_or_create 在 Lock 保护下调用。"""
     exact_storage_match = False
@@ -629,6 +636,11 @@ async def _merge_or_create_inner(
                 # 这样 dashboard 既能看到桶最初由谁创建，也能看到最近一次合并的来源。
                 if source_tool:
                     update_kwargs["last_merged_by"] = source_tool
+                # Miss: 合并到老桶时，meaning 追加一条（不覆盖已有列表），media 追加引用。
+                if meaning:
+                    update_kwargs["meaning_append"] = meaning
+                if media:
+                    update_kwargs["media_append"] = media
                 await rt.bucket_mgr.update(
                     bucket["id"],
                     allow_embedding_fallback=(raw_merge and source_tool == "hold"),
@@ -663,6 +675,8 @@ async def _merge_or_create_inner(
         why_remembered=why_remembered,
         source_tool=source_tool,
         grow_batch_id=grow_batch_id,
+        meaning=meaning,
+        media=media,
         # hold 的铁律：正文优先落盘。打标/embedding 可降级，但绝不压缩或撤销记忆。
         allow_embedding_fallback=(raw_merge and source_tool == "hold"),
     )

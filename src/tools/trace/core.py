@@ -20,7 +20,8 @@ trace 是 OB 唯一的「写元数据」入口，承接所有桶字段更新和�
 
 对外暴露：trace_core(bucket_id, name, domain, valence, arousal, importance,
                      tags, resolved, pinned, digested, content, delete,
-                     status, weight, dont_surface, why_remembered) → str
+                     status, weight, dont_surface, why_remembered,
+                     meaning_append, meaning_replace, media_append, media_replace) → str
 ========================================
 """
 
@@ -50,6 +51,10 @@ async def trace_core(
     weight: Optional[float] = -1,
     dont_surface: Optional[int] = -1,
     why_remembered: Optional[str] = "",
+    meaning_append: Optional[str] = "",
+    meaning_replace: Optional[list] = None,
+    media_append: Optional[list] = None,
+    media_replace: Optional[list] = None,
 ) -> str:
     bucket_id = "" if bucket_id is None else str(bucket_id)
     if name is None:
@@ -82,12 +87,17 @@ async def trace_core(
         dont_surface = -1
     if why_remembered is None:
         why_remembered = ""
+    if meaning_append is None:
+        meaning_append = ""
+    if media_append is None:
+        media_append = []
     content = str(content)
     name = str(name)
     domain = str(domain)
     tags = str(tags)
     status = str(status)
     why_remembered = str(why_remembered)
+    meaning_append = str(meaning_append)
     delete = parse_bool(delete, default=False)
 
     def _finite_float(value, default: float) -> float:
@@ -119,6 +129,7 @@ async def trace_core(
         tags=tags,
         status=status,
         why_remembered=why_remembered,
+        meaning_append=meaning_append,
     )
     if metadata_err:
         return metadata_err
@@ -206,6 +217,16 @@ async def trace_core(
     elif why_remembered:
         updates["why_remembered"] = why_remembered[:500]
 
+    # --- Miss: meaning / media —— 追加是日常操作，整体替换只用于纠错/清理 ---
+    if meaning_append.strip():
+        updates["meaning_append"] = meaning_append.strip()
+    if meaning_replace is not None:
+        updates["meaning"] = meaning_replace
+    if media_append:
+        updates["media_append"] = media_append
+    if media_replace is not None:
+        updates["media"] = media_replace
+
     if not updates:
         return "没有任何字段需要修改。"
 
@@ -247,9 +268,21 @@ async def trace_core(
         except Exception as e:
             rt.logger.warning(f"trace plan cascade outer error: {e}")
 
-    changed = ", ".join(f"{k}={v}" for k, v in updates.items() if k != "content")
+    _display_updates = {
+        k: v for k, v in updates.items()
+        if k not in ("content", "meaning_append", "meaning", "media_append", "media")
+    }
+    changed = ", ".join(f"{k}={v}" for k, v in _display_updates.items())
     if "content" in updates:
         changed += (", content=已替换" if changed else "content=已替换")
+    if "meaning_append" in updates:
+        changed += (", " if changed else "") + "meaning=已追加一条"
+    if "meaning" in updates:
+        changed += (", " if changed else "") + f"meaning=整体替换({len(updates['meaning'])}条)"
+    if "media_append" in updates:
+        changed += (", " if changed else "") + f"media=已追加{len(updates['media_append'])}项"
+    if "media" in updates:
+        changed += (", " if changed else "") + f"media=整体替换({len(updates['media'])}项)"
     if "resolved" in updates:
         changed += f" → {resolved_hint(bool(updates['resolved']))}"
     if "digested" in updates:

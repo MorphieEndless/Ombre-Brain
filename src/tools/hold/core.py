@@ -21,7 +21,7 @@ tools/hold/core.py — hold 普通存入分支（含自动合并）
 - 不做单桶字节上限校验（已在 dispatch 入口做过）
 
 对外暴露：store_core(content, extra_tags, importance, valence, arousal,
-                     why_remembered) → str
+                     why_remembered, meaning, media) → str
 ========================================
 """
 
@@ -38,6 +38,8 @@ async def store_core(
     valence: float,
     arousal: float,
     why_remembered: str,
+    meaning: str = "",
+    media: list | None = None,
 ) -> str:
     metadata_fallback = False
     try:
@@ -79,6 +81,8 @@ async def store_core(
         raw_merge=True,
         why_remembered=why_remembered,
         source_tool="hold",
+        meaning=meaning,
+        media=media,
     )
 
     action = "合并→" if is_merged else "新建→"

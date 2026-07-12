@@ -492,6 +492,13 @@ class EmbeddingEngine:
                 conn.execute(
                     "ALTER TABLE embeddings ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''"
                 )
+            if "meaning_embedding" not in columns:
+                # Miss: meaning 的向量独立存一列，不与 content 的 embedding 混合生成，
+                # 否则长 content 会稀释掉一句话 meaning 的语义信号。NULL = 该桶未写
+                # meaning，或 meaning 向量化尚未成功（无需专门迁移历史桶）。
+                conn.execute(
+                    "ALTER TABLE embeddings ADD COLUMN meaning_embedding TEXT"
+                )
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS embeddings_meta (
                     key TEXT PRIMARY KEY,
@@ -636,10 +643,49 @@ class EmbeddingEngine:
         conn = sqlite3.connect(self.db_path)
         try:
             conn.execute(
-                """INSERT OR REPLACE INTO embeddings
-                   (bucket_id, embedding, updated_at, content_hash)
-                   VALUES (?, ?, ?, ?)""",
+                """INSERT INTO embeddings (bucket_id, embedding, updated_at, content_hash)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(bucket_id) DO UPDATE SET
+                     embedding=excluded.embedding,
+                     updated_at=excluded.updated_at,
+                     content_hash=excluded.content_hash""",
                 (bucket_id, json.dumps(embedding), now_iso(), content_hash),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    async def generate_and_store_meaning(self, bucket_id: str, meaning_text: str) -> bool:
+        """Miss: 为 meaning（最近一条）单独生成并存储一份 embedding。
+
+        与 content 的向量分列存储，互不覆盖；桶可能还没有 content 向量行
+        （outbox 还在排队），所以用 upsert 而不是要求行已存在。
+        """
+        if not self.enabled or not meaning_text or not meaning_text.strip():
+            return False
+        try:
+            embedding = await self._generate_async(meaning_text)
+            if not embedding:
+                return False
+            self._store_meaning_embedding(bucket_id, embedding)
+            return True
+        except Exception as e:
+            logger.warning(f"Meaning embedding generation failed for {bucket_id}: {e}")
+            return False
+
+    def _store_meaning_embedding(self, bucket_id: str, embedding: list[float]) -> None:
+        try:
+            from utils import now_iso  # type: ignore
+        except ImportError:
+            from .utils import now_iso  # type: ignore
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                """INSERT INTO embeddings (bucket_id, embedding, updated_at, content_hash, meaning_embedding)
+                   VALUES (?, '', ?, '', ?)
+                   ON CONFLICT(bucket_id) DO UPDATE SET
+                     meaning_embedding=excluded.meaning_embedding""",
+                (bucket_id, now_iso(), json.dumps(embedding)),
             )
             conn.commit()
         finally:
@@ -708,7 +754,9 @@ class EmbeddingEngine:
             raise RuntimeError("embedding is disabled")
         conn = sqlite3.connect(self.db_path)
         try:
-            rows = conn.execute("SELECT bucket_id, embedding FROM embeddings").fetchall()
+            rows = conn.execute(
+                "SELECT bucket_id, embedding, meaning_embedding FROM embeddings"
+            ).fetchall()
         finally:
             conn.close()
         if not rows:
@@ -719,17 +767,35 @@ class EmbeddingEngine:
             raise RuntimeError("embedding provider returned an empty query vector")
 
         results: list[tuple[str, float]] = []
-        for bucket_id, emb_json in rows:
-            try:
-                stored_embedding = json.loads(emb_json)
-                sim = self._cosine_similarity(query_embedding, stored_embedding)
-                results.append((bucket_id, sim))
-            except (json.JSONDecodeError, ValueError, TypeError) as _emb_exc:
-                logger.warning(
-                    f"[embedding] Skipping malformed embedding for {bucket_id!r}: "
-                    f"{type(_emb_exc).__name__}: {_emb_exc}"
-                )
-                continue
+        for bucket_id, emb_json, meaning_emb_json in rows:
+            # Miss: 一个桶可能同时有 content 向量和 meaning 向量，取相似度较高的
+            # 那一个作为该桶的匹配分——这样一句 meaning 也能单独被检索命中，
+            # 不会被更长的 content 向量稀释掉。
+            best_sim: float | None = None
+            if emb_json:
+                try:
+                    stored_embedding = json.loads(emb_json)
+                    if stored_embedding:
+                        best_sim = self._cosine_similarity(query_embedding, stored_embedding)
+                except (json.JSONDecodeError, ValueError, TypeError) as _emb_exc:
+                    logger.warning(
+                        f"[embedding] Skipping malformed embedding for {bucket_id!r}: "
+                        f"{type(_emb_exc).__name__}: {_emb_exc}"
+                    )
+            if meaning_emb_json:
+                try:
+                    stored_meaning_embedding = json.loads(meaning_emb_json)
+                    if stored_meaning_embedding:
+                        meaning_sim = self._cosine_similarity(query_embedding, stored_meaning_embedding)
+                        if best_sim is None or meaning_sim > best_sim:
+                            best_sim = meaning_sim
+                except (json.JSONDecodeError, ValueError, TypeError) as _emb_exc:
+                    logger.warning(
+                        f"[embedding] Skipping malformed meaning embedding for {bucket_id!r}: "
+                        f"{type(_emb_exc).__name__}: {_emb_exc}"
+                    )
+            if best_sim is not None:
+                results.append((bucket_id, best_sim))
         results.sort(key=lambda x: x[1], reverse=True)
         return results[:top_k]
 

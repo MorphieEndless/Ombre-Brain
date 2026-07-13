@@ -95,6 +95,10 @@
     gap: 6px;
     margin-left: 6px;
   }
+  #btn-restart { order:99; }
+  #btn-restart.restart-required { color: var(--negative) !important; }
+  #btn-restart .restart-dot { display:none;width:7px;height:7px;border-radius:50%;background:var(--negative); }
+  #btn-restart.restart-required .restart-dot { display:inline-block; }
   .search-bar {
     margin-left: auto;
     display: flex;
@@ -1864,6 +1868,7 @@
     <button onclick="doSearch()" title="搜索"><i data-lucide="search"></i></button>
   </div>
   <div class="header-actions">
+    <button id="btn-restart" onclick="restartService()" title="重启服务；红点表示有设置等待重启生效" style="height:32px;padding:0 12px;gap:5px;display:inline-flex;align-items:center;white-space:nowrap;font-size:12px;"><span class="restart-dot"></span><i data-lucide="power"></i> 重启</button>
     <button onclick="openFeedback()" title="给作者反馈 / Feedback" style="height:32px;padding:0 12px;gap:5px;display:inline-flex;align-items:center;white-space:nowrap;font-size:12px;"><i data-lucide="message-circle"></i> 反馈 Feedback</button>
     <button onclick="doLogout()" title="退出登录 / Log out" style="height:32px;padding:0 12px;gap:5px;display:inline-flex;align-items:center;white-space:nowrap;font-size:12px;"><i data-lucide="log-out"></i> 退出 Exit</button>
   </div>
@@ -4015,6 +4020,43 @@ async function saveHostVault() {
     msg.style.color = 'var(--negative)';
     msg.textContent = '保存失败: ' + e;
   }
+}
+
+function setRestartRequired(required, reason) {
+  var button = document.getElementById('btn-restart');
+  if (!button) return;
+  button.classList.toggle('restart-required', !!required);
+  button.title = required ? ('需要重启后生效' + (reason ? '：' + reason : '')) : '重启服务';
+}
+
+async function syncRestartRequirement() {
+  try {
+    var response = await authFetch('/api/config');
+    if (!response || !response.ok) return;
+    var config = await response.json();
+    setRestartRequired(!!config.restart_required, 'OAuth 鉴权设置已保存');
+  } catch (e) { /* 顶栏提示失败不影响主界面 */ }
+}
+
+async function restartService() {
+  var pending = document.getElementById('btn-restart')?.classList.contains('restart-required');
+  var message = pending
+    ? '有设置正在等待重启生效。确定现在重启服务吗？连接会短暂中断。'
+    : '确定现在重启服务吗？Dashboard 与 MCP 连接会短暂中断。';
+  if (!confirm(message)) return;
+  try {
+    var response = await authFetch('/api/restart', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({confirm: true})
+    });
+    if (!response) return;
+    var result = await readJsonSafe(response);
+    if (!response.ok || !result.ok) throw new Error(result.error || '重启请求失败');
+    setRestartRequired(false);
+    var button = document.getElementById('btn-restart');
+    if (button) button.textContent = '重启中…';
+    setTimeout(function () { location.reload(); }, 5000);
+  } catch (e) { alert('重启失败：' + e.message); }
 }
 
 // authFetch: wraps fetch, shows auth overlay on 401
@@ -6310,6 +6352,7 @@ async function loadConfig() {
     document.getElementById('cfg-merge').value = cfg.merge_threshold || 75;
     var mcpAuthEl = document.getElementById('cfg-mcp-auth');
     if (mcpAuthEl) mcpAuthEl.value = cfg.mcp_require_auth ? 'true' : 'false';
+    setRestartRequired(!!cfg.restart_required, 'OAuth 鉴权设置已保存');
     var portEl = document.getElementById('cfg-host-port');
     if (portEl) portEl.value = cfg.host_port || '';
     var portHint = document.getElementById('host-port-hint');
@@ -6990,6 +7033,7 @@ async function loadAbout() {
 
 // Re-render Lucide icons whenever DOM is ready (covers static markup)
 window.addEventListener('DOMContentLoaded', function() {
+  syncRestartRequirement();
   if (window.lucide) lucide.createIcons();
   // iter 2.0: refresh anchor counter on first load + every 30s
   if (typeof refreshAnchorCounter === 'function') {
@@ -7530,8 +7574,9 @@ async function saveMcpAuth() {
     if (!res) return;
     const result = await res.json();
     if (result.ok) {
-      msg.style.color = 'var(--positive)';
-      msg.textContent = '已保存，重启服务后生效';
+      msg.style.color = result.restart_required ? 'var(--warning)' : 'var(--positive)';
+      msg.textContent = result.message || (result.restart_required ? '已保存，需要重启服务后生效' : '已保存');
+      setRestartRequired(!!result.restart_required, 'OAuth 鉴权设置已保存');
     } else {
       msg.style.color = 'var(--negative)';
       msg.textContent = result.error || '保存失败';

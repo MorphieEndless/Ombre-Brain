@@ -44,6 +44,7 @@ from collections import OrderedDict
 from typing import Any
 
 import httpx
+import numpy as np
 from openai import AsyncOpenAI
 
 try:
@@ -745,37 +746,69 @@ class EmbeddingEngine:
         if not query_embedding:
             raise RuntimeError("embedding provider returned an empty query vector")
 
-        results: list[tuple[str, float]] = []
+        bucket_ids: list[str] = []
+        best_scores: list[float | None] = []
+        candidate_vectors: list[list[float]] = []
+        candidate_owners: list[int] = []
+        query_dim = len(query_embedding)
         for bucket_id, emb_json, meaning_emb_json in rows:
             # Miss: 一个桶可能同时有 content 向量和 meaning 向量，取相似度较高的
             # 那一个作为该桶的匹配分——这样一句 meaning 也能单独被检索命中，
             # 不会被更长的 content 向量稀释掉。
-            best_sim: float | None = None
-            if emb_json:
+            owner = len(bucket_ids)
+            bucket_ids.append(bucket_id)
+            best_scores.append(None)
+            for label, raw_embedding in (
+                ("embedding", emb_json),
+                ("meaning embedding", meaning_emb_json),
+            ):
+                if not raw_embedding:
+                    continue
                 try:
-                    stored_embedding = json.loads(emb_json)
-                    if stored_embedding:
-                        best_sim = self._cosine_similarity(query_embedding, stored_embedding)
+                    stored_embedding = json.loads(raw_embedding)
+                    if not isinstance(stored_embedding, list):
+                        raise TypeError(
+                            f"embedding is {type(stored_embedding).__name__}, not list"
+                        )
+                    if not stored_embedding:
+                        continue
+                    stored_embedding = [float(value) for value in stored_embedding]
                 except (json.JSONDecodeError, ValueError, TypeError) as _emb_exc:
                     logger.warning(
-                        f"[embedding] Skipping malformed embedding for {bucket_id!r}: "
+                        f"[embedding] Skipping malformed {label} for {bucket_id!r}: "
                         f"{type(_emb_exc).__name__}: {_emb_exc}"
                     )
-            if meaning_emb_json:
-                try:
-                    stored_meaning_embedding = json.loads(meaning_emb_json)
-                    if stored_meaning_embedding:
-                        meaning_sim = self._cosine_similarity(query_embedding, stored_meaning_embedding)
-                        if best_sim is None or meaning_sim > best_sim:
-                            best_sim = meaning_sim
-                except (json.JSONDecodeError, ValueError, TypeError) as _emb_exc:
+                    continue
+                if len(stored_embedding) != query_dim:
+                    # Preserve the pairwise helper's existing contract: a
+                    # dimension mismatch contributes a 0.0 score.
                     logger.warning(
-                        f"[embedding] Skipping malformed meaning embedding for {bucket_id!r}: "
-                        f"{type(_emb_exc).__name__}: {_emb_exc}"
+                        f"[embedding] {label} dimension mismatch for {bucket_id!r}: "
+                        f"stored={len(stored_embedding)}, query={query_dim}"
                     )
-            if best_sim is not None:
-                results.append((bucket_id, best_sim))
-        results.sort(key=lambda x: x[1], reverse=True)
+                    current = best_scores[owner]
+                    best_scores[owner] = 0.0 if current is None else max(current, 0.0)
+                    continue
+                candidate_vectors.append(stored_embedding)
+                candidate_owners.append(owner)
+
+        if candidate_vectors:
+            similarities = self._cosine_similarity_batch(
+                query_embedding, candidate_vectors
+            )
+            for owner, similarity in zip(candidate_owners, similarities):
+                score = float(similarity)
+                current = best_scores[owner]
+                best_scores[owner] = score if current is None else max(current, score)
+
+        results = [
+            (bucket_id, score)
+            for bucket_id, score in zip(bucket_ids, best_scores)
+            if score is not None
+        ]
+        # Python's sort is stable, preserving SQLite row order for equal scores.
+        # This avoids argpartition's nondeterministic tie-boundary behavior.
+        results.sort(key=lambda item: item[1], reverse=True)
         return results[:top_k]
 
     async def search_similar(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
@@ -801,6 +834,22 @@ class EmbeddingEngine:
         if norm_a == 0 or norm_b == 0:
             return 0.0
         return dot / (norm_a * norm_b)
+
+    @staticmethod
+    def _cosine_similarity_batch(
+        query: list[float], vectors: list[list[float]]
+    ) -> "np.ndarray":
+        """Return cosine similarity for equally-sized vectors in one matrix pass."""
+        query_array = np.asarray(query, dtype=np.float64)
+        matrix = np.asarray(vectors, dtype=np.float64)
+        dots = matrix @ query_array
+        denominator = np.linalg.norm(matrix, axis=1) * np.linalg.norm(query_array)
+        return np.divide(
+            dots,
+            denominator,
+            out=np.zeros_like(dots),
+            where=denominator != 0,
+        )
 
     # -------------------- 前端可读的状态 --------------------
 

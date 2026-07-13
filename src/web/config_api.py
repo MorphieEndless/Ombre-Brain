@@ -63,6 +63,12 @@ def _rebuild_embedding_runtime():
 
 
 def register(mcp) -> None:
+    # MCP auth is bound into middleware and OAuth route visibility at process
+    # startup. Keep the effective value separate from the desired persisted
+    # value so the Dashboard cannot falsely claim a hot switch took effect.
+    runtime_mcp_auth_required = _parse_bool(
+        sh.config.get("mcp_require_auth", True), default=True
+    )
 
     @mcp.custom_route("/dashboard", methods=["GET"])
     async def dashboard(request: Request) -> Response:
@@ -174,6 +180,10 @@ def register(mcp) -> None:
             "mcp_require_auth": _parse_bool(
                 sh.config.get("mcp_require_auth", True), default=True
             ),
+            "mcp_require_auth_effective": runtime_mcp_auth_required,
+            "restart_required": _parse_bool(
+                sh.config.get("mcp_require_auth", True), default=True
+            ) != runtime_mcp_auth_required,
             # 部署信息：数据目录 + 端口 + 是否容器内。前端「系统」区展示，端口可改。
             "host_port": sh.config.get("host_port"),
             "in_docker": sh.in_docker(),
@@ -457,7 +467,20 @@ def register(mcp) -> None:
             except Exception as e:
                 return JSONResponse({"error": f"persist failed: {e}", "updated": updated}, status_code=500)
 
-        return JSONResponse({"updated": updated, "ok": True})
+        restart_required = (
+            mcp_auth_value is not None
+            and mcp_auth_value != runtime_mcp_auth_required
+        )
+        return JSONResponse({
+            "updated": updated,
+            "ok": True,
+            "restart_required": restart_required,
+            "mcp_require_auth_effective": runtime_mcp_auth_required,
+            "message": (
+                "OAuth 鉴权设置已保存，需要重启服务后生效。"
+                if restart_required else "设置已生效。"
+            ),
+        })
 
 
     # =============================================================

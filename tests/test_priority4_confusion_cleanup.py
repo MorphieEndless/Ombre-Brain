@@ -246,6 +246,9 @@ def test_dashboard_exposes_oauth_authentication_switch():
         assert "开启 OAuth（Claude.ai 网页版 / Claude Code 远程需要）" in text
         assert "saveMcpAuth()" in text
         assert "mcp_require_auth: val" in text
+        assert 'id="btn-restart"' in text
+        assert "restartService()" in text
+        assert "setRestartRequired(!!result.restart_required" in text
 
 
 @pytest.mark.asyncio
@@ -265,6 +268,8 @@ async def test_dashboard_oauth_switch_persists_to_config(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert payload["ok"] is True
+    assert payload["restart_required"] is True
+    assert payload["mcp_require_auth_effective"] is True
     assert config_api.sh.config["mcp_require_auth"] is False
     assert persisted["mcp_require_auth"] is False
 

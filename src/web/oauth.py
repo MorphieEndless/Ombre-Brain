@@ -51,7 +51,7 @@ _OAUTH_CODE_TTL = 300               # 5 min
 _MCP_TOKEN_TTL = 86400 * 30         # 30 天；避免 100 年秒数溢出部分客户端的 32-bit duration
 _MCP_REFRESH_TOKEN_TTL = 86400 * 365
 _MCP_SCOPE = "mcp"
-_OAUTH_CLIENT_TTL = 86400
+_OAUTH_CLIENT_TTL = 86400 * 365
 _MAX_OAUTH_CLIENTS = 1024
 _MAX_OAUTH_CODES = 1024
 _MAX_REDIRECT_URIS = 10
@@ -201,6 +201,68 @@ def _mcp_resource(request: Request, requested: str = "") -> tuple[bool, str]:
 
 def _mcp_tokens_file() -> str:
     return os.path.join(sh.config["buckets_dir"], ".dashboard_mcp_tokens.json")
+
+
+def _oauth_clients_file() -> str:
+    return os.path.join(sh.config["buckets_dir"], ".oauth_clients.json")
+
+
+def _load_oauth_clients() -> None:
+    """Restore active, validated dynamic-client registrations from disk."""
+    global _oauth_clients
+    try:
+        path = _oauth_clients_file()
+        if not os.path.exists(path):
+            return
+        with open(path, "r", encoding="utf-8") as handle:
+            raw = _json_lib.load(handle)
+        if not isinstance(raw, dict):
+            raise ValueError("oauth client registry must be a JSON object")
+
+        now = _time_mod.time()
+        restored: list[tuple[float, str, dict]] = []
+        for client_id, data in raw.items():
+            if not isinstance(client_id, str) or not isinstance(data, dict):
+                continue
+            expires = data.get("expires")
+            registration, _ = _normalize_client_registration(data)
+            if (
+                registration is None
+                or not isinstance(expires, (int, float))
+                or expires <= now
+            ):
+                continue
+            restored.append((float(expires), client_id, {
+                **registration,
+                "expires": float(expires),
+            }))
+
+        # Prefer the registrations that remain valid longest if a corrupt or
+        # hand-edited file exceeds the in-memory safety bound.
+        restored.sort(reverse=True)
+        _oauth_clients = {
+            client_id: data
+            for _, client_id, data in restored[:_MAX_OAUTH_CLIENTS]
+        }
+    except Exception as e:
+        logger.warning(f"[oauth] failed to load oauth clients: {e}")
+
+
+def _save_oauth_clients() -> None:
+    """Persist active DCR clients using the auth material atomic writer."""
+    try:
+        now = _time_mod.time()
+        active = {
+            client_id: data
+            for client_id, data in _oauth_clients.items()
+            if isinstance(client_id, str)
+            and isinstance(data, dict)
+            and isinstance(data.get("expires"), (int, float))
+            and data["expires"] > now
+        }
+        sh._atomic_write_private_json(_oauth_clients_file(), active)
+    except Exception as e:
+        logger.warning(f"[oauth] failed to save oauth clients: {e}")
 
 
 def _load_mcp_tokens() -> None:
@@ -424,6 +486,7 @@ def register(mcp) -> None:
     oauth_required = _oauth_required_from_config()
     if oauth_required:
         _load_mcp_tokens()   # Docker 重启后恢复 token，不强制重新 OAuth
+        _load_oauth_clients()
 
     @mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
     @mcp.custom_route("/.well-known/oauth-protected-resource/{resource_path:path}", methods=["GET"])
@@ -502,6 +565,7 @@ def register(mcp) -> None:
             **registration,
             "expires": _time_mod.time() + _OAUTH_CLIENT_TTL,
         }
+        _save_oauth_clients()
         return JSONResponse({
             "client_id": client_id,
             "client_id_issued_at": int(_time_mod.time()),

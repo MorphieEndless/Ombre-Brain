@@ -439,6 +439,53 @@ async def test_oauth_registration_state_is_bounded(
 
 
 @pytest.mark.asyncio
+async def test_oauth_registration_survives_route_restart(monkeypatch, tmp_path):
+    routes = _fresh_oauth_routes(monkeypatch, tmp_path)
+    callback = "https://client.example/callback"
+    response = await routes[("POST", "/oauth/register")](
+        JsonRequest({"redirect_uris": [callback], "client_name": "Persistent Client"})
+    )
+    client_id = _payload(response)["client_id"]
+
+    oauth_mod._oauth_clients.clear()
+    restarted_routes = _fresh_oauth_routes(monkeypatch, tmp_path)
+    assert restarted_routes
+    ok, error = oauth_mod._validate_authorize_redirect(client_id, callback)
+    assert ok is True
+    assert error == ""
+    assert client_id in oauth_mod._oauth_clients
+
+
+def test_load_oauth_clients_rejects_expired_and_unsafe_records(monkeypatch, tmp_path):
+    buckets = tmp_path / "buckets"
+    buckets.mkdir()
+    monkeypatch.setattr(oauth_mod.sh, "config", {"buckets_dir": str(buckets)})
+    registry = {
+        "valid": {
+            "redirect_uris": ["https://client.example/callback"],
+            "client_name": "Valid",
+            "expires": time.time() + 60,
+        },
+        "expired": {
+            "redirect_uris": ["https://client.example/callback"],
+            "client_name": "Expired",
+            "expires": time.time() - 1,
+        },
+        "unsafe": {
+            "redirect_uris": ["javascript:alert(1)"],
+            "client_name": "Unsafe",
+            "expires": time.time() + 60,
+        },
+    }
+    (buckets / ".oauth_clients.json").write_text(json.dumps(registry), encoding="utf-8")
+
+    oauth_mod._oauth_clients.clear()
+    oauth_mod._load_oauth_clients()
+
+    assert list(oauth_mod._oauth_clients) == ["valid"]
+
+
+@pytest.mark.asyncio
 async def test_oauth_authorize_password_failures_share_login_lockout(
     oauth_routes, monkeypatch
 ):

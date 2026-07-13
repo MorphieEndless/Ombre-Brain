@@ -245,10 +245,24 @@ def test_dashboard_exposes_oauth_authentication_switch():
         assert 'id="cfg-mcp-auth"' in text
         assert "开启 OAuth（Claude.ai 网页版 / Claude Code 远程需要）" in text
         assert "saveMcpAuth()" in text
-        assert "mcp_require_auth: val" in text
+        assert "mcp_require_auth: false, persist: true" in text
         assert 'id="btn-restart"' in text
         assert "restartService()" in text
         assert "setRestartRequired(!!result.restart_required" in text
+
+
+def test_dashboard_exposes_mcp_static_token_mode():
+    for rel in ("frontend/dashboard.html",):
+        text = (ROOT / rel).read_text(encoding="utf-8")
+
+        # 三态互斥：选 OAuth 就不认 Token，选 Token 就不认 OAuth。
+        assert '<option value="oauth">' in text
+        assert '<option value="token">' in text
+        assert '<option value="off">' in text
+        assert 'id="mcp-token-panel"' in text
+        assert "regenerateMcpToken()" in text
+        assert "/api/mcp-token/regenerate" in text
+        assert "Ombre-MCP-Token" in text
 
 
 @pytest.mark.asyncio

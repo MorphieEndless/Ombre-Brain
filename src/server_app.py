@@ -44,6 +44,9 @@ class HTTPRuntimeSettings:
     auth_required: bool
     max_request_bytes: int
     max_management_request_bytes: int = DEFAULT_MAX_MANAGEMENT_REQUEST_BYTES
+    # "oauth" (default) or "token" — only consulted when auth_required is True.
+    # Mutually exclusive: see MCPAuthMiddleware and web/oauth.py's route 404s.
+    auth_mode: str = "oauth"
 
     @classmethod
     def from_config(
@@ -69,12 +72,16 @@ class HTTPRuntimeSettings:
             "max_management_request_bytes",
             DEFAULT_MAX_MANAGEMENT_REQUEST_BYTES,
         )
+        auth_mode = str(config.get("mcp_auth_mode", "oauth")).strip().lower()
+        if auth_mode not in ("oauth", "token"):
+            auth_mode = "oauth"
         return cls(
             auth_required=parse_bool(
                 config.get("mcp_require_auth", True), default=True
             ),
             max_request_bytes=max_request_bytes,
             max_management_request_bytes=max_management_request_bytes,
+            auth_mode=auth_mode,
         )
 
 
@@ -119,10 +126,12 @@ class MCPAuthMiddleware:
         *,
         auth_required: bool,
         token_validator: TokenValidator,
+        auth_mode: str = "oauth",
     ) -> None:
         self.app = app
         self.auth_required = bool(auth_required)
         self.token_validator = token_validator
+        self.auth_mode = auth_mode if auth_mode in ("oauth", "token") else "oauth"
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
         path = str(scope.get("path", ""))
@@ -137,21 +146,34 @@ class MCPAuthMiddleware:
             valid = auth.startswith("Bearer ") and self.token_validator(
                 auth[7:], resource=resource
             )
+            if not valid and self.auth_mode == "token":
+                # Fallback header for MCP clients that can't customize Authorization.
+                alt_token = headers.get(b"ombre-mcp-token", b"").decode(
+                    "latin-1"
+                ).strip()
+                if alt_token:
+                    valid = self.token_validator(alt_token, resource=resource)
             if not valid:
                 endpoint = path.strip("/")
-                metadata_url = (
-                    f"{base}/.well-known/oauth-protected-resource/{endpoint}"
-                )
-                challenge = (
-                    'Bearer realm="Ombre Brain",'
-                    f' resource_metadata="{metadata_url}", scope="mcp"'
-                )
-                body = json.dumps(
-                    {
-                        "error": "Unauthorized",
-                        "resource_metadata": metadata_url,
-                    }
-                ).encode()
+                if self.auth_mode == "token":
+                    # No OAuth server exists in token mode — a resource_metadata
+                    # challenge pointing at a 404'd discovery endpoint would mislead.
+                    challenge = 'Bearer realm="Ombre Brain"'
+                    body = json.dumps({"error": "Unauthorized"}).encode()
+                else:
+                    metadata_url = (
+                        f"{base}/.well-known/oauth-protected-resource/{endpoint}"
+                    )
+                    challenge = (
+                        'Bearer realm="Ombre Brain",'
+                        f' resource_metadata="{metadata_url}", scope="mcp"'
+                    )
+                    body = json.dumps(
+                        {
+                            "error": "Unauthorized",
+                            "resource_metadata": metadata_url,
+                        }
+                    ).encode()
                 await send(
                     {
                         "type": "http.response.start",
@@ -396,6 +418,7 @@ def build_http_app(
         MCPAuthMiddleware,
         auth_required=settings.auth_required,
         token_validator=token_validator,
+        auth_mode=settings.auth_mode,
     )
     app.state.ombre_http_settings = settings
     app.state.ombre_runtime_lifecycle = lifecycle

@@ -167,6 +167,9 @@ def load_config(config_path: Optional[str] = None) -> dict:
         "transport": "stdio",
         "log_level": "INFO",
         "mcp_require_auth": True,
+        # 只有 mcp_require_auth=true 时才生效："oauth"（默认）或 "token"，二选一、互斥。
+        "mcp_auth_mode": "oauth",
+        "mcp_token": "",
         "buckets_dir": os.path.join(project_root, "buckets"),
         "merge_threshold": 75,
         "dehydration": {
@@ -300,6 +303,27 @@ def load_config(config_path: Optional[str] = None) -> dict:
         config["mcp_require_auth"] = parse_bool(
             _env_mcp_auth, default=config["mcp_require_auth"]
         )
+
+    # MCP 鉴权模式（枚举，仅 mcp_require_auth=true 时生效）—— mcp_auth_mode / OMBRE_MCP_AUTH_MODE
+    # "oauth"（默认）沿用上面的 OAuth 2.1 + PKCE；"token" 改走静态密钥（mcp_token / OMBRE_MCP_TOKEN）。
+    # 二者互斥——选 token 模式时 OAuth 的 discovery/register/authorize/token 路由全部 404（见 web/oauth.py）。
+    # 不能走 _apply_env_override：这里需要做枚举校验，非法值一律回退默认 "oauth"。
+    _raw_auth_mode = str(config.get("mcp_auth_mode", "oauth")).strip().lower()
+    config["mcp_auth_mode"] = _raw_auth_mode if _raw_auth_mode in ("oauth", "token") else "oauth"
+    _env_mcp_auth_mode = os.environ.get("OMBRE_MCP_AUTH_MODE", "").strip().lower()
+    if _env_mcp_auth_mode in ("oauth", "token"):
+        config["mcp_auth_mode"] = _env_mcp_auth_mode
+
+    _apply_env_override(config, "OMBRE_MCP_TOKEN", "mcp_token")
+
+    # 安全兜底：选了 token 模式却没配密钥——宁可继续用更强的 OAuth 兜底，也不要让用户
+    # 误以为已经开了保护、实际上 /mcp 会因校验函数拿不到密钥而被意外锁死或裸奔。
+    if config["mcp_auth_mode"] == "token" and not str(config.get("mcp_token") or "").strip():
+        logging.warning(
+            "mcp_auth_mode=token 但未配置 mcp_token / OMBRE_MCP_TOKEN，已自动回退为 oauth 模式 / "
+            "mcp_auth_mode=token but no mcp_token/OMBRE_MCP_TOKEN configured — falling back to oauth"
+        )
+        config["mcp_auth_mode"] = "oauth"
 
     # iter 1.9 F: 统一推荐 OMBRE_VAULT_DIR；老变量 OMBRE_BUCKETS_DIR 仍兼容
     # Priority: OMBRE_BUCKETS_DIR (legacy explicit) > OMBRE_VAULT_DIR > config.yaml.buckets_dir

@@ -64,8 +64,17 @@ _FORBIDDEN_REDIRECT_SCHEMES = {
 
 
 def _oauth_required_from_config() -> bool:
-    """Snapshot the effective MCP auth mode used for this server process."""
-    return parse_bool(sh.config.get("mcp_require_auth", True), default=True)
+    """Snapshot the effective MCP auth mode used for this server process.
+
+    OAuth and the static-token mode (mcp_auth_mode: "token") are mutually
+    exclusive: when token mode is selected, every OAuth discovery/register/
+    authorize/token route below 404s via _oauth_not_found(), same as when
+    mcp_require_auth is false outright.
+    """
+    return (
+        parse_bool(sh.config.get("mcp_require_auth", True), default=True)
+        and str(sh.config.get("mcp_auth_mode", "oauth")).strip().lower() == "oauth"
+    )
 
 
 def _oauth_not_found() -> Response:
@@ -368,6 +377,25 @@ def _is_valid_mcp_token(token: str, resource: str = "") -> bool:
     if resource and bound_resource:
         return _normalize_resource(resource) == _normalize_resource(bound_resource)
     return True
+
+
+def _is_valid_static_mcp_token(token: str, resource: str = "") -> bool:
+    """Validate against the static mcp_auth_mode=token secret.
+
+    Reads sh.config / env fresh on every call (no startup snapshot) so that
+    regenerating the token via the Dashboard takes effect immediately without
+    a process restart. resource is accepted for TokenValidator signature
+    compatibility but ignored — a static token is not bound to one resource.
+    """
+    if not token:
+        return False
+    configured = (
+        os.environ.get("OMBRE_MCP_TOKEN", "").strip()
+        or str(sh.config.get("mcp_token", "") or "").strip()
+    )
+    if not configured:
+        return False
+    return _hmac.compare_digest(token, configured)
 
 
 def _issue_mcp_access_token(resource: str = "") -> str:

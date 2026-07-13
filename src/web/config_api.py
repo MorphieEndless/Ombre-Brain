@@ -18,6 +18,7 @@ web/config_api.py — Dashboard 配置 / 环境变量 / API Key 测试 / 模型�
 
 import os
 import sys
+import secrets
 import yaml
 import httpx
 
@@ -62,12 +63,38 @@ def _rebuild_embedding_runtime():
     return engine
 
 
+def _persisted_mcp_auth_mode() -> str:
+    """The desired (config.yaml-level) mcp_auth_mode, not the running process's."""
+    raw = str(sh.config.get("mcp_auth_mode", "oauth")).strip().lower()
+    return raw if raw in ("oauth", "token") else "oauth"
+
+
+def _current_mcp_token() -> str:
+    """Live static MCP token — env wins over config.yaml, same priority as validation."""
+    return (
+        os.environ.get("OMBRE_MCP_TOKEN", "").strip()
+        or str(sh.config.get("mcp_token", "") or "").strip()
+    )
+
+
+def _mask_mcp_token(token: str) -> str | None:
+    if not token:
+        return None
+    if len(token) <= 8:
+        return "***"
+    return f"{token[:4]}...{token[-4:]}"
+
+
 def register(mcp) -> None:
     # MCP auth is bound into middleware and OAuth route visibility at process
     # startup. Keep the effective value separate from the desired persisted
     # value so the Dashboard cannot falsely claim a hot switch took effect.
     runtime_mcp_auth_required = _parse_bool(
         sh.config.get("mcp_require_auth", True), default=True
+    )
+    _runtime_mcp_auth_mode_raw = str(sh.config.get("mcp_auth_mode", "oauth")).strip().lower()
+    runtime_mcp_auth_mode = (
+        _runtime_mcp_auth_mode_raw if _runtime_mcp_auth_mode_raw in ("oauth", "token") else "oauth"
     )
 
     @mcp.custom_route("/dashboard", methods=["GET"])
@@ -119,6 +146,8 @@ def register(mcp) -> None:
             {"name": "OMBRE_LOG_FILE", "group": "system", "label": "日志文件路径", "sensitive": False, **_plain("OMBRE_LOG_FILE")},
             {"name": "OMBRE_CONFIG_PATH", "group": "system", "label": "配置文件路径", "sensitive": False, **_plain("OMBRE_CONFIG_PATH")},
             {"name": "OMBRE_MCP_REQUIRE_AUTH", "group": "auth", "label": "MCP OAuth 开关覆盖", "sensitive": False, **_plain("OMBRE_MCP_REQUIRE_AUTH")},
+            {"name": "OMBRE_MCP_AUTH_MODE", "group": "auth", "label": "MCP 鉴权模式覆盖 (oauth/token)", "sensitive": False, **_plain("OMBRE_MCP_AUTH_MODE")},
+            {"name": "OMBRE_MCP_TOKEN", "group": "auth", "label": "MCP 静态 Token", "sensitive": True, **_masked("OMBRE_MCP_TOKEN")},
             {"name": "AI_NAME", "group": "identity", "label": "AI 显示名", "sensitive": False, **_plain("AI_NAME")},
             # 路径组
             {"name": "OMBRE_VAULT_DIR", "group": "paths", "label": "Vault 目录 (推荐)", "sensitive": False, **_plain("OMBRE_VAULT_DIR")},
@@ -181,9 +210,17 @@ def register(mcp) -> None:
                 sh.config.get("mcp_require_auth", True), default=True
             ),
             "mcp_require_auth_effective": runtime_mcp_auth_required,
-            "restart_required": _parse_bool(
-                sh.config.get("mcp_require_auth", True), default=True
-            ) != runtime_mcp_auth_required,
+            # 鉴权模式（仅 mcp_require_auth=true 时有意义）："oauth"（默认）或 "token"，二者互斥。
+            "mcp_auth_mode": _persisted_mcp_auth_mode(),
+            "mcp_auth_mode_effective": runtime_mcp_auth_mode,
+            # 静态 Token 状态：只回掩码/是否已配置，绝不回明文。
+            "mcp_token_configured": bool(_current_mcp_token()),
+            "mcp_token_hint": _mask_mcp_token(_current_mcp_token()),
+            "restart_required": (
+                _parse_bool(sh.config.get("mcp_require_auth", True), default=True)
+                != runtime_mcp_auth_required
+                or _persisted_mcp_auth_mode() != runtime_mcp_auth_mode
+            ),
             # 部署信息：数据目录 + 端口 + 是否容器内。前端「系统」区展示，端口可改。
             "host_port": sh.config.get("host_port"),
             "in_docker": sh.in_docker(),
@@ -219,6 +256,14 @@ def register(mcp) -> None:
                 if "mcp_require_auth" in body
                 else None
             )
+            mcp_auth_mode_value = None
+            if "mcp_auth_mode" in body:
+                mcp_auth_mode_value = str(body["mcp_auth_mode"]).strip().lower()
+                if mcp_auth_mode_value not in ("oauth", "token"):
+                    return JSONResponse(
+                        {"error": "mcp_auth_mode must be 'oauth' or 'token'"},
+                        status_code=400,
+                    )
             embedding_payload = body.get("embedding")
             if "embedding" in body and not isinstance(embedding_payload, dict):
                 return JSONResponse(
@@ -355,6 +400,11 @@ def register(mcp) -> None:
             sh.config["mcp_require_auth"] = mcp_auth_value
             updated.append("mcp_require_auth")
 
+        # --- MCP 鉴权模式（mcp_auth_mode）--- 同上，也是启动期闭包值，热改不即时生效。
+        if mcp_auth_mode_value is not None:
+            sh.config["mcp_auth_mode"] = mcp_auth_mode_value
+            updated.append("mcp_auth_mode")
+
         # --- 对外端口（host_port）---
         # 裸机：写 config 后进程自重启即监听新端口（前端「保存并重启」）。
         # Docker：容器内端口由 Dockerfile 固定，host_port 仅供部署脚本读取注入
@@ -424,6 +474,9 @@ def register(mcp) -> None:
                 if mcp_auth_value is not None:
                     save_config["mcp_require_auth"] = mcp_auth_value
 
+                if mcp_auth_mode_value is not None:
+                    save_config["mcp_auth_mode"] = mcp_auth_mode_value
+
                 if "host_port" in body:
                     try:
                         save_config["host_port"] = int(body["host_port"])
@@ -468,17 +521,71 @@ def register(mcp) -> None:
                 return JSONResponse({"error": f"persist failed: {e}", "updated": updated}, status_code=500)
 
         restart_required = (
-            mcp_auth_value is not None
-            and mcp_auth_value != runtime_mcp_auth_required
+            (mcp_auth_value is not None and mcp_auth_value != runtime_mcp_auth_required)
+            or (mcp_auth_mode_value is not None and mcp_auth_mode_value != runtime_mcp_auth_mode)
         )
         return JSONResponse({
             "updated": updated,
             "ok": True,
             "restart_required": restart_required,
             "mcp_require_auth_effective": runtime_mcp_auth_required,
+            "mcp_auth_mode_effective": runtime_mcp_auth_mode,
             "message": (
-                "OAuth 鉴权设置已保存，需要重启服务后生效。"
+                "MCP 鉴权设置已保存，需要重启服务后生效。"
                 if restart_required else "设置已生效。"
+            ),
+        })
+
+
+    # =============================================================
+    # /api/mcp-token/regenerate — 生成/轮换 mcp_auth_mode=token 用的静态密钥
+    # 独立成一个小路由（而不是塞进 POST /api/config）：生成新密钥和改配置项
+    # 是两件不同的事，参照 oauth.py 里 token 签发自成一块的做法。
+    # =============================================================
+    @mcp.custom_route("/api/mcp-token/regenerate", methods=["POST"])
+    async def api_mcp_token_regenerate(request: Request) -> Response:
+        """(Re)generate the static MCP token and persist it to config.yaml.
+
+        Returns the plaintext token exactly once — GET /api/config only ever
+        returns a masked hint, so the Dashboard must capture this response.
+        Takes effect immediately (no restart needed): _is_valid_static_mcp_token
+        reads sh.config/env fresh on every request.
+        """
+        from starlette.responses import JSONResponse
+        err = sh._require_auth(request)
+        if err:
+            return err
+
+        new_token = secrets.token_urlsafe(32)
+        sh.config["mcp_token"] = new_token
+
+        from utils import config_file_path
+        config_path = config_file_path()
+        try:
+            save_config: dict[str, object] = {}
+            if os.path.exists(config_path):
+                with open(config_path, "r", encoding="utf-8") as f:
+                    save_config = yaml.safe_load(f) or {}
+            if not isinstance(save_config, dict):
+                save_config = {}
+            save_config["mcp_token"] = new_token
+            with open(config_path, "w", encoding="utf-8") as f:
+                yaml.dump(save_config, f, default_flow_style=False, allow_unicode=True)
+        except Exception as e:
+            return JSONResponse({"error": f"persist failed: {e}"}, status_code=500)
+
+        env_override = bool(os.environ.get("OMBRE_MCP_TOKEN", "").strip())
+        return JSONResponse({
+            "ok": True,
+            "token": new_token,
+            "token_hint": _mask_mcp_token(new_token),
+            "env_override": env_override,
+            "message": (
+                "环境变量 OMBRE_MCP_TOKEN 优先级更高，已生成的新密钥暂不会生效，"
+                "请改用该环境变量或先取消设置它。"
+                if env_override
+                else "新 Token 已生成并保存，请立即复制；刷新页面后不再显示完整值。"
+                     "重新生成立即生效，无需重启。"
             ),
         })
 

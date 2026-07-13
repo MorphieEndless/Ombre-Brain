@@ -2423,7 +2423,10 @@
           </div>
           <div id="tunnel-msg" style="margin-top:8px;font-size:12px;"></div>
           <div id="tunnel-auth-danger" style="display:none;margin-top:10px;padding:10px 12px;border:1px solid var(--negative);border-radius:10px;background:rgba(220,60,60,.10);color:var(--negative);font-size:12px;line-height:1.6;font-weight:600;">
-            ⚠ 隧道已配置，但 MCP OAuth 已关闭。任何能访问公网地址的人都可以匿名读写全部记忆。请立即开启 MCP OAuth，或停止隧道。
+            ⚠ 隧道已配置，但 MCP 鉴权已关闭。任何能访问公网地址的人都可以匿名读写全部记忆。请立即开启鉴权，或停止隧道。
+          </div>
+          <div id="tunnel-auth-caution" style="display:none;margin-top:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:rgba(220,160,60,.10);color:#a06a10;font-size:12px;line-height:1.6;font-weight:600;">
+            ⚠ 隧道已配置，MCP 使用静态 Token 鉴权；一旦 Token 泄露等同公开访问，请妥善保管、不要提交到公开仓库或截图分享。
           </div>
         </div>
       </div>
@@ -2879,20 +2882,43 @@
         </div>
       </div>
 
-      <!-- OAuth 鉴权开关 -->
+      <!-- MCP 鉴权模式（OAuth / 静态 Token / 关闭）-->
       <div style="margin:18px 0;padding:14px;background:var(--surface-solid);border-radius:11px;box-shadow:inset 2px 2px 5px var(--shadow-dark-subtle),inset -2px -2px 4px var(--shadow-light);">
-        <div style="font-weight:600;font-size:13px;margin-bottom:8px;">OAuth 鉴权</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:8px;">MCP 鉴权</div>
         <div class="config-row" style="align-items:center;">
           <label>连接鉴权</label>
-          <select id="cfg-mcp-auth" style="flex:1;max-width:440px;min-width:0;">
-            <option value="true">开启 OAuth（Claude.ai 网页版 / Claude Code 远程需要）</option>
-            <option value="false">关闭 · 免认证直连（自有前端 / GPT / GLM）</option>
+          <select id="cfg-mcp-auth" onchange="onMcpAuthModeChange()" style="flex:1;max-width:440px;min-width:0;">
+            <option value="oauth">开启 OAuth（Claude.ai 网页版 / Claude Code 远程需要）</option>
+            <option value="token">静态 Token 鉴权（第三方 MCP 客户端，不走 OAuth）</option>
+            <option value="off">关闭 · 免认证直连（自有前端 / GPT / GLM）</option>
           </select>
           <button type="button" onclick="saveMcpAuth()" title="保存并写入 config.yaml / Save &amp; write to config.yaml" style="margin-left:8px;padding:0 12px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="save"></i> 保存 Save</button>
           <span id="mcp-auth-msg" style="margin-left:8px;font-size:11px;"></span>
         </div>
         <div style="margin-top:6px;font-size:11px;color:var(--text-light);line-height:1.7;">
-          改动写入 config.yaml，<b>需重启服务后生效</b>。关闭后任何能访问 /mcp 的人都能读写记忆，请勿裸奔公网（放内网，或在反代层另加一道鉴权）。
+          三选一，<b>不会叠加</b>：选 OAuth 就不认 Token，选 Token 就不认 OAuth。改动写入 config.yaml，<b>需重启服务后生效</b>。
+          关闭鉴权后任何能访问 /mcp 的人都能读写记忆；静态 Token 泄露也等同公开访问——<b>无论选哪种模式都请勿把服务直接暴露公网</b>（放内网，或在反代层另加一道鉴权）。
+        </div>
+
+        <div id="mcp-token-panel" style="display:none;margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:9px;">
+          <div style="font-size:12px;line-height:1.8;">
+            <div>Token 状态：<b id="mcp-token-status">未设置</b></div>
+            <div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <button type="button" onclick="regenerateMcpToken()" style="padding:0 12px;height:30px;font-size:12px;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="refresh-cw"></i> 生成新 Token</button>
+              <span id="mcp-token-msg" style="font-size:11px;"></span>
+            </div>
+            <div id="mcp-token-reveal" style="display:none;margin-top:8px;">
+              <div style="font-size:11px;color:var(--negative);margin-bottom:4px;">请立即复制，刷新页面后不再显示完整值：</div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <code id="mcp-token-value" style="flex:1;min-width:0;word-break:break-all;padding:6px 8px;background:var(--surface);border-radius:6px;font-size:11px;"></code>
+                <button type="button" onclick="copyMcpToken()" style="padding:0 10px;height:28px;font-size:11px;flex-shrink:0;"><i data-lucide="copy"></i> 复制</button>
+              </div>
+            </div>
+            <div style="margin-top:10px;color:var(--text-light);">
+              用法：请求头二选一 —— <code>Authorization: Bearer &lt;token&gt;</code> 或 <code>Ombre-MCP-Token: &lt;token&gt;</code>。
+              切换鉴权模式需重启生效；重新生成 Token <b>立即生效，无需重启</b>。
+            </div>
+          </div>
         </div>
       </div>
 
@@ -3330,7 +3356,10 @@ async function loadTunnelStatus() {
   // A slower status poll must not overwrite the value while a save is in flight.
   if (!_tunnelAutoStartSaving) setHwSwitch('tunnel-autostart', d.auto_start);
   const authDanger = document.getElementById('tunnel-auth-danger');
-  if (authDanger) authDanger.style.display = (d.token_set && d.mcp_auth_required === false) ? '' : 'none';
+  const authCaution = document.getElementById('tunnel-auth-caution');
+  const tunnelActive = !!d.token_set;
+  if (authDanger) authDanger.style.display = (tunnelActive && d.mcp_auth_required === false) ? '' : 'none';
+  if (authCaution) authCaution.style.display = (tunnelActive && d.mcp_auth_required !== false && d.mcp_auth_mode === 'token') ? '' : 'none';
   if (d.running) {
     _setTunnelUI(true, '已连接 / Connected', 'var(--positive, #9DC880)', '停止', '');
   } else {
@@ -4067,7 +4096,7 @@ async function syncRestartRequirement() {
     var response = await authFetch('/api/config');
     if (!response || !response.ok) return;
     var config = await response.json();
-    setRestartRequired(!!config.restart_required, 'OAuth 鉴权设置已保存');
+    setRestartRequired(!!config.restart_required, 'MCP 鉴权设置已保存');
   } catch (e) { /* 顶栏提示失败不影响主界面 */ }
 }
 
@@ -6616,8 +6645,15 @@ async function loadConfig() {
     refreshEnvConfig();
     document.getElementById('cfg-merge').value = cfg.merge_threshold || 75;
     var mcpAuthEl = document.getElementById('cfg-mcp-auth');
-    if (mcpAuthEl) mcpAuthEl.value = cfg.mcp_require_auth ? 'true' : 'false';
-    setRestartRequired(!!cfg.restart_required, 'OAuth 鉴权设置已保存');
+    if (mcpAuthEl) {
+      mcpAuthEl.value = cfg.mcp_require_auth
+        ? (cfg.mcp_auth_mode === 'token' ? 'token' : 'oauth')
+        : 'off';
+    }
+    window._mcpTokenConfigured = !!cfg.mcp_token_configured;
+    window._mcpTokenHint = cfg.mcp_token_hint || null;
+    onMcpAuthModeChange();
+    setRestartRequired(!!cfg.restart_required, 'MCP 鉴权设置已保存');
     var portEl = document.getElementById('cfg-host-port');
     if (portEl) portEl.value = cfg.host_port || '';
     var portHint = document.getElementById('host-port-hint');
@@ -7827,21 +7863,37 @@ function _getMcpOrigin() {
   return 'http://127.0.0.1:' + port;
 }
 
+function onMcpAuthModeChange() {
+  const sel = document.getElementById('cfg-mcp-auth');
+  const panel = document.getElementById('mcp-token-panel');
+  if (!sel || !panel) return;
+  panel.style.display = sel.value === 'token' ? '' : 'none';
+  const statusEl = document.getElementById('mcp-token-status');
+  if (statusEl) {
+    statusEl.textContent = window._mcpTokenConfigured
+      ? ('已设置（' + (window._mcpTokenHint || '***') + '）')
+      : '未设置';
+  }
+}
+
 async function saveMcpAuth() {
   const msg = document.getElementById('mcp-auth-msg');
-  const val = document.getElementById('cfg-mcp-auth').value === 'true';
+  const sel = document.getElementById('cfg-mcp-auth').value; // 'oauth' | 'token' | 'off'
+  const payload = sel === 'off'
+    ? { mcp_require_auth: false, persist: true }
+    : { mcp_require_auth: true, mcp_auth_mode: sel, persist: true };
   try {
     const res = await authFetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mcp_require_auth: val, persist: true }),
+      body: JSON.stringify(payload),
     });
     if (!res) return;
     const result = await res.json();
     if (result.ok) {
       msg.style.color = result.restart_required ? 'var(--warning)' : 'var(--positive)';
       msg.textContent = result.message || (result.restart_required ? '已保存，需要重启服务后生效' : '已保存');
-      setRestartRequired(!!result.restart_required, 'OAuth 鉴权设置已保存');
+      setRestartRequired(!!result.restart_required, 'MCP 鉴权设置已保存');
     } else {
       msg.style.color = 'var(--negative)';
       msg.textContent = result.error || '保存失败';
@@ -7850,6 +7902,48 @@ async function saveMcpAuth() {
     msg.style.color = 'var(--negative)';
     msg.textContent = '请求失败: ' + e.message;
   }
+}
+
+let _mcpTokenPlaintext = '';
+async function regenerateMcpToken() {
+  const msg = document.getElementById('mcp-token-msg');
+  msg.style.color = 'var(--text-light)';
+  msg.textContent = '生成中…';
+  try {
+    const res = await authFetch('/api/mcp-token/regenerate', { method: 'POST' });
+    if (!res) return;
+    const result = await res.json();
+    if (result.ok) {
+      _mcpTokenPlaintext = result.token || '';
+      window._mcpTokenConfigured = true;
+      window._mcpTokenHint = result.token_hint || null;
+      document.getElementById('mcp-token-status').textContent =
+        '已设置（' + (window._mcpTokenHint || '***') + '）';
+      const reveal = document.getElementById('mcp-token-reveal');
+      const valueEl = document.getElementById('mcp-token-value');
+      if (reveal && valueEl) {
+        valueEl.textContent = _mcpTokenPlaintext;
+        reveal.style.display = '';
+      }
+      msg.style.color = result.env_override ? 'var(--warning)' : 'var(--positive)';
+      msg.textContent = result.message || '已生成';
+    } else {
+      msg.style.color = 'var(--negative)';
+      msg.textContent = result.error || '生成失败';
+    }
+  } catch (e) {
+    msg.style.color = 'var(--negative)';
+    msg.textContent = '请求失败: ' + e.message;
+  }
+}
+
+function copyMcpToken() {
+  if (!_mcpTokenPlaintext) return;
+  navigator.clipboard.writeText(_mcpTokenPlaintext).then(function() {
+    const msg = document.getElementById('mcp-token-msg');
+    msg.style.color = 'var(--positive)';
+    msg.textContent = '已复制';
+  });
 }
 
 function highlightTransport(t) {

@@ -811,9 +811,10 @@ async def dream(window_hours: Optional[int] = 48) -> str:
 
 # ============================================================
 # OAuth 2.0 — MCP Remote Auth —— 已拆分到 web/oauth.py（路由在其 register 内注册）。
-# 这里仅把启动期 MCP 鉴权中间件要用的 _is_valid_mcp_token import 回来。
+# 这里把启动期 MCP 鉴权中间件要用的两个校验函数 import 回来：mcp_auth_mode=="oauth"（默认）
+# 用 _is_valid_mcp_token，mcp_auth_mode=="token" 用 _is_valid_static_mcp_token，二选一注入中间件。
 # ============================================================
-from web.oauth import _is_valid_mcp_token  # noqa: F401  (injected into server_app middleware)
+from web.oauth import _is_valid_mcp_token, _is_valid_static_mcp_token  # noqa: F401
 
 
 # ============================================================
@@ -876,11 +877,16 @@ if __name__ == "__main__":
             # Explicit IPv4 avoids localhost resolving to ::1 in Proot/Termux.
             keepalive_url=f"http://127.0.0.1:{OMBRE_PORT}/health",
         )
+        _mcp_token_validator = (
+            _is_valid_static_mcp_token
+            if _http_settings.auth_mode == "token"
+            else _is_valid_mcp_token
+        )
         _app = build_http_app(
             mcp,
             transport,
             settings=_http_settings,
-            token_validator=_is_valid_mcp_token,
+            token_validator=_mcp_token_validator,
             lifecycle=_runtime_lifecycle,
         )
         if transport == "streamable-http":
@@ -894,7 +900,20 @@ if __name__ == "__main__":
         )
 
         _mcp_auth_required = _http_settings.auth_required
-        if _mcp_auth_required:
+        if _mcp_auth_required and _http_settings.auth_mode == "token":
+            logger.info(
+                "MCP 静态 Token 鉴权已启用（OAuth 端点已关闭）/ "
+                "MCP static-token auth enabled (OAuth endpoints disabled)"
+            )
+            logger.warning(
+                "=" * 60 + "\n"
+                "⚠️  MCP 静态 Token 等同万能密钥：拿到它的人能读写你的全部记忆。\n"
+                "    该模式与 OAuth 互斥，本进程不再提供 OAuth 授权流程；请勿把本服务\n"
+                "    直接暴露到公网，仅在可信内网或自带鉴权的隧道场景使用，并妥善保管、\n"
+                "    定期轮换该 Token。\n"
+                + "=" * 60
+            )
+        elif _mcp_auth_required:
             logger.info("MCP OAuth middleware enabled / MCP OAuth 中间件已启用")
         else:
             # 安全加固 #7：关掉鉴权 = /mcp 全裸奔，任何能连到端口的人都能读写全部记忆。
@@ -925,7 +944,10 @@ if __name__ == "__main__":
             "（远程走你的域名/隧道，末尾同样是 /mcp）| 鉴权: %s",
             transport,
             OMBRE_PORT,
-            "开启(需 OAuth Bearer)" if _mcp_auth_required
+            (
+                "开启(需静态 Token)" if _http_settings.auth_mode == "token"
+                else "开启(需 OAuth Bearer)"
+            ) if _mcp_auth_required
             else "关闭(免 token 直连，仅限可信内网/本机)",
         )
         uvicorn.run(_app, host=_BIND_HOST, port=OMBRE_PORT)

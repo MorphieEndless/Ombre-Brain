@@ -150,6 +150,11 @@ def register(mcp) -> None:
             "mcp_auth_required": parse_bool(
                 sh.config.get("mcp_require_auth", True), default=True
             ),
+            "mcp_auth_mode": (
+                str(sh.config.get("mcp_auth_mode", "oauth")).strip().lower()
+                if str(sh.config.get("mcp_auth_mode", "oauth")).strip().lower() in ("oauth", "token")
+                else "oauth"
+            ),
             "last_error": _tunnel_last_error if not running else "",
         })
 

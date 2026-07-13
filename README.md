@@ -343,6 +343,38 @@ mcp_require_auth: false
 
 ---
 
+### 方式四：静态 Token 鉴权（第三方 MCP 客户端，不走 OAuth）
+
+适合：MCP 客户端支持自定义请求头，但走不通浏览器 OAuth 授权流程——又不想像方式三那样完全关闭鉴权。
+
+这是与 OAuth **互斥**的第三种模式：选了 Token 就不再认 OAuth（OAuth 的发现/授权路由全部 404），选 OAuth 就不认 Token，不会同时生效。
+
+```bash
+# 方式 A：环境变量（优先级最高）
+OMBRE_MCP_AUTH_MODE=token
+OMBRE_MCP_TOKEN=一串足够长的随机密钥
+
+# 方式 B：config.yaml
+mcp_auth_mode: "token"
+mcp_token: "一串足够长的随机密钥"
+```
+
+也可以在 Dashboard「MCP 鉴权」区选择「静态 Token 鉴权」，点「生成新 Token」自动生成并保存（生成后立即生效，无需重启；但切换鉴权模式本身仍需重启）。
+
+客户端调用时任选其一：
+
+```
+Authorization: Bearer 你的Token
+# 或
+Ombre-MCP-Token: 你的Token
+```
+
+（不支持把 Token 放进 URL 查询参数——`/mcp` 能读写全部记忆，查询参数更容易被隧道/反代/浏览器历史记录留痕。）
+
+> ⚠️ **安全提醒**：静态 Token 等同万能密钥，泄露后果和关闭鉴权一样。请勿把服务直接暴露公网，妥善保管并定期轮换该 Token。
+
+---
+
 ### Operit / 安卓 / Proot 本地桥接（连接器一直黄灯）
 
 适合：在手机上用 **Operit** 等本地 MCP 客户端，通过 **Termux / Proot** 跑 Ombre Brain，客户端灯常亮黄、连不上 `/mcp`。

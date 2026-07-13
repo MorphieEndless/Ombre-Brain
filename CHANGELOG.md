@@ -2,6 +2,12 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.6.7
+
+- 新增 `/mcp` 静态 Token 鉴权模式（`mcp_auth_mode: token`），与 OAuth 互斥、三选一：默认 `oauth` 不变、`token` 供支持自定义请求头但走不通浏览器 OAuth 授权流程的第三方 MCP 客户端使用、`off` 保持原有免鉴权语义。Token 走 `Authorization: Bearer` 或 `Ombre-MCP-Token` 请求头，不支持 URL 查询参数；选了 `token` 后 OAuth 的 discovery/register/authorize/token 路由全部 404。
+- Dashboard「MCP 鉴权」区支持一键切换三种模式、生成/轮换静态 Token（生成即时生效、切换模式仍需重启），并对隧道 + Token 模式给出针对性的公网暴露风险提示。
+- 修复 `src/VERSION` 落后于根目录 `VERSION` 的问题（2.6.6 发布时只 bump 了根目录，Dashboard 版本号一度显示 2.6.5）。
+
 ## 2.6.6
 
 - 新增三模式安全部署向导：普通用户只需选择本机、公网安全或高级模式；公网安全模式强制 OAuth，并在保存前校验 HTTPS 边界。

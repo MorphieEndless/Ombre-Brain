@@ -2,6 +2,12 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.6.10
+
+### 安全 / Security
+
+- 修复 2.6.9 引入的回归：给「永久删除测试桶」按钮统一加图标时，行内 `style="display:inline-flex"` 覆盖了 `.developer-only { display:none; }` 这条控制显隐的 class 规则（行内样式优先级恒高于 class 选择器），导致该危险操作无论是否开启开发者模式都会显示给所有用户。现在去掉了这个按钮自身 style 里的 `display`，显隐重新完全交给 `.developer-only` / `body.developer-mode .developer-only` 两条 class 规则控制；其余三个动作按钮不受影响，靠右对齐和图标不变。补了一条回归测试直接检查该按钮的行内 style 属性不得含 `display`。
+
 ## 2.6.9
 
 - 记忆桶列表工具栏视觉细节修正：`主动遗忘`/`沉底`/`归档`/`永久删除测试桶` 四个动作按钮从整条左对齐堆放改为整体靠右（与左侧 `全选当前筛选`/`已选` 分开两组），并补上与站内其他位置一致的图标（`eye-off`/`moon`/`archive`/`trash-2`）。外框改成和其他卡片一致的圆角+浮起阴影，去掉此前突兀的方角细边框。

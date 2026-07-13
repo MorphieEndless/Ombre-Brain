@@ -291,6 +291,16 @@ async def test_dashboard_backfill_delegates_to_running_outbox(monkeypatch):
             return 1
 
     outbox = Outbox()
+
+    class Engine(DisabledEngine):
+        def list_all_ids(self):
+            return ["one", "orphan"]
+
+        def delete_embedding(self, bucket_id):
+            assert bucket_id == "orphan"
+            self.deleted = bucket_id
+
+    engine = Engine()
     state = {
         "running": True,
         "scanned": 0,
@@ -303,7 +313,7 @@ async def test_dashboard_backfill_delegates_to_running_outbox(monkeypatch):
     }
     monkeypatch.setattr(embedding_web.sh, "bucket_mgr", Manager())
     monkeypatch.setattr(embedding_web.sh, "embedding_outbox", outbox)
-    monkeypatch.setattr(embedding_web.sh, "embedding_engine", DisabledEngine())
+    monkeypatch.setattr(embedding_web.sh, "embedding_engine", engine)
     monkeypatch.setattr(embedding_web, "_backfill_state", state)
 
     await embedding_web._backfill_run()
@@ -312,6 +322,10 @@ async def test_dashboard_backfill_delegates_to_running_outbox(monkeypatch):
     assert outbox.retried is True
     assert state["status"] == "queued"
     assert state["queued"] == 1
+    assert state["orphaned"] == 1
+    assert state["cleaned"] == 1
+    assert state["cleanup_failed"] == 0
+    assert engine.deleted == "orphan"
     assert state["running"] is False
 
 

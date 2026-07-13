@@ -136,6 +136,33 @@ async def _backfill_run() -> None:
     try:
         all_buckets = await sh.bucket_mgr.list_all(include_archive=True)
         _backfill_state["scanned"] = len(all_buckets)
+        for key in ("orphaned", "cleaned", "cleanup_failed"):
+            _backfill_state.setdefault(key, 0)
+
+        # Reconcile both sides of the derived index.  Historically this action
+        # only queued "bucket exists, vector missing" rows, while diagnostics
+        # also reported the opposite drift (vector exists, bucket missing).
+        # That made the Dashboard recommend backfill for orphan vectors and
+        # then report "pending 0 / queued 0" forever.
+        known_ids = {
+            str(bucket.get("id") or "")
+            for bucket in all_buckets
+            if str(bucket.get("id") or "")
+        }
+        try:
+            indexed_ids = set(engine.list_all_ids()) if engine else set()
+        except Exception as exc:
+            logger.warning("[backfill] could not list indexed ids: %s", exc)
+            indexed_ids = set()
+        orphan_ids = sorted(indexed_ids - known_ids)
+        _backfill_state["orphaned"] = len(orphan_ids)
+        for bucket_id in orphan_ids:
+            try:
+                engine.delete_embedding(bucket_id)
+                _backfill_state["cleaned"] += 1
+            except Exception as exc:
+                _backfill_state["cleanup_failed"] += 1
+                logger.warning("[backfill] orphan cleanup failed for %s: %s", bucket_id, exc)
 
         # Managed server runtimes have one durable writer for the derived
         # index. Reuse it so manual backfill, startup reconciliation, and
@@ -520,7 +547,8 @@ def register(mcp) -> None:
         import asyncio as _aio
         _backfill_state = {
             "running": True, "scanned": 0, "missing": 0, "done": 0,
-            "failed": 0, "queued": 0, "status": "scanning", "error": "",
+            "failed": 0, "queued": 0, "orphaned": 0, "cleaned": 0,
+            "cleanup_failed": 0, "status": "scanning", "error": "",
         }
         _backfill_task = _aio.create_task(_backfill_run())
         return JSONResponse({

@@ -5722,14 +5722,18 @@ function _renderBackfillStatus(s) {
   } else if (s.status === 'queued') {
     html = '<b style="color:var(--positive,#2a8)">' + _SV.ok + ' 已交给后台索引队列：</b>'
       + '待处理 ' + (s.missing || 0) + ' · 本次新加入 ' + (s.queued || 0)
+      + ' · 孤儿向量 ' + (s.orphaned || 0) + ' · 已清理 ' + (s.cleaned || 0)
+      + (s.cleanup_failed ? ' · <span style="color:var(--negative,#c33)">清理失败 ' + s.cleanup_failed + '</span>' : '')
       + (s.failed ? ' · <span style="color:var(--negative,#c33)">重试中 ' + s.failed + '</span>' : '')
       + '<br><span style="color:var(--text-light)">记忆原文已安全保存；即使网络暂时不可用，服务也会继续重试。</span>';
   } else if (s.status === 'done') {
-    if ((s.missing || 0) === 0) {
+    if ((s.missing || 0) === 0 && (s.orphaned || 0) === 0) {
       html = '<b style="color:var(--positive,#2a8)">' + _SV.ok + ' 全部桶都有向量，无需补齐。</b>';
     } else {
       html = '<b style="color:var(--positive,#2a8)">' + _SV.ok + ' 完成：</b>扫描 ' + s.scanned
         + ' · 缺失 ' + s.missing + ' · 补齐 ' + s.done
+        + ' · 孤儿向量 ' + (s.orphaned || 0) + ' · 已清理 ' + (s.cleaned || 0)
+        + (s.cleanup_failed ? ' · <span style="color:var(--negative,#c33)">清理失败 ' + s.cleanup_failed + '</span>' : '')
         + (s.failed ? ' · <span style="color:var(--negative,#c33)">失败 ' + s.failed + '</span>' : '');
     }
   } else if (s.status === 'error') {

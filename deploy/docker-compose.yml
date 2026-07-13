@@ -28,9 +28,10 @@ services:
     container_name: ombre-brain
     restart: unless-stopped
     ports:
-      - "${OMBRE_HOST_PORT:-18001}:8000"
+      - "${OMBRE_BIND_ADDRESS:-127.0.0.1}:${OMBRE_HOST_PORT:-18001}:8000"
     environment:
       - OMBRE_TRANSPORT=streamable-http
+      - OMBRE_CONFIG_PATH=/app/buckets/config.yaml
       - OMBRE_EMBED_BACKEND=${OMBRE_EMBED_BACKEND:-api}
       - OMBRE_COMPRESS_API_KEY=${OMBRE_COMPRESS_API_KEY}
       - OMBRE_COMPRESS_BASE_URL=${OMBRE_COMPRESS_BASE_URL:-}

@@ -55,6 +55,8 @@ async def trace_core(
     meaning_replace: Optional[list] = None,
     media_append: Optional[list] = None,
     media_replace: Optional[list] = None,
+    hard_delete: Optional[bool] = False,
+    delete_reason: Optional[str] = "",
 ) -> str:
     bucket_id = "" if bucket_id is None else str(bucket_id)
     if name is None:
@@ -99,6 +101,8 @@ async def trace_core(
     why_remembered = str(why_remembered)
     meaning_append = str(meaning_append)
     delete = parse_bool(delete, default=False)
+    hard_delete = parse_bool(hard_delete, default=False)
+    delete_reason = "" if delete_reason is None else str(delete_reason)
 
     def _finite_float(value, default: float) -> float:
         try:
@@ -158,6 +162,16 @@ async def trace_core(
         return "请提供有效的 bucket_id。"
 
     # --- Delete 模式（F-10：软删除，移入 archive/ + 标 deleted_at）---
+    if hard_delete:
+        result = await rt.bucket_mgr.hard_delete_test_bucket(
+            bucket_id, reason=delete_reason or "AI requested test-data cleanup"
+        )
+        if result.get("ok"):
+            return f"已永久删除测试桶: {bucket_id}"
+        if result.get("error") == "not_erasable_test_data":
+            return "拒绝永久删除：只有创建时明确标记为 test_data 的测试桶可以被物理删除。"
+        return f"永久删除失败: {result.get('error', 'unknown_error')}"
+
     if delete:
         success = await rt.bucket_mgr.delete(bucket_id)
         return f"已将记忆桶存入档案（不可在日常召回中浮现）: {bucket_id}" if success else f"未找到记忆桶: {bucket_id}"

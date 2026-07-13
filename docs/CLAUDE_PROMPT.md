@@ -85,6 +85,8 @@
 | 我对当时的判断改主意了 | `trace(id, valence=0.7, arousal=0.4)` — 改情感坐标 |
 | 内容写错了 | `trace(id, content="新版本")` — 替换正文并重建 embedding |
 | 放入删除档案 | `trace(id, delete=True)` — 从日常召回中隐藏并清理 embedding；Markdown 仍保留在 `archive/` |
+| 创建可清理的虚假测试桶 | `hold(content="...", test_data=True)` — 创建时写入不可后补的测试来源标记，且不会合并进真实记忆 |
+| 永久删除虚假测试桶 | `trace(id, hard_delete=True, delete_reason="...")` — 仅限创建时已标记 `test_data=True` 的桶；真实记忆一律拒绝 |
 | 改 plan 状态 | `trace(plan_id, status="resolved")` — 仅对 plan 桶 |
 | 调 plan 重量 | `trace(plan_id, weight=0.8)` |
 | 改/补「为什么记得」 | `trace(id, why_remembered="...")` |

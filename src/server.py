@@ -565,6 +565,7 @@ async def hold(
     why_remembered: Optional[str] = "",
     meaning: Optional[str] = "",
     media: Optional[list] = None,
+    test_data: Optional[bool] = False,
 ) -> str:
     """仅在对话中已明确决定“这段内容值得成为长期记忆”时调用；不要因普通聊天、猜测或工具名称联想而自行调用。存入一条一句话级记忆，content 必须保留原意和事实，不得先改写成摘要；OB 的 hold 路径也绝不会压缩正文。系统优先自动打标，API 不可用时使用本地中性元数据继续逐字保存。tags 逗号分隔,importance 1-10。pinned=True=标记为永久核心,不衰减不合并。feel=True=存为感受类记忆(不参与普通浮现,仅通过 feel 检索读取)。source_bucket=正在消化的原始记忆桶 ID,会被标为已消化以加速淡化。why_remembered=记录原因(可选,自由文本,仅用于展示不计分)。meaning=可选,这条记忆为什么值得被想起——不是摘要,是我自己的话,只在真正觉得有重量时才写,不必每次都写。每次传入的是新增的一条,系统自动追加到该桶的 meaning 列表,不会覆盖已有的(同一条记忆可能在不同时刻被反复触动)。media=可选,本次要新增的媒体引用列表,每项至少含 path,如 [{"path": "...", "title": "...", "type": "image", "note": "..."}]；同样是追加,不覆盖已有 media；只存引用,不解析/不存储文件本身。"""
     return await _with_notice(
@@ -572,7 +573,7 @@ async def hold(
             content=content, tags=tags, importance=importance,
             pinned=pinned, feel=feel, source_bucket=source_bucket,
             valence=valence, arousal=arousal, why_remembered=why_remembered,
-            meaning=meaning, media=media,
+            meaning=meaning, media=media, test_data=test_data,
         ),
         op="hold",
         args={
@@ -581,6 +582,7 @@ async def hold(
             "source_bucket": source_bucket, "valence": valence, "arousal": arousal,
             "why_len": len(why_remembered or ""), "meaning_len": len(meaning or ""),
             "media_count": len(media or []),
+            "test_data": bool(test_data),
         },
     )
 
@@ -619,6 +621,8 @@ async def trace(
     meaning_replace: Optional[list] = None,
     media_append: Optional[list] = None,
     media_replace: Optional[list] = None,
+    hard_delete: Optional[bool] = False,
+    delete_reason: Optional[str] = "",
 ) -> str:
     """仅在明确需要修改某条已存在记忆时调用，不要猜测 bucket_id 或自行改写记忆。resolved=1=标记已放下,沉底仅在关键词触发时返回;resolved=0=重新激活;pinned=1=标记永久核心(锁 importance=10),0=取消;digested=1=标记已消化,加速淡化;content=替换桶正文并在落盘后排队重建 embedding;delete=True=移入 archive 并标记 deleted_at（只是归档，Markdown 文件不会被物理删除）;status=plan 桶状态(active/resolved/abandoned);weight=plan 承诺重量 0.0-1.0;dont_surface=1=不再出现在 breath,0=恢复;why_remembered=更新记录原因。meaning_append=追加一条新 meaning(不覆盖已有的,日常用这个);meaning_replace=整体替换 meaning 列表(仅用于纠错/清理,会丢弃所有旧条目);media_append=追加媒体引用列表(不覆盖已有的);media_replace=整体替换 media 列表(仅用于删除失效引用)。只传需要修改的字段,-1 或空串表示不改。"""
     return await _with_notice(
@@ -630,6 +634,7 @@ async def trace(
             dont_surface=dont_surface, why_remembered=why_remembered,
             meaning_append=meaning_append, meaning_replace=meaning_replace,
             media_append=media_append, media_replace=media_replace,
+            hard_delete=hard_delete, delete_reason=delete_reason,
         ),
         op="trace",
         args={

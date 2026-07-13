@@ -40,6 +40,7 @@ async def store_core(
     why_remembered: str,
     meaning: str = "",
     media: list | None = None,
+    test_data: bool = False,
 ) -> str:
     metadata_fallback = False
     try:
@@ -83,6 +84,7 @@ async def store_core(
         source_tool="hold",
         meaning=meaning,
         media=media,
+        test_data=test_data,
     )
 
     action = "合并→" if is_merged else "新建→"

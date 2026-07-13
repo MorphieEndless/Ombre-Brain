@@ -537,6 +537,7 @@ async def merge_or_create(
     grow_batch_id: str = "",
     meaning: str = "",
     media: list | None = None,
+    test_data: bool = False,
 ) -> Tuple[str, bool, str]:
     """
     检查是否有相似桶可合并，有则合并，无则新建。返回 (桶ID或名称, 是否合并, embed警告信息)。
@@ -562,6 +563,7 @@ async def merge_or_create(
             valence=valence, arousal=arousal, name=name, raw_merge=raw_merge,
             why_remembered=why_remembered, source_tool=source_tool,
             grow_batch_id=grow_batch_id, meaning=meaning, media=media,
+            test_data=test_data,
         )
 
 
@@ -579,6 +581,7 @@ async def _merge_or_create_inner(
     grow_batch_id: str = "",
     meaning: str = "",
     media: list | None = None,
+    test_data: bool = False,
 ) -> Tuple[str, bool, str]:
     """实际的 search→merge/create 逻辑，由 merge_or_create 在 Lock 保护下调用。"""
     exact_storage_match = False
@@ -604,7 +607,7 @@ async def _merge_or_create_inner(
                 existing = [exact]
                 exact_storage_match = True
 
-    if existing and existing[0].get("score", 0) > (rt.config.get("merge_threshold") or 75):
+    if not test_data and existing and existing[0].get("score", 0) > (rt.config.get("merge_threshold") or 75):
         bucket = existing[0]
         # --- 不合并到钉选/保护桶 ---
         if not (bucket["metadata"].get("pinned") or bucket["metadata"].get("protected")):
@@ -677,6 +680,7 @@ async def _merge_or_create_inner(
         grow_batch_id=grow_batch_id,
         meaning=meaning,
         media=media,
+        test_data=test_data,
         # hold 的铁律：正文优先落盘。打标/embedding 可降级，但绝不压缩或撤销记忆。
         allow_embedding_fallback=(raw_merge and source_tool == "hold"),
     )

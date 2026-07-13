@@ -18,6 +18,8 @@ import os
 import time
 from typing import Any
 
+import yaml
+
 from starlette.requests import Request
 from starlette.responses import Response
 
@@ -44,6 +46,8 @@ from ombrebrain.policy import RedLineContract, RedLineFeatureSpec, SurfaceDecisi
 from ombrebrain.protocol import PublicToolDesignContract, PublicToolSpec
 from ombrebrain.resilience import CrashRecoveryContract, CrashRecoveryPlan, PathStep
 from ombrebrain.retrieval import SurfaceContextCompiler
+from deployment_profile import effective_configuration_report
+from utils import config_file_path
 
 try:
     from errors import recent_errors, format_error, clear_errors_log, get_recent_logs  # type: ignore
@@ -572,6 +576,18 @@ def _rel_path(path: str, root: str) -> str:
         return path
 
 
+def _read_persisted_runtime_config() -> tuple[str, dict[str, Any]]:
+    """读取未应用环境覆盖的 config.yaml，供“已保存/实际生效”对照。"""
+    path = config_file_path()
+    if not os.path.exists(path):
+        return path, {}
+    with open(path, "r", encoding="utf-8") as handle:
+        raw = yaml.safe_load(handle) or {}
+    if not isinstance(raw, dict):
+        raise ValueError("config.yaml 顶层必须是对象")
+    return path, raw
+
+
 async def build_system_diagnostics() -> dict[str, Any]:
     """Build a read-only Dashboard diagnostics report.
 
@@ -620,6 +636,55 @@ async def build_system_diagnostics() -> dict[str, Any]:
         },
         action=storage_action,
     ))
+
+    try:
+        persisted_path, persisted_cfg = _read_persisted_runtime_config()
+        effective_report = effective_configuration_report(
+            cfg,
+            persisted_cfg,
+            environment=os.environ,
+            config_path=persisted_path,
+            persistence=persistence,
+        )
+        effective_auth = bool(effective_report["effective"]["mcp_require_auth"])
+        profile = str(effective_report.get("profile") or "unconfigured")
+        overrides = effective_report.get("overrides") or []
+        if profile == "public_secure" and not effective_auth:
+            config_status = "error"
+            config_message = "公网安全模式的实际 OAuth 已关闭，当前配置不安全"
+            config_action = "删除/修正 OMBRE_MCP_REQUIRE_AUTH，或重新运行安全部署向导"
+        elif profile == "unconfigured":
+            config_status = "warning"
+            config_message = "尚未选择部署模式；系统仍按安全默认运行"
+            config_action = "打开 /onboarding 选择本机、公网安全或高级模式"
+        elif overrides:
+            config_status = "warning"
+            config_message = f"部署模式已配置，但有 {len(overrides)} 个启动环境变量覆盖已保存设置"
+            config_action = "按详情中的变量名修改 Zeabur/Render/Docker 环境变量"
+        elif effective_report.get("restart_required"):
+            config_status = "warning"
+            config_message = "部署设置已保存，但当前进程尚未采用新值"
+            config_action = "使用 Dashboard 右上角重启按钮使设置生效"
+        else:
+            config_status = "ok"
+            config_message = "已保存配置与当前实际生效值一致"
+            config_action = ""
+        checks.append(_check(
+            "effective_config",
+            "实际生效配置",
+            config_status,
+            config_message,
+            details=effective_report,
+            action=config_action,
+        ))
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        checks.append(_check(
+            "effective_config",
+            "实际生效配置",
+            "error",
+            f"无法读取或比较 config.yaml：{exc}",
+            action="检查 OMBRE_CONFIG_PATH 指向的 YAML 文件与读取权限",
+        ))
 
     try:
         stats = await sh.bucket_mgr.get_stats() if sh.bucket_mgr else {}

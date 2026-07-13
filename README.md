@@ -521,9 +521,12 @@ Render 自带 HTTPS，可直接在 Claude.ai 添加，无需额外 Tunnel。
 
 [![Deploy on Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/templates/OMBRE-BRAIN)
 
-1. Fork 本仓库 → Zeabur **New Project** → **Deploy from GitHub**
-2. Variables 填 `OMBRE_COMPRESS_API_KEY`（必填）
-3. Volumes → 挂载路径 `/app/buckets`
+1. Fork 本仓库 → Zeabur **New Project** → **Deploy from GitHub**；根目录 Dockerfile 会被自动识别。
+2. Variables 只填模型所需的 Key（至少 `OMBRE_COMPRESS_API_KEY`）；不要额外设置 `OMBRE_MCP_REQUIRE_AUTH`，避免它覆盖 Dashboard。
+3. Volumes 新建 `data`，挂载路径必须是 `/app/buckets`。这是记忆、OAuth 客户端注册和 `config.yaml` 的共同持久目录。
+4. 绑定 HTTPS 域名后打开 Dashboard，进入 `/onboarding`，选择“公网安全模式”、填入域名并保存，然后在平台重启一次服务。
+
+如果“页面里明明开启 OAuth，重启后却仍显示未开启”，去 **系统体检 → 实际生效配置**：它会同时列出已保存值、当前进程值和覆盖来源。优先删除 Zeabur 中遗留的 `OMBRE_MCP_REQUIRE_AUTH=false`；环境变量优先级高于 `config.yaml`。
 4. Networking → Port `8000` → **Generate Domain**
 
 ### 自有 VPS

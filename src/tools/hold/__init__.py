@@ -23,6 +23,8 @@ core（普通存入 + 自动合并）。
 
 from typing import Optional
 
+from utils import parse_bool
+
 from .. import _runtime as rt
 from .._common import (
     check_content_size,
@@ -47,6 +49,7 @@ async def dispatch(
     why_remembered: Optional[str] = "",
     meaning: Optional[str] = "",
     media: Optional[list] = None,
+    test_data: Optional[bool] = False,
 ) -> str:
     content = "" if content is None else str(content)
     if tags is None:
@@ -71,6 +74,9 @@ async def dispatch(
     meaning = str(meaning).strip()
     if media is not None and not isinstance(media, list):
         media = None
+    test_data = parse_bool(test_data, default=False)
+    if test_data and (pinned or feel):
+        return "测试数据不能创建为 pinned 或 feel；请使用普通测试桶。"
     try:
         importance = int(importance)
     except (TypeError, ValueError, OverflowError):
@@ -193,5 +199,6 @@ async def dispatch(
         why_remembered=why_remembered,
         meaning=meaning,
         media=media,
+        test_data=test_data,
     )
     return result

@@ -825,6 +825,7 @@ class BucketManager:
         allow_embedding_fallback: bool = False,
         meaning: str = "",
         media: Optional[list[dict]] = None,
+        test_data: bool = False,
     ) -> str:
         """
         Create a new memory bucket, return bucket ID.
@@ -916,6 +917,12 @@ class BucketManager:
             "last_active": now_iso(),
             "activation_count": 0,
         }
+        if test_data:
+            metadata["provenance"] = {
+                "kind": "test",
+                "created_by": str(source_tool or "developer")[:_SOURCE_TOOL_MAX],
+                "erasable": True,
+            }
         if pinned:
             metadata["pinned"] = True
         if protected:
@@ -1401,6 +1408,44 @@ class BucketManager:
         )
 
         return True
+
+    async def hard_delete_test_bucket(self, bucket_id: str, *, reason: str = "") -> dict:
+        """Physically erase only a bucket born as explicitly erasable test data."""
+        file_path = self._find_bucket_file(bucket_id)
+        if not file_path:
+            return {"ok": False, "error": "not_found"}
+        try:
+            post = frontmatter.load(file_path)
+        except Exception as exc:
+            return {"ok": False, "error": f"read_failed: {exc}"}
+        provenance = post.get("provenance")
+        if not (isinstance(provenance, dict)
+                and provenance.get("kind") == "test"
+                and provenance.get("erasable") is True):
+            return {"ok": False, "error": "not_erasable_test_data"}
+        bucket_type = str(post.get("type") or "dynamic")
+        try:
+            os.remove(file_path)
+        except OSError as exc:
+            return {"ok": False, "error": f"delete_failed: {exc}"}
+        if self.embedding_outbox is not None:
+            try:
+                self.embedding_outbox.discard(bucket_id)
+            except Exception:
+                pass
+        if self.embedding_engine is not None:
+            try:
+                self.embedding_engine.delete_embedding(bucket_id)
+            except Exception as exc:
+                logger.warning("hard delete embedding cleanup failed for %s: %s", bucket_id, exc)
+        self._invalidate_bm25()
+        self._record_ledger_event(
+            "TraceHardDeleted", bucket_id, bucket_type, "",
+            {"provenance": {"kind": "test", "erasable": True}},
+            {"reason": str(reason).strip()[:500], "content_erased": True},
+        )
+        logger.warning("Physically erased test bucket: %s", bucket_id)
+        return {"ok": True, "deleted": bucket_id}
 
     # ---------------------------------------------------------
     # Wikilink injection — DISABLED

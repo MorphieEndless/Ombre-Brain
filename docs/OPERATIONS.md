@@ -1,5 +1,17 @@
 # Ombre Brain 可靠性与恢复手册
 
+## 安全部署向导
+
+首次登录后打开 `/onboarding`，只选择部署意图：
+
+- 本机：自己的设备或可信内网使用，OAuth 可关闭。
+- 公网安全：HTTPS 域名远程使用，OAuth 强制开启。
+- 高级：已有反向代理或外部鉴权时自行选择，系统仍持续报告风险。
+
+向导写入现有 `config.yaml`，不会创建第二套配置。OAuth 与传输模式在进程启动时绑定，保存后必须重启。系统体检的“实际生效配置”同时显示已保存值、当前进程值、环境变量来源和持久卷状态；只有环境变量确实改变保存值时才告警。
+
+Docker/Zeabur 的持久卷统一挂载 `/app/buckets`，配置路径为 `/app/buckets/config.yaml`。Zeabur 从 GitHub 部署时只需添加模型 Key、挂载该卷、绑定 HTTPS 域名，再从向导选择“公网安全模式”。不要在平台中长期保留 `OMBRE_MCP_REQUIRE_AUTH` 或 `OMBRE_TRANSPORT`，除非明确希望平台覆盖 Dashboard。
+
 这份文档说明 Ombre Brain 在断网、模型限流、外部编辑和备份恢复时真正保证什么。
 
 ## 数据边界

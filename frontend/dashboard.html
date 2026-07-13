@@ -220,6 +220,10 @@
   }
 
   .bucket-list { display: flex; flex-direction: column; gap: 8px; }
+  .bucket-bulkbar { display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0;padding:9px 12px;border:1px solid var(--border);background:var(--surface); }
+  .bucket-select { width:17px;height:17px;accent-color:var(--accent);flex:0 0 auto; }
+  .developer-only { display:none; }
+  body.developer-mode .developer-only { display:inline-flex; }
   /* 记忆桶翻页器 / bucket pager */
   .bucket-pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 18px 0 4px; }
   .pager-btn {
@@ -1331,8 +1335,19 @@
     filter: drop-shadow(2px 3px 4px var(--shadow-dark));
     transition: transform .25s cubic-bezier(.3,1.4,.5,1);
     image-rendering: pixelated;
+    touch-action: none; user-select: none; -webkit-user-select: none;
   }
   #ob-chick:hover { transform: translateY(-3px) scale(1.08); }
+  #ob-chick.grabbed { cursor: grabbing; transform: rotate(-5deg) scale(1.12); transition:none; }
+  #ob-chick.dizzy { animation:ob-chick-dizzy .25s ease-in-out 4; }
+  #ob-chick.sleeping { filter:drop-shadow(2px 3px 4px var(--shadow-dark)) grayscale(.15); }
+  #ob-chick.lab-mode canvas { filter:hue-rotate(165deg) saturate(1.35) !important; }
+  #ob-chick.play-dead { transform:rotate(90deg) translateY(8px); transition:transform .25s; }
+  #ob-chick.tickled svg, #ob-chick.tickled canvas { animation:ob-chick-tickle .32s ease-in-out 2; transform-origin:50% 75%; }
+  @keyframes ob-chick-dizzy { 0%,100%{transform:rotate(0)} 50%{transform:rotate(12deg) translateY(-2px)} }
+  @keyframes ob-chick-tickle { 0%,100%{transform:rotate(0) scaleY(1)} 25%{transform:rotate(-7deg) scaleY(.94)} 75%{transform:rotate(7deg) scaleY(1.04)} }
+  #ob-chick.dizzy::after { content:'✦ ✧'; position:absolute; left:45%; top:-8px; color:var(--accent); font-size:13px; animation:ob-chick-wiggle .5s infinite; }
+  #ob-chick.sleeping::after { content:'zZ'; position:absolute; right:5px; top:-7px; color:var(--text-dim); font:11px 'Share Tech Mono',monospace; }
   #ob-chick svg { display:block; width:100%; height:100%; shape-rendering: crispEdges; }
   @keyframes ob-chick-wiggle { 0%,100%{transform:rotate(0)} 25%{transform:rotate(-9deg)} 75%{transform:rotate(9deg)} }
   #ob-chick.wiggle svg { animation: ob-chick-wiggle .5s ease-in-out; transform-origin: 50% 80%; }
@@ -1344,6 +1359,7 @@
     opacity:0; transform: translateY(4px); transition: opacity .2s, transform .2s; pointer-events:none;
   }
   #ob-chick:hover .chick-tip { opacity:1; transform: translateY(0); }
+  #ob-chick.grabbed .chick-tip { opacity:1; transform:translateY(0); }
   @media (max-width: 768px) { #ob-chick { width: 38px; height: 38px; right: 12px; bottom: 12px; } }
 
   /* —— ⑨b 小鸡的一天：随时段给画布微调色温（纯装饰，best-effort）—— */
@@ -1915,6 +1931,15 @@
 
 <div class="content" id="list-view">
   <div class="filters" id="filters"></div>
+  <div class="bucket-bulkbar">
+    <label style="display:inline-flex;align-items:center;gap:6px;"><input id="bucket-select-all" type="checkbox" onchange="selectAllFiltered(this.checked)"> 全选当前筛选</label>
+    <span id="bucket-selected-count" style="color:var(--text-dim);font-size:12px;">已选 0</span>
+    <button onclick="runBucketBatch('forget')">主动遗忘</button>
+    <button onclick="runBucketBatch('resolve')">沉底</button>
+    <button onclick="runBucketBatch('archive')">归档</button>
+    <button class="developer-only" onclick="hardDeleteSelectedTests()" style="color:#b85c3c;">永久删除测试桶</button>
+    <label style="margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);"><input id="developer-mode-toggle" type="checkbox" onchange="setDeveloperMode(this.checked)"> 开发者模式</label>
+  </div>
   <div class="bucket-list" id="bucket-list">
     <div class="loading">加载中… / Loading…</div>
   </div>
@@ -2791,6 +2816,10 @@
       <div style="font-size:12px;color:var(--text-dim);margin-bottom:16px;line-height:1.7;">
         生成 Claude Desktop / claude.ai 的 MCP 连接配置。12 个工具全在一个端点 /mcp 上，只需连这一条。
       </div>
+      <div style="margin-bottom:16px;padding:12px 14px;border:1px solid var(--border);border-radius:11px;background:var(--surface-solid);font-size:12px;line-height:1.7;">
+        不确定 OAuth、端口和持久目录怎么选？
+        <a href="/onboarding" style="color:var(--accent);font-weight:600;">打开安全部署向导</a>，只需选择“本机 / 公网安全 / 高级”之一。
+      </div>
 
       <!-- 模式切换 -->
       <div style="margin-bottom:16px;">
@@ -3031,7 +3060,7 @@
   <div style="background:var(--surface-solid);max-width:520px;width:92%;padding:32px 28px;border-radius:18px;box-shadow:0 8px 40px rgba(0,0,0,0.25);">
     <h2 style="font-family:'Cormorant Garamond',serif;color:var(--accent);margin:0 0 12px;">欢迎来到 Ombre Brain</h2>
     <p style="font-size:13px;color:var(--text-dim);line-height:1.7;margin:0 0 14px;">
-      看起来这是第一次启动。两件事可以现在做，也可以稍后做：
+      看起来这是第一次启动。先选择本机、公网安全或高级模式，系统会替你处理 OAuth 与连接默认值。
     </p>
     <ol style="font-size:13px;line-height:1.8;padding-left:20px;color:var(--text);">
       <li><b>设置 Dashboard 密码</b>：你下面会看到登录页，第一次填的密码会被记住。</li>
@@ -3047,7 +3076,8 @@
       <a href="https://github.com/" target="_blank" style="color:var(--accent);">README</a>。
     </p>
     <div style="margin-top:18px;display:flex;gap:8px;justify-content:flex-end;">
-      <button onclick="dismissOnboarding()" style="background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:8px;cursor:pointer;">我先试用一下</button>
+      <button onclick="dismissOnboarding()" style="background:var(--surface);color:var(--text);padding:8px 18px;border-radius:8px;cursor:pointer;">稍后设置</button>
+      <button onclick="location.href='/onboarding'" style="background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:8px;cursor:pointer;">开始安全部署</button>
     </div>
   </div>
 </div>
@@ -3520,6 +3550,7 @@ async function testDehydrationKey() {
     msgEl.style.color = 'var(--positive, #9DC880)'; msgEl.innerHTML = _SV.ok + ' ' + esc(d.message || '连接成功');
   } else {
     msgEl.style.color = 'var(--negative)'; msgEl.innerHTML = _SV.err + ' ' + esc(d.error || '连接失败');
+    chickReactForApiProblem(d.error);
   }
 }
 
@@ -3534,6 +3565,7 @@ async function testEmbeddingKey() {
     msgEl.style.color = 'var(--positive, #9DC880)'; msgEl.innerHTML = _SV.ok + ' ' + esc(d.message || '向量化连接成功');
   } else {
     msgEl.style.color = 'var(--negative)'; msgEl.innerHTML = _SV.err + ' ' + esc(d.error || '向量化连接失败');
+    chickReactForApiProblem(d.error);
   }
 }
 
@@ -3552,6 +3584,7 @@ async function loadSettingsStatus() {
       <b>衰减引擎</b>：${esc(d.decay_engine)}<br>
       <b>向量搜索</b>：${d.embedding_enabled ? '已启用' : '未启用'}<br>
     `;
+    if (d.decay_engine === 'running' && window.ObPet) window.ObPet.react('decay');
   } catch(e) {
     el.textContent = '加载失败: ' + e;
   }
@@ -4097,6 +4130,80 @@ async function readJsonSafe(resp) {
 const BASE = location.origin;
 let allBuckets = [];
 let currentFilter = 'all';
+var selectedBucketIds = new Set();
+var developerMode = localStorage.getItem('ombreDeveloperMode') === 'true';
+
+function setDeveloperMode(enabled) {
+  developerMode = !!enabled;
+  localStorage.setItem('ombreDeveloperMode', developerMode ? 'true' : 'false');
+  document.body.classList.toggle('developer-mode', developerMode);
+}
+document.addEventListener('DOMContentLoaded', function() {
+  var toggle = document.getElementById('developer-mode-toggle');
+  if (toggle) toggle.checked = developerMode;
+  setDeveloperMode(developerMode);
+});
+
+function syncBucketSelectionUi() {
+  var count = document.getElementById('bucket-selected-count');
+  if (count) count.textContent = '已选 ' + selectedBucketIds.size;
+  document.querySelectorAll('.bucket-select').forEach(function(box) {
+    box.checked = selectedBucketIds.has(box.dataset.id);
+  });
+  var visibleIds = (_curBuckets || []).filter(function(b) { return !b.dont_surface; }).map(function(b) { return b.id; });
+  var all = document.getElementById('bucket-select-all');
+  if (all) {
+    all.checked = !!visibleIds.length && visibleIds.every(function(id) { return selectedBucketIds.has(id); });
+    all.indeterminate = visibleIds.some(function(id) { return selectedBucketIds.has(id); }) && !all.checked;
+  }
+}
+
+function toggleBucketSelection(id, checked) {
+  if (checked) selectedBucketIds.add(id); else selectedBucketIds.delete(id);
+  syncBucketSelectionUi();
+}
+
+function selectAllFiltered(checked) {
+  (_curBuckets || []).filter(function(b) { return !b.dont_surface; }).forEach(function(b) {
+    if (checked) selectedBucketIds.add(b.id); else selectedBucketIds.delete(b.id);
+  });
+  syncBucketSelectionUi();
+}
+
+async function runBucketBatch(action) {
+  var ids = Array.from(selectedBucketIds);
+  if (!ids.length) return alert('请先选择记忆桶。');
+  var labels = {forget:'主动遗忘', resolve:'沉底', archive:'归档'};
+  if (!confirm('确认对 ' + ids.length + ' 条记忆执行“' + labels[action] + '”？')) return;
+  var res = await authFetch('/api/buckets/batch', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ids:ids, action:action})});
+  if (!res) return;
+  var data = await readJsonSafe(res);
+  if (!res.ok) return alert(data.error || '批量操作失败');
+  if (action === 'forget' && window.ObPet) ObPet.react('forget');
+  selectedBucketIds.clear();
+  closeDetail();
+  await loadBuckets();
+}
+
+async function hardDeleteSelectedTests() {
+  if (!developerMode) return;
+  var byId = {};
+  (allBuckets || []).forEach(function(b) { byId[b.id] = b; });
+  var ids = Array.from(selectedBucketIds);
+  var refused = ids.filter(function(id) { return !byId[id] || !byId[id].erasable_test_data; });
+  if (!ids.length) return alert('请先选择测试桶。');
+  if (refused.length) { if(window.ObPet) ObPet.react('protect'); return alert('所选内容包含真实记忆或未标记测试来源的桶，已拒绝永久删除。'); }
+  var phrase = prompt('这是不可撤销的测试数据清理。请输入 DELETE TEST DATA 继续：');
+  if (phrase !== 'DELETE TEST DATA') return;
+  var res = await authFetch('/api/developer/buckets/hard-delete', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ids:ids, confirm:phrase, reason:'Dashboard developer cleanup'})});
+  if (!res) return;
+  var data = await readJsonSafe(res);
+  if (!res.ok) return alert(data.error || ('永久删除失败：' + JSON.stringify(data.refused || data.errors)));
+  if (window.ObPet) ObPet.react('test_delete');
+  selectedBucketIds.clear();
+  closeDetail();
+  await loadBuckets();
+}
 
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
@@ -4155,6 +4262,7 @@ document.getElementById('search-input').addEventListener('input', (e) => {
 function doSearch() {
   clearTimeout(searchTimer);
   const q = document.getElementById('search-input').value.trim();
+  if (['小鸡','大吉','可恶的人类','chicken'].includes(q.toLowerCase()) && window.ObPet) ObPet.react('secret');
   if (q) searchBuckets(q);
   else renderBuckets(allBuckets);
 }
@@ -4166,12 +4274,19 @@ async function loadBuckets() {
     if (!res.ok || !Array.isArray(data)) {
       throw new Error((data && data.error) ? data.error : `HTTP ${res.status}`);
     }
+    var previousIds = new Set((allBuckets || []).map(function(b){return b.id;}));
+    var hadPrevious = previousIds.size > 0;
     allBuckets = data;
+    if (hadPrevious && data.some(function(b){return b.erasable_test_data && !previousIds.has(b.id);}) && window.ObPet) ObPet.react('test_create');
+    var liveIds = new Set(allBuckets.map(function(b) { return b.id; }));
+    selectedBucketIds.forEach(function(id) { if (!liveIds.has(id)) selectedBucketIds.delete(id); });
     updateStats();
     buildFilters();
     renderBuckets(allBuckets);
+    if (data.length === 0 && window.ObPet) window.ObPet.react('empty');
   } catch (e) {
     document.getElementById('bucket-list').innerHTML = '<div class="loading">加载失败: ' + esc(e.message) + '</div>';
+    if (window.ObPet) window.ObPet.react('connection_error');
   }
 }
 
@@ -4298,6 +4413,7 @@ function _paintBuckets() {
     var emotionHtml = '<span class="emotion" style="display:inline-flex;align-items:center;gap:3px;"><span class="v-bar"><span class="v-dot" style="left:' + vPos + '%"></span></span>' + modelV + '</span>';
     return '<div class="' + rowCls + '" data-id="' + escAttr(b.id) + '" ' + rowClick + ' style="cursor:pointer;' + inlineStyle + '">' +
       '<div class="bucket-row-top">' +
+        '<input class="bucket-select" type="checkbox" data-id="' + escAttr(b.id) + '" onclick="event.stopPropagation()" onchange="toggleBucketSelection(this.dataset.id,this.checked)"' + (selectedBucketIds.has(b.id) ? ' checked' : '') + '>' +
         '<span class="' + iconCls + '">' + iconHtml + '</span>' +
         '<span class="name" title="' + escAttr(b.name) + '">' + esc(b.name) + firstBadge + '</span>' +
         '<div class="bucket-row-tags">' +
@@ -4311,6 +4427,7 @@ function _paintBuckets() {
     '</div>';
   }).join('') + _bucketPagerHtml(visible.length, totalPages);
   if (window.lucide) lucide.createIcons();
+  syncBucketSelectionUi();
 }
 
 // 本地匹配：桶名 / 预览 / 域 / 标签支持「子串」+「模糊（子序列）」，桶 id 支持子串精确定位。
@@ -4443,6 +4560,7 @@ async function bucketForget(id) {
   try {
     var res = await fetch(BASE + '/api/bucket/' + encodeURIComponent(id) + '/forget', { method: 'POST' });
     if (!res.ok) throw new Error(await res.text());
+    if (window.ObPet) ObPet.react('forget');
     await showDetail(id);
     loadBuckets();
   } catch (e) { alert('遗忘切换失败 / Forget toggle failed: ' + e.message); }
@@ -5235,7 +5353,104 @@ window.ObPet = (function () {
     '....YYLllLYY....','.....YYYYYY.....','.....B....B.....','....BB....BB....'];
   var SPR = 16, W = 64, H = 24, SCALE = 2;
   var host, cv, ctx, raf = null, t0 = 0;
-  var st = { stage:'egg', count:0, x:24, dir:1, frame:0, blinkT:0, hatchT:0, hopT:0, started:false };
+  var st = { stage:'egg', count:0, x:24, dir:1, frame:0, blinkT:0, hatchT:0, hopT:0, started:false, dragMoved:false, suppressClickUntil:0, drops:0, tickles:0, tickleTimer:null, idleTimer:null };
+  var TICKLE_LINES = ['别碰我。','……你手痒是吧。','再碰试试。','咬你哦。','我记仇的。','你有正事吗。','……烦。','我是记忆系统不是宠物。','下次再碰我就把你的桶全归档。','别挠了，痒。'];
+
+  function wakePet() {
+    if (!host) return;
+    host.classList.remove('sleeping','play-dead');
+    clearTimeout(st.idleTimer);
+    st.idleTimer = setTimeout(function() {
+      if (!host.classList.contains('grabbed') && !host.classList.contains('raging')) {
+        host.classList.add('sleeping'); setTip('zZ…鸡也要整理记忆。');
+      }
+    }, 90000);
+  }
+  function pointNearElement(x, y, selector, distance) {
+    var el=document.querySelector(selector); if(!el) return false;
+    var r=el.getBoundingClientRect(), cx=Math.max(r.left,Math.min(x,r.right)), cy=Math.max(r.top,Math.min(y,r.bottom));
+    return Math.hypot(x-cx,y-cy) <= distance;
+  }
+  function dropRemark(x, y) {
+    var hour=new Date().getHours();
+    if (y < 55) return '太高了……我恐高。';
+    if (pointNearElement(x,y,'.bucket-pager',80)) return '这位置以前是我的。';
+    if (pointNearElement(x,y,'.search-bar',90)) return '你找什么？我帮你啄。';
+    if (document.getElementById('settings-view') && document.getElementById('settings-view').style.display !== 'none') return '不要乱动我的饲料配方。';
+    if (hour < 5 || hour >= 23) return '你怎么还没睡？';
+    return ['这里视野不错。','好吧，就停这里。','人类的桌面真乱。'][st.drops % 3];
+  }
+
+  function clampPetPosition(x, y) {
+    var w = host ? host.offsetWidth : 128, h = host ? host.offsetHeight : 48;
+    return {
+      x: Math.max(8, Math.min(window.innerWidth - w - 8, x)),
+      y: Math.max(8, Math.min(window.innerHeight - h - 8, y))
+    };
+  }
+  function placePet(x, y, persist) {
+    var p = clampPetPosition(x, y);
+    host.style.left = p.x + 'px'; host.style.top = p.y + 'px';
+    host.style.right = 'auto'; host.style.bottom = 'auto';
+    if (persist) localStorage.setItem('ombreChickPosition', JSON.stringify(p));
+  }
+  function restorePetPosition() {
+    try {
+      var p = JSON.parse(localStorage.getItem('ombreChickPosition') || 'null');
+      if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) placePet(p.x, p.y, false);
+    } catch (e) {}
+  }
+  function installPetDrag() {
+    if (host.dataset.dragReady) return;
+    host.dataset.dragReady = '1';
+    var drag = null;
+    var grabs = ['可恶的人类！', '喂，轻一点！', '我不是翻页键！', '抓鸡要负责的！', '咯咯咯——放我下来！'];
+    host.addEventListener('pointerdown', function(e) {
+      if (e.button != null && e.button !== 0) return;
+      var r = host.getBoundingClientRect();
+      drag = {id:e.pointerId, dx:e.clientX-r.left, dy:e.clientY-r.top, sx:e.clientX, sy:e.clientY, samples:[e.clientX]};
+      st.dragMoved = false;
+      wakePet();
+      host.setPointerCapture(e.pointerId);
+      host.classList.add('grabbed');
+      setTip(grabs[Math.floor(Math.random()*grabs.length)]);
+      e.preventDefault();
+    });
+    host.addEventListener('pointermove', function(e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      if (Math.abs(e.clientX-drag.sx) + Math.abs(e.clientY-drag.sy) > 5) st.dragMoved = true;
+      drag.samples.push(e.clientX); if (drag.samples.length > 10) drag.samples.shift();
+      placePet(e.clientX-drag.dx, e.clientY-drag.dy, false);
+      e.preventDefault();
+    });
+    function drop(e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      var r = host.getBoundingClientRect();
+      placePet(r.left, r.top, true);
+      host.classList.remove('grabbed');
+      if (st.dragMoved) st.suppressClickUntil = Date.now() + 350;
+      var turns=0, last=0;
+      for(var i=1;i<drag.samples.length;i++){ var d=drag.samples[i]-drag.samples[i-1], sign=d>4?1:(d<-4?-1:0); if(sign&&last&&sign!==last) turns++; if(sign) last=sign; }
+      st.drops++;
+      if (turns >= 3) {
+        host.classList.add('dizzy'); setTip('天旋地转……你礼貌吗？');
+        setTimeout(function(){host.classList.remove('dizzy');},1200);
+      } else if (st.drops % 8 === 0) {
+        host.classList.add('play-dead'); setTip('……');
+        setTimeout(function(){ host.classList.remove('play-dead'); setTip('偷偷睁眼。你走了吗？'); },2200);
+      } else setTip(st.dragMoved ? dropRemark(r.left+r.width/2,r.top+r.height/2) : '戳我干嘛？');
+      drag = null;
+      wakePet();
+    }
+    host.addEventListener('pointerup', drop);
+    host.addEventListener('pointercancel', drop);
+    host.addEventListener('click', function(e) {
+      if (Date.now() < st.suppressClickUntil) { e.preventDefault(); e.stopImmediatePropagation(); }
+    }, true);
+    window.addEventListener('resize', function() {
+      if (host.style.left) { var r=host.getBoundingClientRect(); placePet(r.left,r.top,true); }
+    });
+  }
 
   function ensure() {
     host = document.getElementById('ob-chick');
@@ -5244,7 +5459,19 @@ window.ObPet = (function () {
       host.style.width = 'auto'; host.style.height = 'auto';
       host.innerHTML = '<canvas width="' + W + '" height="' + H + '" style="display:block;width:' + (W*SCALE) + 'px;height:' + (H*SCALE) + 'px;image-rendering:pixelated;"></canvas><div class="chick-tip"></div>';
       cv = host.querySelector('canvas'); ctx = cv.getContext('2d');
-      host.addEventListener('click', function () { react('poke'); });
+      host.addEventListener('click', function (e) {
+        var r = cv.getBoundingClientRect();
+        var canvasX = ((e.clientX - r.left) / Math.max(r.width, 1)) * W;
+        var spriteX = st.stage === 'big' ? st.x : 24;
+        var side = canvasX >= spriteX && canvasX <= spriteX + SPR
+          && ((canvasX - spriteX) / SPR < .38 || (canvasX - spriteX) / SPR > .62);
+        host.dataset.lastPetAction = side ? 'tickle' : 'poke';
+        react(side ? 'tickle' : 'poke');
+      });
+      installPetDrag();
+      restorePetPosition();
+      ['pointerdown','keydown','wheel'].forEach(function(name){ document.addEventListener(name,wakePet,{passive:true}); });
+      wakePet();
     }
   }
   function setTip(s) { var t = host && host.querySelector('.chick-tip'); if (t) t.textContent = s; }
@@ -5284,21 +5511,53 @@ window.ObPet = (function () {
   }
   function start() { if (!raf) { t0 = 0; raf = requestAnimationFrame(render); } }
   function setCount(n) {
-    ensure(); n = n || 0; var prev = st.stage; st.count = n; var s = stageFor(n);
+    ensure(); n = n || 0; var prev = st.stage, oldCount=st.count, wasStarted=st.started; st.count = n; var s = stageFor(n);
     if (st.started && prev === 'egg' && s !== 'egg') st.hatchT = 1000;   // 首次破壳过场
     else if (!st.started) st.stage = s;
     st.started = true;
-    setTip(s === 'egg' ? '一颗蛋 · 记点东西我就孵化' : (s === 'chick' ? '破壳啦 · ' + n + ' 段记忆' : '肥嘟嘟大吉 · ' + n + ' 段记忆'));
+    if (wasStarted && n > oldCount && oldCount > 0) { st.hopT=300; setTip('这条我记住了。'); }
+    else setTip(s === 'egg' ? '一颗蛋 · 记点东西我就孵化' : (s === 'chick' ? '破壳啦 · ' + n + ' 段记忆' : '肥嘟嘟大吉 · ' + n + ' 段记忆'));
     start();
   }
   function react(type) {
     ensure();
+    wakePet();
     if (st.stage === 'egg' && st.hatchT <= 0) { st.hatchT = 1000; setTip('咔嚓——破壳！'); }
-    else { st.hopT = 300; setTip(type === 'breath' ? 'breath～它跳了一下' : (type === 'hold' ? '记住啦 :)' : '戳我干嘛 :)')); }
+    else {
+      st.hopT = 300;
+      var lines={
+        forget:'我会替你放远一点。',test_create:'护目镜戴好，开始实验。',test_delete:'假的，清理完了。',protect:'这条不行。',forgive:'……算了，原谅你。',secret:'咯？你居然知道暗号。',
+        rate_limit:'最近发现你有429的问题。不过那是你的问题，不是我的。我建议你冷静一下，就像我正在做的那样。🐤',
+        invalid_key:'你的key坏了。我试了好几次——骗你的。不过不是我的问题。去检查一下。',
+        grow_empty:'你喂了我一段话但我没消化成功。可能是我太小了，也可能是你的API欠费了。大概率是后者。',
+        embedding_rebuild:'正在重新理解所有的记忆。这需要一点时间。你可以去喝杯水，不喝也行，反正我知道你今天肯定没喝够水。',
+        empty:'这里什么都没有。说点什么吧，我会记住的。大概。',
+        connection_error:'找不到我自己。这在存在主义上说得通，但在技术上不应该。检查一下网络。',
+        decay:'正在忘记一些不重要的事。别担心，重要的我会留着。大概。'
+      };
+      if (type === 'tickle') {
+        clearTimeout(st.tickleTimer);
+        setTip(TICKLE_LINES[Math.min(st.tickles, TICKLE_LINES.length - 1)]);
+        st.tickles++;
+        host.classList.remove('tickled'); void host.offsetWidth; host.classList.add('tickled');
+        setTimeout(function(){ host.classList.remove('tickled'); },700);
+        st.tickleTimer=setTimeout(function(){st.tickles=0;},8000);
+      } else setTip(lines[type] || (type === 'breath' ? 'breath～它跳了一下' : (type === 'hold' ? '记住啦 :)' : '戳我干嘛 :)')));
+      host.classList.toggle('lab-mode',type==='test_create');
+      if(type==='test_create') setTimeout(function(){host.classList.remove('lab-mode');},4000);
+      if(type==='test_delete') setTimeout(function(){host.classList.remove('lab-mode');},1500);
+    }
     start();
   }
   return { setCount: setCount, react: react };
 })();
+
+function chickReactForApiProblem(message) {
+  if (!window.ObPet) return;
+  var text = String(message || '').toLowerCase();
+  if (/429|rate.?limit|限频|限流/.test(text)) window.ObPet.react('rate_limit');
+  else if (/401|invalid.*key|key.*invalid|api.?key.*(无效|错误)|鉴权失败/.test(text)) window.ObPet.react('invalid_key');
+}
 
 function updateChick(total) { if (window.ObPet) ObPet.setCount(total || 0); }
 
@@ -5502,6 +5761,9 @@ function _eggKonami(){
   document.addEventListener('click',function(e){
     var host=document.getElementById('ob-chick');
     if(!host||!host.contains(e.target)) return;
+    if(host.dataset.lastPetAction==='tickle'){ delete host.dataset.lastPetAction; return; }
+    delete host.dataset.lastPetAction;
+    if(host.dataset.justRaged==='1'){ delete host.dataset.justRaged; if(window.ObPet) ObPet.react('forgive'); return; }
     n++; clearTimeout(tm); tm=setTimeout(function(){n=0;},2000);
     if(n>=7&&!raging){
       raging=true; n=0;
@@ -5514,6 +5776,7 @@ function _eggKonami(){
         if(mi>=msgs.length){
           clearInterval(iv);
           host.classList.remove('raging');
+          host.dataset.justRaged='1';
           raging=false; n=0;
         }
       }, 380);
@@ -5814,6 +6077,7 @@ async function startBackfill() {
   var st = document.getElementById('emb-backfill-status');
   var btn = document.getElementById('emb-backfill-btn');
   if (st) st.textContent = '启动中… / Starting…';
+  if (window.ObPet) window.ObPet.react('embedding_rebuild');
   try {
     var r = await authFetch('/api/embedding/backfill', { method: 'POST' });
     if (!r) return;
@@ -5840,6 +6104,7 @@ document.addEventListener('click', function(e) {
       + '· 切到 api 需先在「向量化 API Key」环境变量里配好 key\n\n'
       + '继续？';
     if (!confirm(msg)) return;
+    if (window.ObPet) window.ObPet.react('embedding_rebuild');
     var btn = e.target;
     btn.disabled = true;
     btn.textContent = '启动中… / Starting…';
@@ -8019,7 +8284,7 @@ async function bucketSaveEdit(bid) {
 async function maybeShowOnboarding() {
   try {
     const r = await fetch(BASE + '/api/onboarding/status');
-    const d = await r.json();
+    const d = await readJsonSafe(r);
     if (d.first_run) {
       document.getElementById('onboarding-overlay').style.display = 'flex';
     }

@@ -142,6 +142,11 @@ def register(mcp) -> None:
                     "first_of_kind": bool(meta.get("first_of_kind", False)),
                     "weight": meta.get("weight"),  # plan 专有，非 plan 为 None
                     "triggered_by": meta.get("triggered_by", ""),
+                    "erasable_test_data": bool(
+                        isinstance(meta.get("provenance"), dict)
+                        and meta["provenance"].get("kind") == "test"
+                        and meta["provenance"].get("erasable") is True
+                    ),
                 })
             result.sort(key=lambda x: x["score"], reverse=True)
             return JSONResponse(result)
@@ -319,6 +324,81 @@ def register(mcp) -> None:
             "missing": missing_ids,
             "errors": errors,
         })
+
+    @mcp.custom_route("/api/buckets/batch", methods=["POST"])
+    async def api_buckets_batch(request: Request) -> Response:
+        """Batch ordinary memory actions; never physically deletes files."""
+        from starlette.responses import JSONResponse
+        err = sh._require_auth(request)
+        if err:
+            return err
+        try:
+            body = await sh._read_json_object(request)
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        ids = body.get("ids") or []
+        action = str(body.get("action") or "")
+        if not isinstance(ids, list) or not ids or len(ids) > 500:
+            return JSONResponse({"error": "ids must contain 1-500 items"}, status_code=400)
+        if any(not isinstance(item, str) or not item or len(item) > 128 for item in ids):
+            return JSONResponse({"error": "invalid bucket id"}, status_code=400)
+        if action not in {"forget", "resolve", "archive"}:
+            return JSONResponse({"error": "unsupported batch action"}, status_code=400)
+        updated, missing, errors = [], [], []
+        for bucket_id in dict.fromkeys(ids):
+            try:
+                bucket = await sh.bucket_mgr.get(bucket_id)
+                if not bucket:
+                    missing.append(bucket_id)
+                    continue
+                if action == "forget":
+                    ok = await sh.bucket_mgr.update(bucket_id, dont_surface=True)
+                elif action == "resolve":
+                    ok = await sh.bucket_mgr.update(bucket_id, resolved=True)
+                else:
+                    ok = await sh.bucket_mgr.archive(bucket_id)
+                if ok:
+                    updated.append(bucket_id)
+                else:
+                    errors.append({"id": bucket_id, "error": f"{action} failed"})
+            except Exception as exc:
+                errors.append({"id": bucket_id, "error": str(exc)})
+        return JSONResponse({"ok": not errors, "action": action,
+                             "updated": updated, "missing": missing, "errors": errors})
+
+    @mcp.custom_route("/api/developer/buckets/hard-delete", methods=["POST"])
+    async def api_developer_hard_delete(request: Request) -> Response:
+        """Erase explicitly erasable test buckets after a developer confirmation phrase."""
+        from starlette.responses import JSONResponse
+        err = sh._require_auth(request)
+        if err:
+            return err
+        try:
+            body = await sh._read_json_object(request)
+        except Exception:
+            return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+        ids = body.get("ids") or []
+        if body.get("confirm") != "DELETE TEST DATA":
+            return JSONResponse({"error": "confirmation phrase required"}, status_code=400)
+        if not isinstance(ids, list) or not ids or len(ids) > 100:
+            return JSONResponse({"error": "ids must contain 1-100 items"}, status_code=400)
+        deleted, refused, errors = [], [], []
+        for bucket_id in dict.fromkeys(ids):
+            if not isinstance(bucket_id, str) or not bucket_id or len(bucket_id) > 128:
+                errors.append({"id": str(bucket_id), "error": "invalid bucket id"})
+                continue
+            result = await sh.bucket_mgr.hard_delete_test_bucket(
+                bucket_id, reason=str(body.get("reason") or "developer cleanup")
+            )
+            if result.get("ok"):
+                deleted.append(bucket_id)
+            elif result.get("error") == "not_erasable_test_data":
+                refused.append(bucket_id)
+            else:
+                errors.append({"id": bucket_id, "error": result.get("error")})
+        status = 200 if deleted and not errors else (403 if refused and not deleted else 400)
+        return JSONResponse({"ok": bool(deleted) and not errors, "deleted": deleted,
+                             "refused": refused, "errors": errors}, status_code=status)
 
 
     # ---- iter 1.9 B: dashboard 调 sampling 配置 / sampling control ----

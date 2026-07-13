@@ -837,6 +837,10 @@ def register(mcp) -> None:
         gem_cfg = bool((sh.config.get("dehydration", {}) or {}).get("api_key", "")) or \
             bool((sh.config.get("embedding", {}) or {}).get("api_key", ""))
 
+        deployment = sh.config.get("deployment")
+        deployment_cfg = deployment if isinstance(deployment, dict) else {}
+        deployment_completed = bool(deployment_cfg.get("onboarding_completed"))
+
         first_run = (not dash_env and not dash_file) and (not gem_env and not gem_cfg)
 
         return JSONResponse({
@@ -846,6 +850,9 @@ def register(mcp) -> None:
             "gemini_key_set": gem_env or gem_cfg,
             "gemini_key_source": "env" if gem_env else ("config" if gem_cfg else "none"),
             "embedding_enabled": sh.embedding_engine.enabled,
+            "deployment_onboarding_completed": deployment_completed,
+            "deployment_profile": deployment_cfg.get("profile") or "unconfigured",
+            "deployment_onboarding_url": "/onboarding",
         })
 
     @mcp.custom_route("/api/status", methods=["GET"])

@@ -2,6 +2,11 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.6.11
+
+- 修复 `breath` 工具因参数过多（9 个）导致 claude.ai 按需加载工具时常年跳过它、记忆无法自动浮现的问题：拆成 `breath()`（0 参数，日常浮现）/ `breath_search(query, domain, max_results)`（3 参数，检索）/ `breath_advanced(...)`（完整 9 参数，供 catalog/tags/importance_min/valence/arousal/max_tokens 等高级模式使用）三个 MCP 工具，共用同一套内部实现，检索/浮现逻辑本身不变。工具总数由 12 个变为 14 个。
+- 新增 `NgrokHeaderMiddleware`：给所有 HTTP 响应（含鉴权拒绝/出错响应）加 `ngrok-skip-browser-warning: true` 头，避免 ngrok 隧道部署时免费版浏览器警告拦截页挡住 claude.ai 的 MCP 请求。
+
 ## 2.6.10
 
 ### 安全 / Security

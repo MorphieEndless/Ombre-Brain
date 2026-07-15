@@ -2,6 +2,28 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.7.1
+
+### 修复 / Fixed
+
+- 修复 `breath` 默认 token 预算、精准查询、`max_results`、`catalog` 与 pinned/core 渲染回归；目录模式不再注入全文，普通命中不会再被无关核心准则挤出预算。
+- 修复 Dashboard 记忆编辑、pinned/type/importance 联动，以及取消钉选或保存后丢失当前 tab/页码的问题。
+- 修复 grow/API Key 热更新与 GitHub 备份配置持久化；配置先原子落盘并回读成功后才更新运行时，不再出现界面报成功、重启后被旧值清空。
+- 修复 Dashboard 公网 MCP 地址与安全部署向导无法可靠保存/回读，以及 OAuth 换取 token 成功后 `/mcp` 循环 401：公网 origin 统一规范化并绑定 discovery、授权、刷新与 MCP 校验；旧地址授权要求重新认证，不再签发必然失效的 token。
+- 修复托管平台/反向代理改写 Host 或 HTTPS 协议时，Dashboard 同源的记忆编辑与两组 API Key 保存被 CSRF 防护误判为 `Cross-origin request rejected`；浏览器同源信号及已保存公网 origin 可安全放行，真实 `same-site`/`cross-site` 请求仍拒绝；无初始化 token 的首启设密同时校验回环 peer 与唯一回环 Host，阻断 DNS rebinding 抢占。
+- 完整备份迁移改为 disk-backed upload/extract/apply：请求先占位再流入 spool，桶与 SQLite 只保留路径，冲突在 bucket 锁内重验，`overwrite` 采用 staged commit + 历史副本 + 失败回滚；导入、解析、应用均以 generation 防并发串包。
+- 修复 Render 512 MB 场景下迁移、全量导出与日志读取的额外 OOM 风险；导出改为有上限的磁盘流式 ZIP/FileResponse，正常、Range 提前返回和断连均清临时文件，日志只倒序扫描有界尾部。
+- 强化登录、恢复与 OAuth 密码验证：PBKDF2 移出事件循环，加入跨 event-loop 并发上限、全局/来源双限流、有界来源状态及 IPv6 `/64` 聚合。
+- 强化 auth/OAuth rotation 原子性：密码/session/grant 使用 generation/CAS，code 与 refresh 单次消费，换密/revoke 阻断在途授权复活，持久化失败不会消费旧 grant 或发布半状态；DCR 增加双层限流、未激活 TTL 与安全驱逐。
+- 修复热更新跨 event-loop 双任务、同步 I/O/子进程阻塞和 SSE 断连竞态：进程级单飞占位，阻塞阶段移出事件循环，取消等待 worker 后回滚并清理，根目录与 `src/VERSION` 同步更新。
+- 强化持久化 prompt 注入数据边界与 dream/hook 最终预算：存储/派生内容显式标为不可执行数据，provenance 有界；dream 把完整渲染计入硬上限，hook 限制 provider 调用、并发与超时，token 只接受 header/Bearer。
+- 强化公开健康/引导接口、备份/下载边界、embedding 迁移单所有者与供应链完整性校验。
+- 完成全项目代码健康度、14 个 MCP 工具 Docker 集成、边界/异常路径及红蓝对抗测试；完整报告见 `docs/CODE_HEALTH_AUDIT_2026-07-15.md`。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与热更新必读的 `src/VERSION` 同步更新为 `2.7.1`，Dashboard 与热更新检查均可见。
+
 ## 2.7.0
 
 一次系统性找茬（对抗式代码审查）后的批量修复，覆盖安全、数据丢失、竞态、检索质量、历史对话导入四类问题。

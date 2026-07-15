@@ -30,6 +30,7 @@ import json
 import asyncio
 import hashlib
 import sqlite3
+import weakref
 import logging
 from typing import Optional
 
@@ -314,6 +315,16 @@ class Dehydrator:
         db_path = os.path.join(config["buckets_dir"], "dehydration_cache.db")
         self.cache_db_path = db_path
         self._cache_conn: sqlite3.Connection = self._init_cache_db()
+        # Keep the cache connection persistent for hot-path lookups, but do not
+        # leak the Windows file handle when a runtime/test instance is released.
+        # ``weakref.finalize`` also runs during interpreter shutdown in reverse
+        # creation order, before an enclosing temporary vault is cleaned up.
+        self._cache_finalizer = weakref.finalize(self, self._cache_conn.close)
+
+    def close(self) -> None:
+        """Close the persistent cache connection; safe to call repeatedly."""
+
+        self._cache_finalizer()
 
     def _init_cache_db(self) -> sqlite3.Connection:
         """Open (or create) the dehydration cache DB; return a persistent connection."""
@@ -503,7 +514,11 @@ class Dehydrator:
         if self.thinking_budget is not None:
             payload["generationConfig"]["thinkingConfig"] = {"thinkingBudget": self.thinking_budget}
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            r = await client.post(url, params={"key": self.api_key}, json=payload)
+            r = await client.post(
+                url,
+                headers={"x-goog-api-key": self.api_key},
+                json=payload,
+            )
             r.raise_for_status()
         data = r.json()
         candidates = data.get("candidates", [])

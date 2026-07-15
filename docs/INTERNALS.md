@@ -168,7 +168,7 @@ src/web/
 ├── search.py       # /api/search / /api/network / /api/breath-debug
 ├── plans.py        # /api/plans(+/{id}/action) 看板
 ├── letters.py      # /api/letters / /api/letter 信件
-├── hooks.py        # /breath-hook / /dream-hook（SessionStart 等 HTTP 钩子）+ Webhook
+├── hooks.py        # /breath-hook（SessionStart HTTP 钩子）+ Webhook；dream 不自动触发
 ├── buckets.py      # /api/buckets(+ pin/resolve/archive/forget/anchor/edit/DELETE；保留已退役 purge 拒绝端点)
 ├── import_api.py   # /api/import/*（上传 / 进度 / 暂停 / 规律 / 审阅）
 ├── github.py       # /api/github/*（GitHub 备份同步，封装 github_sync.py）
@@ -207,8 +207,8 @@ hold / grow（Claude 决策）
        bucket_mgr.search(content, limit=1, domain_filter)
               │
        score > merge_threshold(75)?
-        ├─ 是 → dehydrator.merge() → bucket_mgr.update()
-        └─ 否 → bucket_mgr.create()
+        ├─ 是 → 原文分隔追加（raw_merge=True）→ bucket_mgr.update()
+        └─ 否 → bucket_mgr.create()（原文逐字落盘）
               │
               ▼
        写入 buckets/dynamic/{domain}/{name}_{id}.md
@@ -293,28 +293,31 @@ feel 桶自身：
 
 ### 3.2 `hold` — 存储单条记忆
 
-签名：`hold(content, tags="", importance=5, pinned=False, feel=False, source_bucket="", valence=-1, arousal=-1, why_remembered="")`
+签名：`hold(content, tags="", importance=5, pinned=False, feel=False, source_bucket="", valence=-1, arousal=-1, why_remembered="", meaning="", media=None, test_data=False)`
 
 两种路径：
 
 - **Feel 模式** (`feel=True`)：跳过 LLM 分析，自动注入 `__feel__` 标签，写入 `feel/沉淀物/`。`source_bucket` 提供时把源桶标记为 `digested=True` 并写 `model_valence`。返回 `🫧feel→{id}`。
 - **普通模式**：`analyze()` → 用户传入的 `valence`/`arousal` 优先于 LLM 结果（B-09 修复）→ `_merge_or_create(raw_merge=True)`（相似度 > `merge_threshold` 时以分隔线追加原文，否则新建）→ 原文落盘后投递 embedding outbox → 异步触发 `_check_plan_resolution()` 扫 active plans。返回 `合并→{name}` 或 `新建→{name}`。`analyze()` 或 embedding 不可用时只降级元数据/向量索引，正文仍原样落盘；**hold 永远不调 `dehydrate()`/`merge()` 压缩正文**。
+- `meaning` 追加一条“为什么值得被想起”的第一人称含义；`media` 接受持久化前可读取路径或 `data_base64+filename` 项，失败时不写失效引用。
+- `test_data=True` 只在创建时写入不可后补的可擦除 provenance，并禁止与 pinned/feel 组合；这是 `trace(hard_delete=True)` 唯一允许物理删除的来源边界。
 
 (改动注意：`pinned=True` 走单独分支直接创建到 `permanent/`，importance 强制锁 10，不走合并；用户显式传 valence/arousal=0.0 也算「有效」，必须走 `0 <= v <= 1` 判定，不能用 `if valence` 否则 0.0 会被忽略——这就是 B-09。)
 
 ### 3.3 `grow` — 日记拆分归档
 
-签名：`grow(content)`
+签名：`grow(content="", items=None)`
 
 - 短内容（< 30 字符）走快速路径：`analyze()` + `_merge_or_create()`，跳过 `digest()` 节省一次 API。
 - 正常路径：`dehydrator.digest()` 拆为 2~6 条 → 每条独立走 `_merge_or_create()`，单条失败 try/except 隔离，标 `⚠️条目名`。
+- `items=[...]` 模式表示调用方已经拆好最终正文：忽略 `content`，逐条原文入库，只补元数据；最多 100 条且每条仍受单桶大小限制。
 - 末尾异步触发 `_check_plan_resolution()`。
 
 返回示例：`3条|新2合1\n📝体检结果\n📌朋友聚餐\n📎近期焦虑情绪`。
 
 ### 3.4 `trace` — 修改/删除
 
-签名：`trace(bucket_id, name="", domain="", valence=-1, arousal=-1, importance=-1, tags="", resolved=-1, pinned=-1, digested=-1, content="", delete=False, status="", weight=-1, dont_surface=-1, why_remembered="")`
+签名：`trace(bucket_id, name="", domain="", valence=-1, arousal=-1, importance=-1, tags="", resolved=-1, pinned=-1, digested=-1, content="", delete=False, status="", weight=-1, dont_surface=-1, why_remembered="", meaning_append="", meaning_replace=None, media_append=None, media_replace=None, hard_delete=False, delete_reason="")`
 
 - `delete=True` → `bucket_mgr.delete()`：写入 `deleted_at` 并将 Markdown 移入 `archive/`；只清理可重建的 embedding 索引，不抹除记忆文件。
 - `hard_delete=True` → 仅当桶在创建时带有 `provenance.kind=test` 与 `erasable=true` 才物理删除；真实记忆、后补字段及普通 Dashboard 路径均不得越过此边界。Dashboard 普通模式支持多选/当前筛选全选的沉底、主动遗忘和归档，开发者模式才显示测试桶永久删除入口。
@@ -324,6 +327,8 @@ feel 桶自身：
 - `status` 仅接受 `active`/`resolved`/`abandoned`，主要用于 plan 桶。
 - `content="..."` 替换正文并重新生成 embedding。
 - `weight` 仅对 plan 桶有意义；`dont_surface` 切换主动遗忘标记；`why_remembered` 写「为什么留着这条」自由文本。
+- `meaning_append` 日常追加一条 meaning；`meaning_replace` 仅在纠错时整体替换。`media_append` / `media_replace` 同理管理持久媒体引用。
+- `hard_delete=True` 必须同时提供 `delete_reason`，且只接受创建时已标记为可擦除测试数据的桶；真实记忆始终拒绝物理删除。
 - **不暴露 `anchor` 字段**：anchor 切换必须走 `anchor()` / `release()` 工具（受 24 上限保护）。
 
 (返回时会按 `resolved`/`digested` 状态变化追加人话提示，如「→ 已沉底，只在关键词触发时重新浮现」。)
@@ -359,7 +364,7 @@ feel 桶自身：
 
 ### 3.8 `letter_write` / `letter_read` — 信件
 
-`letter_write(author, content, user_name="", title="", date="")` —— `author` 必填且仅 `user`/`claude`；写入 `letters/history/`，**硬编码** `importance=10` / `valence=0.5` / `arousal=0.3`（设计：信件不开放给用户调这三项），原文永久保留。**不接受 `why_remembered`**——信件本身就是「为什么记得」的载体。
+`letter_write(author, content, user_name="", title="", date="", ai_name="")` —— `author` 必填；`user` 表示用户侧，`ai`（或与 `ai_name` 相同）表示 AI 侧，也接受任意自定义署名字符串。写入 `letters/history/`，**硬编码** `importance=10` / `valence=0.5` / `arousal=0.3`（设计：信件不开放给用户调这三项），原文永久保留。**不接受 `why_remembered`**——信件本身就是「为什么记得」的载体。
 
 `letter_read(query="", limit=10, author="", date_from="", date_to="")` —— 无 query 时按 `letter_date` 或 `created` 倒序；有 query 且 embedding 启用时用向量相似度排序。
 
@@ -400,7 +405,6 @@ feel 桶自身：
 | `/` | GET | 公开 | 重定向到 `/dashboard` |
 | `/health` | GET | 公开 | 健康检查（桶数 + 衰减引擎状态） |
 | `/breath-hook` | GET | 🔒 cookie/token | SessionStart 钩子（HTTP 模式才生效）；默认需 Dashboard 登录态或 hook token |
-| `/dream-hook` | GET | 🔒 cookie/token | Dream 钩子；默认需 Dashboard 登录态或 hook token |
 | `/dashboard` | GET | 公开（页面），AJAX 走 cookie | Dashboard HTML |
 | `/letters` | GET | 公开 | 301 → `/#letters`（已合并进 dashboard 的「信」分页，老书签兼容） |
 | `/auth/status` | GET | 公开 | 是否已登录 / 是否需要初始化密码 |
@@ -446,7 +450,7 @@ feel 桶自身：
 | `/api/export` | GET | 🔒 | 返回可验证 zip：buckets/*.md + SQLite 一致性快照 + export_meta.json + backup_manifest.json；**不包含 config / 密钥**；任何源文件读取失败则整个导出失败，不产生“看似成功”的残缺包 |
 | `/api/migrate/upload` | POST | 🔒 | 上传 zip 包，先做 ZIP 安全边界与清单 SHA-256 校验，再解析内容、识别 ID 冲突、检查 embedding 模型/维度；返回冲突和 `integrity_verified`，不实际写入 |
 | `/api/migrate/status` | GET | 🔒 | 查询当前迁移任务状态（phase / 冲突列表 / 导入进度 / 重新向量化进度） |
-| `/api/migrate/apply` | POST | 🔒 | 执行导入，携带冲突决策 `{bucket_id: "skip"|"overwrite"|"keep_both"}`；异步执行，轮询 status 看进度 |
+| `/api/migrate/apply` | POST | 🔒 | 执行导入；请求必须回传本次 upload 返回的 `job_id`，并携带冲突决策 `{bucket_id: "skip"|"overwrite"|"keep_both"}`。过期/缺失 job ID 返回 409；异步执行，轮询 status 看进度 |
 | `/api/heartbeat` | GET | 🔒 | iter 1.6 §3：心跳（uptime / last_op_ts / decay 状态），Dashboard 右上角灯轮询 |
 | `/api/logs` | GET | 🔒 | iter 1.6 §3：读 `OMBRE_LOG_FILE`（RotatingFileHandler 写的 server.log）末尾若干行，支持 `?level=ERROR\|WARNING\|INFO\|ALL&limit=200` |
 | `/api/onboarding/status` | GET | 公开 | iter 1.6 §8：判断"全新启动"。env+config 同时缺 dashboard_password 与 gemini api_key 时 `first_run=true`。**不要求登录**——首次访问连密码都还没设。不返回任何密钥值，仅布尔/来源标识 |
@@ -1368,7 +1372,7 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 | `scoring_weights.time_proximity` | `1.5` | time 权重（B-06 修复值） |
 | `scoring_weights.importance` | `1.0` | importance 权重 |
 | `scoring_weights.content_weight` | `1.0` | 正文权重（B-07 修复值） |
-| `hooks.token` | `""` | `/breath-hook`、`/dream-hook` 的共享 token；也可用 `OMBRE_HOOK_TOKEN` |
+| `hooks.token` | `""` | `/breath-hook` 的 token；也可用 `OMBRE_HOOK_TOKEN`，仅通过请求头传递 |
 | `hooks.allow_public` | `false` | 是否允许 hook 无鉴权访问；也可用 `OMBRE_HOOK_ALLOW_PUBLIC=true`，仅建议在外层已有鉴权时开启 |
 | `limits.max_bucket_bytes` | `51200` (50KB) | 单桶内容字节上限（iter 1.6 §5）；0 禁用 |
 | `limits.max_pinned` | `20` | `metadata.pinned=True` 桶数量上限；显式 permanent 不占；0 禁用 |

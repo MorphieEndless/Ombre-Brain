@@ -90,6 +90,28 @@ def test_non_active_legacy_data_app_is_reported_without_deletion(tmp_path):
     assert (legacy / "src" / "server.py").is_file()
 
 
+def test_directory_config_path_fails_closed_without_deleting_contents(tmp_path):
+    image = tmp_path / "image"
+    code = tmp_path / "code" / "_app"
+    data = tmp_path / "data"
+    mistaken_config = data / "mistaken-config"
+    remembered = mistaken_config / "permanent" / "must-survive.md"
+    _prepare_image(image)
+    remembered.parent.mkdir(parents=True)
+    remembered.write_text("irreplaceable memory\n", encoding="utf-8")
+
+    result = _run(
+        image,
+        code,
+        data,
+        OMBRE_CONFIG_PATH=str(mistaken_config),
+    )
+
+    assert result.returncode == 1
+    assert "refusing to delete" in result.stdout
+    assert remembered.read_text(encoding="utf-8") == "irreplaceable memory\n"
+
+
 def test_image_seed_failure_keeps_existing_runtime_tree(tmp_path):
     image = tmp_path / "image"
     code = tmp_path / "code" / "_app"

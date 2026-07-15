@@ -3,13 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="referrer" content="no-referrer">
 <title>Ombre Brain</title>
 <meta name="theme-color" content="#B85C3C">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="apple-touch-icon" href="/static/icon.svg">
 <link rel="manifest" href="/static/manifest.json">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;500;600&family=Noto+Sans+SC:wght@400;500&family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=Share+Tech+Mono&family=VT323&display=swap" rel="stylesheet">
-<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+<script src="https://unpkg.com/lucide@1.24.0/dist/umd/lucide.min.js"
+        integrity="sha384-mooE85Luwgx+AyykX7e90VcN8/QCFTSIwPuHLmvcsLVoA0en7lKYb9XlOzn5G2co"
+        crossorigin="anonymous" defer></script>
 <style>
   :root {
     /* === 复古掌机 retro-handheld palette — warm cream plastic + pale LCD + gold === */
@@ -2819,7 +2822,7 @@
     <div class="config-section" id="sec-mcp" data-sgroup="advanced">
       <h3>MCP 配置 <span class="sec-en">MCP Setup</span></h3>
       <div style="font-size:12px;color:var(--text-dim);margin-bottom:16px;line-height:1.7;">
-        生成 Claude Desktop / claude.ai 的 MCP 连接配置。12 个工具全在一个端点 /mcp 上，只需连这一条。
+        生成 Claude Desktop / claude.ai 的 MCP 连接配置。14 个工具全在一个端点 /mcp 上，只需连这一条。
       </div>
       <div style="margin-bottom:16px;padding:12px 14px;border:1px solid var(--border);border-radius:11px;background:var(--surface-solid);font-size:12px;line-height:1.7;">
         不确定 OAuth、端口和持久目录怎么选？
@@ -2836,6 +2839,7 @@
           <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
             <input type="radio" name="mcp-mode" value="public" onchange="onMcpModeChange()" /> 公网模式
           </label>
+          <button type="button" onclick="saveMcpAddress()" title="保存连接模式与公网地址 / Save connection mode and public address" style="margin-left:auto;padding:0 12px;height:30px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="save"></i> 保存连接地址</button>
         </div>
         <div style="margin-top:6px;font-size:11px;color:var(--text-light);">
           本地模式使用当前页面域名（<code id="mcp-local-origin"></code>）；公网模式可填入自定义域名（Cloudflare Tunnel 等）。
@@ -2850,8 +2854,9 @@
             style="flex:1;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 14px;border-radius:2px;font-family:monospace;font-size:12px;"
             oninput="renderMcpUrls()" />
         </div>
-        <div style="margin-top:4px;font-size:11px;color:var(--text-light);">填域名或完整 URL，末尾斜杠可省略。</div>
+        <div style="margin-top:4px;font-size:11px;color:var(--text-light);">填域名或完整的 HTTPS /mcp URL；保存后会统一为 HTTPS 域名。</div>
       </div>
+      <div id="mcp-address-msg" style="margin:-10px 0 12px;font-size:11px;min-height:16px;"></div>
 
       <!-- 生成的链接预览 -->
       <div style="margin-bottom:16px;">
@@ -2863,7 +2868,7 @@
             <button onclick="copyMcpUrl('main')" title="复制 / Copy" style="padding:3px 8px;font-size:11px;white-space:nowrap;background:none;border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim);"><i data-lucide="copy"></i></button>
           </div>
         </div>
-        <div style="margin-top:6px;font-size:11px;color:var(--text-light);">12 个工具已合并到单一连接器 /mcp，只需连这一条。</div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text-light);">14 个工具已合并到单一连接器 /mcp，只需连这一条。</div>
         <div id="mcp-copy-msg" style="margin-top:4px;font-size:11px;color:var(--positive);min-height:16px;"></div>
       </div>
 
@@ -4305,7 +4310,7 @@ document.getElementById('search-input').addEventListener('input', (e) => {
   const q = e.target.value.trim();
   searchTimer = setTimeout(() => {
     if (q) searchBuckets(q);
-    else renderBuckets(allBuckets);
+    else renderBuckets(filterBuckets(allBuckets));
   }, 300);
 });
 function doSearch() {
@@ -4313,7 +4318,7 @@ function doSearch() {
   const q = document.getElementById('search-input').value.trim();
   if (['小鸡','大吉','可恶的人类','chicken'].includes(q.toLowerCase()) && window.ObPet) ObPet.react('secret');
   if (q) searchBuckets(q);
-  else renderBuckets(allBuckets);
+  else renderBuckets(filterBuckets(allBuckets));
 }
 
 async function loadBuckets() {
@@ -4331,7 +4336,9 @@ async function loadBuckets() {
     selectedBucketIds.forEach(function(id) { if (!liveIds.has(id)) selectedBucketIds.delete(id); });
     updateStats();
     buildFilters();
-    renderBuckets(allBuckets);
+    // 数据刷新不等于用户切换视图：继续应用当前筛选，并保留所在页。
+    // 若刷新后页数减少，_paintBuckets 会自动把 bucketPage 收敛到末页。
+    renderBuckets(filterBuckets(allBuckets), true);
     if (data.length === 0 && window.ObPet) window.ObPet.react('empty');
   } catch (e) {
     document.getElementById('bucket-list').innerHTML = '<div class="loading">加载失败: ' + esc(e.message) + '</div>';
@@ -4362,20 +4369,27 @@ function buildFilters() {
     { key: 'digested', label: '<i data-lucide="leaf"></i> 已消化' },
     { key: 'archived', label: '<i data-lucide="archive"></i> 归档' },
   ];
+  const visibleDomains = Array.from(domains).slice(0, 10);
+  const availableFilters = types.map(function(t) { return t.key; })
+    .concat(visibleDomains.map(function(d) { return 'domain:' + d; }));
+  // domain 筛选可能因最后一个相关桶被编辑而消失；这时才安全退回“全部”。
+  if (!availableFilters.includes(currentFilter)) currentFilter = 'all';
   filters.innerHTML = types.map(function(t) {
-    return '<button class="filter-btn ' + (t.key === 'all' ? 'active' : '') + '" data-filter="' + escAttr(t.key) + '">' + t.label + '</button>';
-  }).join('') + Array.from(domains).slice(0, 10).map(function(d) {
-    return '<button class="filter-btn" data-filter="' + escAttr('domain:' + d) + '">' + esc(d) + '</button>';
+    return '<button class="filter-btn ' + (t.key === currentFilter ? 'active' : '') + '" data-filter="' + escAttr(t.key) + '">' + t.label + '</button>';
+  }).join('') + visibleDomains.map(function(d) {
+    var key = 'domain:' + d;
+    return '<button class="filter-btn ' + (key === currentFilter ? 'active' : '') + '" data-filter="' + escAttr(key) + '">' + esc(d) + '</button>';
   }).join('');
 
-  filters.addEventListener('click', function(e) {
+  // buildFilters 会在每次数据刷新后运行；覆盖处理器，避免重复累积监听器。
+  filters.onclick = function(e) {
     var btn = e.target.closest('.filter-btn');
     if (!btn) return;
     filters.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
     btn.classList.add('active');
     currentFilter = btn.dataset.filter;
     renderBuckets(filterBuckets(allBuckets));
-  });
+  };
 }
 
 function filterBuckets(buckets) {
@@ -4392,14 +4406,14 @@ function filterBuckets(buckets) {
   return buckets;
 }
 
-// 翻页状态：renderBuckets 每次换新数据集时重置到第 1 页；gotoBucketPage 只翻页不重置。
+// 翻页状态：用户主动切换筛选/搜索时回到第 1 页；后台刷新可显式保留当前页。
 var bucketPage = 1;
 var _curBuckets = [];
 var BUCKETS_PER_PAGE = 10;
 
-function renderBuckets(buckets) {
+function renderBuckets(buckets, preservePage) {
   _curBuckets = buckets || [];
-  bucketPage = 1;
+  if (!preservePage) bucketPage = 1;
   _paintBuckets();
 }
 
@@ -4526,6 +4540,15 @@ async function showDetail(id) {
     var res = await fetch(BASE + '/api/bucket/' + encodeURIComponent(id));
     var b = await res.json();
     var meta = b.metadata || {};
+    // content 是可无损写回的原始 Markdown；display_content 仅供详情展示。
+    var displayContent = typeof b.display_content === 'string' ? b.display_content : (b.content || '');
+    var safeValence = safeNumber(meta.valence, 0.5, 0, 1);
+    var safeArousal = safeNumber(meta.arousal, 0.3, 0, 1);
+    var safeModelValence = meta.model_valence == null
+      ? null
+      : safeNumber(meta.model_valence, 0.5, 0, 1);
+    var safeImportance = Math.round(safeNumber(meta.importance, 5, 1, 10));
+    var safeActivationCount = safeNumber(meta.activation_count, 0, 0);
     // letter → 翻信纸展开动画；anchor → 引力线背景（坐标系质感）
     panel.classList.toggle('letter-mode', meta.type === 'letter');
     panel.classList.toggle('anchor-mode', !!meta.anchor);
@@ -4554,12 +4577,12 @@ async function showDetail(id) {
         '<div class="field"><label>类型 / Type</label>' + esc(meta.type || 'dynamic') + '</div>' +
         '<div class="field"><label>域 / Domain</label>' + esc((meta.domain || []).join(', ')) + '</div>' +
         '<div class="field"><label>标签 / Tags</label>' + esc((meta.tags || []).join(', ')) + '</div>' +
-        '<div class="field"><label>事件效价 / Valence</label>V' + (meta.valence || 0.5).toFixed(2) + '</div>' +
-        '<div class="field"><label>唤醒度 / Arousal</label>A' + (meta.arousal || 0.3).toFixed(2) + '</div>' +
-        '<div class="field"><label>模型视角 / Model view</label>' + (meta.model_valence != null ? 'V' + meta.model_valence.toFixed(2) : '—') + '</div>' +
-        '<div class="field"><label>重要度 / Importance</label>' + (meta.importance || 5) + '/10</div>' +
+        '<div class="field"><label>事件效价 / Valence</label>V' + safeValence.toFixed(2) + '</div>' +
+        '<div class="field"><label>唤醒度 / Arousal</label>A' + safeArousal.toFixed(2) + '</div>' +
+        '<div class="field"><label>模型视角 / Model view</label>' + (safeModelValence != null ? 'V' + safeModelValence.toFixed(2) : '—') + '</div>' +
+        '<div class="field"><label>重要度 / Importance</label>' + safeImportance + '/10</div>' +
         '<div class="field"><label>权重分 / Weight</label>' + (b.score != null ? b.score.toFixed(4) : '—') + '</div>' +
-        '<div class="field"><label>激活次数 / Activations</label>' + (meta.activation_count != null ? meta.activation_count : 0) + '</div>' +
+        '<div class="field"><label>激活次数 / Activations</label>' + safeActivationCount + '</div>' +
         '<div class="field"><label>已解决 / Resolved</label>' + (meta.resolved ? _SV.ok : '—') + '</div>' +
         '<div class="field"><label>已消化 / Digested</label>' + (meta.digested ? _SV.ok : '—') + '</div>' +
         '<div class="field"><label>钉选 / Pinned</label>' + (meta.pinned ? _SV.ok : '—') + '</div>' +
@@ -4578,7 +4601,7 @@ async function showDetail(id) {
         '<button data-bucket-id="' + escAttr(id) + '" onclick="bucketArchive(this.dataset.bucketId)" class="icon-btn"><i data-lucide="archive"></i> 归档</button>' +
         '<button data-bucket-id="' + escAttr(id) + '" onclick="bucketDelete(this.dataset.bucketId)" class="icon-btn" style="color:#b85c3c;"><i data-lucide="trash-2"></i> 删除到档案</button>' +
       '</div>' +
-      '<div class="detail-content">' + esc(b.content) + '</div>' +
+      '<div class="detail-content">' + esc(displayContent) + '</div>' +
       renderEditForm(id, Object.assign({}, meta, {_content_for_edit: b.content}));
   } catch (e) {
     content.innerHTML = '<div class="loading">加载失败: ' + esc(e.message) + '</div>';
@@ -4590,7 +4613,7 @@ async function bucketPin(id) {
     var res = await fetch(BASE + '/api/bucket/' + encodeURIComponent(id) + '/pin', { method: 'POST' });
     if (!res.ok) throw new Error(await res.text());
     await showDetail(id);
-    loadBuckets();
+    await loadBuckets();
   } catch (e) { alert('钉选切换失败 / Pin toggle failed: ' + e.message); }
 }
 
@@ -5167,12 +5190,6 @@ function animateConceptNetwork(canvas, ctx, W, H, data) {
   _netRAF = requestAnimationFrame(frame);
 }
 
-// 兼容旧调用点（depth-slider 里的 renderConceptNetwork）
-function renderConceptNetwork(ctx, W, H, data) {
-  networkState.needsLayout = true;
-  // 动画循环正在跑时不需要额外触发；若未运行（embedding 模式切回）则忽略
-}
-
 // –– 注入控制栏 ––
 function injectNetworkControls() {
   if (document.getElementById('network-depth-control')) return;
@@ -5210,12 +5227,6 @@ function injectNetworkControls() {
       networkState.needsLayout  = true;
     }
   });
-}
-
-// drawConceptNetwork 改为调用新函数（兼容原有调用点，如 networkData == 'concept' 情况等）
-function drawConceptNetwork(ctx, W, H, data) {
-  var canvas = document.getElementById('network-canvas');
-  initConceptNetwork(canvas, ctx, W, H, data);
 }
 
 // 旧的桶级网络（embedding 模式仍然能切到）
@@ -6456,15 +6467,24 @@ async function loadGithubStatus() {
     var res = await authFetch('/api/github/status');
     if (!res || !res.ok) return;
     var d = await res.json();
-    if (d.repo) document.getElementById('gh-repo').placeholder = '当前: ' + d.repo;
-    if (d.branch) document.getElementById('gh-branch').placeholder = '当前: ' + d.branch;
-    if (d.path_prefix !== undefined) document.getElementById('gh-prefix').placeholder = d.path_prefix || '（仓库根目录）';
+    // 非敏感字段回填 value，不只写 placeholder。否则页面刷新/标签页
+    // 被浏览器回收后表单看起来「全被清空」，再次保存还强制重填 repo。
+    var tokenEl = document.getElementById('gh-token');
+    var repoEl = document.getElementById('gh-repo');
+    var branchEl = document.getElementById('gh-branch');
+    var prefixEl = document.getElementById('gh-prefix');
+    if (repoEl && d.repo !== undefined) repoEl.value = d.repo || '';
+    if (branchEl && d.branch !== undefined) branchEl.value = d.branch || 'main';
+    if (prefixEl && d.path_prefix !== undefined) prefixEl.value = d.path_prefix || '';
+    if (tokenEl) tokenEl.placeholder = d.token_set
+      ? '已配置（留空 = 保留现有 Token）'
+      : 'ghp_xxxx…（Fine-grained 或 Classic，需 repo 权限）';
     var autoMin = d.auto_interval_minutes || 0;
     var ghIntervalEl = document.getElementById('gh-interval');
     if (ghIntervalEl) ghIntervalEl.value = String(autoMin);
     var box = document.getElementById('gh-status-box');
+    if (box) box.style.display = d.configured ? '' : 'none';
     if (d.configured && box) {
-      box.style.display = '';
       document.getElementById('gh-st-repo').textContent = d.repo || '—';
       document.getElementById('gh-st-branch').textContent = d.branch || '—';
       document.getElementById('gh-st-prefix').textContent = d.path_prefix || '（根目录）';
@@ -6673,6 +6693,14 @@ async function loadConfig() {
     window._mcpTokenConfigured = !!cfg.mcp_token_configured;
     window._mcpTokenHint = cfg.mcp_token_hint || null;
     onMcpAuthModeChange();
+    const publicUrl = String((cfg.deployment || {}).public_url || '');
+    const publicMode = document.querySelector('input[name="mcp-mode"][value="public"]');
+    const localMode = document.querySelector('input[name="mcp-mode"][value="local"]');
+    const publicUrlInput = document.getElementById('mcp-custom-domain');
+    if (publicUrlInput) publicUrlInput.value = publicUrl;
+    if (publicUrl && publicMode) publicMode.checked = true;
+    else if (localMode) localMode.checked = true;
+    onMcpModeChange();
     setRestartRequired(!!cfg.restart_required, 'MCP 鉴权设置已保存');
     var portEl = document.getElementById('cfg-host-port');
     if (portEl) portEl.value = cfg.host_port || '';
@@ -6687,7 +6715,9 @@ async function loadConfig() {
     document.getElementById('cfg-sf-breath-tokens').value = sf.breath_max_tokens || 10000;
     document.getElementById('cfg-sf-feel-tokens').value = sf.feel_max_tokens || 6000;
     document.getElementById('config-readonly').innerHTML =
-      'Transport: <strong>' + esc(cfg.transport) + '</strong><br>数据目录: <strong>' + esc(cfg.buckets_dir) + '</strong>'
+      'Transport（已保存）: <strong>' + esc(cfg.transport) + '</strong>'
+      + '<br>Transport（当前生效）: <strong>' + esc(cfg.transport_effective || cfg.transport) + '</strong>'
+      + '<br>数据目录: <strong>' + esc(cfg.buckets_dir) + '</strong>'
       + '<br>运行环境: <strong>' + (cfg.in_docker ? 'Docker 容器' : '裸机') + '</strong>'
       + '<br>对外端口: <strong>' + esc(cfg.host_port || '18001（默认）') + '</strong>';
     if (cfg.transport) highlightTransport(cfg.transport);
@@ -6862,6 +6892,7 @@ async function saveEnvConfig() {
 async function _saveEnvKeys(updates, msgElId) {
   var msgEl = document.getElementById(msgElId);
   if (msgEl) msgEl.textContent = '保存中… / Saving…';
+  var requestedKeys = Object.keys(updates || {});
   try {
     var r = await authFetch('/api/env-config', {
       method: 'POST',
@@ -6870,16 +6901,61 @@ async function _saveEnvKeys(updates, msgElId) {
     });
     if (!r) return;
     var d = await readJsonSafe(r);
-    if (d && d.ok) {
-      if (msgEl) msgEl.innerHTML = '<span style="color:var(--positive,#7EAD68)">' + _SV.ok + ' 已保存</span>';
+    var updatedKeys = d && Array.isArray(d.updated) ? d.updated : [];
+    var persistedKeys = d && Array.isArray(d.persisted) ? d.persisted : null;
+    var warnings = d && Array.isArray(d.warnings) ? d.warnings.filter(function (item) {
+      return item !== null && item !== undefined && String(item).trim();
+    }).map(function (item) { return String(item); }) : [];
+    var savedKeys = requestedKeys.filter(function (key) { return updatedKeys.indexOf(key) !== -1; });
+    var missingKeys = requestedKeys.filter(function (key) { return updatedKeys.indexOf(key) === -1; });
+    var unpersistedKeys = persistedKeys === null ? [] : savedKeys.filter(function (key) {
+      return persistedKeys.indexOf(key) === -1;
+    });
+    var responsePartial = !!(d && d.partial);
+    var responseFailed = !r.ok || !d || !d.ok;
+
+    if (responseFailed && savedKeys.length === 0) {
+      var httpLabel = !r.ok ? '（HTTP ' + r.status + '）' : '';
+      var reason = d && d.error
+        ? d.error
+        : (warnings.length ? warnings.join('; ') : (!r.ok ? '服务器拒绝保存' : '未知错误'));
+      if (msgEl) msgEl.innerHTML = '<span style="color:var(--negative)">' + _SV.err + ' 保存失败 / Save failed' + httpLabel + '：' + esc(reason) + '</span>';
+      return;
+    }
+
+    if (!responseFailed && !responsePartial && missingKeys.length === 0 && unpersistedKeys.length === 0 && warnings.length === 0) {
+      if (msgEl) msgEl.innerHTML = '<span style="color:var(--positive,#7EAD68)">' + _SV.ok + ' 已保存 / Saved</span>';
+    } else if (savedKeys.length > 0) {
+      var partialDetails = [];
+      if (missingKeys.length) partialDetails.push('未保存 / Not saved: ' + missingKeys.join(', '));
+      if (unpersistedKeys.length) partialDetails.push('未持久化 / Not persisted: ' + unpersistedKeys.join(', '));
+      if (warnings.length) partialDetails.push('警告 / Warning: ' + warnings.join('; '));
+      if (d && d.error) partialDetails.push(d.error);
+      if (!partialDetails.length) partialDetails.push((d && d.note) || '服务器报告部分保存 / Server reported a partial save');
+      if (msgEl) msgEl.innerHTML = '<span style="color:var(--warning,#B89762)">' + _SV.warn + ' 部分保存 / Partially saved<br>' + esc(partialDetails.join('\n')).replace(/\n/g, '<br>') + '</span>';
+    } else {
+      var failureDetails = warnings.length
+        ? warnings.join('; ')
+        : '服务器未确认任何请求字段 / Server did not confirm any requested field';
+      if (missingKeys.length) failureDetails += '\n未保存 / Not saved: ' + missingKeys.join(', ');
+      if (msgEl) msgEl.innerHTML = '<span style="color:var(--negative)">' + _SV.err + ' 保存失败 / Save failed：' + esc(failureDetails).replace(/\n/g, '<br>') + '</span>';
+    }
+
+    if (savedKeys.length > 0) {
       refreshEnvConfig();
       refreshEmbInfo();
-    } else {
-      if (msgEl) msgEl.innerHTML = '<span style="color:var(--negative)">' + _SV.err + ' ' + esc(d && d.error ? d.error : '失败') + '</span>';
     }
   } catch (e) {
-    if (msgEl) msgEl.innerHTML = '<span style="color:var(--negative)">' + _SV.err + ' ' + esc(e.message) + '</span>';
+    if (msgEl) msgEl.innerHTML = '<span style="color:var(--negative)">' + _SV.err + ' 请求失败 / Request failed：' + esc(e.message) + '</span>';
   }
+}
+
+function safeNumber(value, fallback, minValue, maxValue) {
+  var numeric = Number(value);
+  if (!Number.isFinite(numeric)) numeric = Number(fallback);
+  if (Number.isFinite(minValue)) numeric = Math.max(minValue, numeric);
+  if (Number.isFinite(maxValue)) numeric = Math.min(maxValue, numeric);
+  return numeric;
 }
 
 async function saveCompressKey() {
@@ -7009,7 +7085,7 @@ loadVersionBadge();
     if (deployEl) {
       deployEl.textContent = [
         '当前版本  : v' + (info.version || _obLocalVersion || '?'),
-        '部署方式  : ' + (info.is_docker ? 'Docker 容器' : '裸机 / git'),
+        '部署方式  : ' + (info.is_render ? 'Render' : (info.is_docker ? 'Docker 容器' : '裸机 / git')),
         '服务端口  : ' + (info.port || location.port || '8000'),
         '数据目录  : ' + (info.data_dir || '（未知）'),
         '访问地址  : ' + location.origin,
@@ -7018,7 +7094,9 @@ loadVersionBadge();
 
     var cmdEl = document.getElementById('ver-cmd-box');
     if (cmdEl) {
-      if (info.is_docker) {
+      if (info.is_render) {
+        cmdEl.textContent = '请在 Render Dashboard 中触发正式部署\n或更新所连接 Git 仓库的 main 分支';
+      } else if (info.is_docker) {
         var cname = info.container_name || 'ombre-brain';
         cmdEl.textContent = 'docker pull p0luz/ombre-brain:latest\ndocker restart ' + cname;
       } else {
@@ -7034,8 +7112,8 @@ loadVersionBadge();
   function renderPersistNote(info) {
     var el = document.getElementById('ver-persist-note');
     if (!el) return;
-    // 裸机天然持久，无需打扰
-    if (!info || !info.is_docker || info.hot_update_persistent === undefined) {
+    // 裸机天然持久，无需打扰；Render 虽非 Docker，源码层仍是易失的，必须提示。
+    if (!info || info.hot_update_persistent === undefined || (!info.is_docker && !info.is_render)) {
       el.style.display = 'none';
       return;
     }
@@ -7060,9 +7138,12 @@ loadVersionBadge();
     var logBox  = document.getElementById('ver-log-box');
     var doneEl  = document.getElementById('ver-update-done');
 
-    // v2.3.9 起：服务端热更新后会「自我重启」(os.execv 原地替换进程)，
-    // 不再依赖外部守护进程，Docker / Render / Zeabur / 裸机 Mac·Linux·Windows 统一自动恢复。
+    // v2.3.9 起：服务端热更新后会「自我重启」(os.execv 原地替换进程)。
+    // Render 当前实例也会恢复，但源码层易失，平台下一次重建会回到正式部署版本。
     var _confirmMsg = '确认开始热更新？\n\n请确保已导出记忆备份，更新期间服务会自动重启（约 10-30 秒）后自行恢复。';
+    if (_deployInfo && _deployInfo.is_render) {
+      _confirmMsg = 'Render 上的 Dashboard 热更新只对当前实例临时生效，平台重启或重新部署后会回滚。\n\n建议取消并改用 Render 正式部署。仍要进行临时热更新吗？';
+    }
     if (!confirm(_confirmMsg)) return;
 
     if (btn) { btn.disabled = true; btn.innerHTML = '<i data-lucide="loader"></i> 更新中…'; lucide.createIcons(); }
@@ -7626,10 +7707,14 @@ async function detectPatterns() {
 
 async function reviewAction(bid, action) {
   try {
-    await fetch(BASE + '/api/import/review', {
+    const response = await fetch(BASE + '/api/import/review', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ decisions: [{ bucket_id: bid, action }] })
     });
+    const result = await readJsonSafe(response);
+    if (!response.ok || !result || result.applied !== 1 || result.errors) {
+      throw new Error((result && result.error) || '审阅操作未生效');
+    }
     // Remove card from UI
     const card = Array.from(document.querySelectorAll('[data-review-bucket-id]'))
       .find(function(el) { return el.dataset.reviewBucketId === bid; });
@@ -7640,10 +7725,18 @@ async function reviewAction(bid, action) {
 async function batchReview(idsJson, action) {
   try {
     const ids = JSON.parse(idsJson);
-    await fetch(BASE + '/api/import/review', {
+    if (!Array.isArray(ids) || !ids.length) throw new Error('没有可审阅的记忆');
+    const response = await fetch(BASE + '/api/import/review', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ decisions: ids.map(id => ({ bucket_id: id, action })) })
     });
+    const result = await readJsonSafe(response);
+    if (!response.ok || !result || result.applied !== ids.length || result.errors) {
+      const summary = result
+        ? `成功 ${Number(result.applied || 0)}，失败 ${Number(result.errors || 0)}`
+        : '服务器未返回结果';
+      throw new Error((result && result.error) || summary);
+    }
     detectPatterns();
   } catch(e) { alert('批量操作失败: ' + (e.message || e)); }
 }
@@ -7876,7 +7969,7 @@ function _getMcpOrigin() {
     let domain = (document.getElementById('mcp-custom-domain')?.value || '').trim();
     if (!domain) return location.origin;
     if (!/^https?:\/\//i.test(domain)) domain = 'https://' + domain;
-    return domain.replace(/\/+$/, '');
+    return domain.replace(/\/mcp\/?$/i, '').replace(/\/+$/, '');
   }
   // 本地模式：固定用 127.0.0.1 + 当前端口，保证 Claude Desktop 连本机 Docker
   const port = location.port || (location.protocol === 'https:' ? '443' : '80');
@@ -8073,6 +8166,40 @@ function onMcpModeChange() {
   renderMcpUrls();
 }
 
+async function saveMcpAddress() {
+  const msg = document.getElementById('mcp-address-msg');
+  const mode = document.querySelector('input[name="mcp-mode"]:checked')?.value;
+  const publicUrl = mode === 'public'
+    ? (document.getElementById('mcp-custom-domain')?.value || '').trim()
+    : '';
+  if (mode === 'public' && !publicUrl) {
+    msg.style.color = 'var(--negative)';
+    msg.textContent = '请先填写公网 HTTPS 地址';
+    return;
+  }
+  try {
+    const response = await authFetch('/api/config', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({deployment: {public_url: publicUrl}, persist: true}),
+    });
+    if (!response) return;
+    const data = await readJsonSafe(response);
+    if (!response.ok || !data.ok) throw new Error(data.error || '保存失败');
+    const savedUrl = String((data.deployment || {}).public_url || '');
+    const input = document.getElementById('mcp-custom-domain');
+    if (input) input.value = savedUrl;
+    msg.style.color = data.restart_required ? 'var(--warning)' : 'var(--positive)';
+    msg.textContent = (savedUrl ? ('已保存：' + savedUrl) : '已切回本地模式并清除公网地址')
+      + (data.restart_required ? '；重启服务后生效' : '');
+    setRestartRequired(!!data.restart_required, 'MCP 连接地址已保存');
+    renderMcpUrls();
+  } catch (error) {
+    msg.style.color = 'var(--negative)';
+    msg.textContent = error.message || String(error);
+  }
+}
+
 function copyMcpUrl(which) {
   const el = document.getElementById('mcp-url-main');
   const text = el?.textContent || '';
@@ -8108,6 +8235,7 @@ function exportClaudeDesktopConfig() {
 // 冲突决策表：{bucket_id: "skip"|"overwrite"|"keep_both"}
 let _migrateDecisions = {};
 let _migratePollingTimer = null;
+let _migrateJobId = '';
 
 function handleMigrateFileDrop(event) {
   const files = event.dataTransfer.files;
@@ -8145,6 +8273,7 @@ async function uploadMigrateZip(file) {
 
 function renderMigrateParsed(d) {
   _migrateDecisions = {};
+  _migrateJobId = String(d.job_id || '');
   document.getElementById('migrate-upload-zone').style.display = 'none';
   const panel = document.getElementById('migrate-parsed-panel');
   panel.style.display = 'block';
@@ -8208,7 +8337,7 @@ async function applyMigrate() {
     const r = await fetch(BASE + '/api/migrate/apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ decisions: _migrateDecisions }),
+      body: JSON.stringify({ decisions: _migrateDecisions, job_id: _migrateJobId }),
     });
     if (!r.ok) {
       const d = await r.json().catch(() => ({}));
@@ -8228,6 +8357,12 @@ async function pollMigrateStatus() {
   try {
     const r = await fetch(BASE + '/api/migrate/status');
     const d = await r.json();
+    if (_migrateJobId && d.job_id && d.job_id !== _migrateJobId) {
+      clearInterval(_migratePollingTimer);
+      _migratePollingTimer = null;
+      document.getElementById('migrate-phase-text').textContent = '任务已被新的迁移包替代，请重新上传';
+      return;
+    }
     updateMigrateProgress(d);
     if (d.phase === 'done' || d.phase === 'error') {
       clearInterval(_migratePollingTimer);
@@ -8240,7 +8375,7 @@ async function pollMigrateStatus() {
 
 function updateMigrateProgress(d) {
   const phaseNames = {
-    idle: '空闲', parsed: '已解析', applying: '正在写入…',
+    idle: '空闲', parsing: '正在解析…', parsed: '已解析', applying: '正在写入…',
     reindexing: '重新向量化…', done: '完成', error: '出错',
   };
   const phaseText = document.getElementById('migrate-phase-text');
@@ -8278,6 +8413,7 @@ function updateMigrateProgress(d) {
 function resetMigrate() {
   if (_migratePollingTimer) { clearInterval(_migratePollingTimer); _migratePollingTimer = null; }
   _migrateDecisions = {};
+  _migrateJobId = '';
   const zone = document.getElementById('migrate-upload-zone');
   zone.style.display = 'block';
   zone.innerHTML = '<div style="font-size:13px;color:var(--text-dim);">点击或拖入 <code>ombre_export_*.zip</code></div><input type="file" id="migrate-file-input" accept=".zip" style="display:none" onchange="handleMigrateFileSelect(event)" />';
@@ -8308,6 +8444,16 @@ async function loadDuplicates() {
 // ========================================
 function renderEditForm(bid, meta) {
   const curContent = esc(meta._content_for_edit || '');
+  const safeImportance = Math.round(safeNumber(meta.importance, 5, 1, 10));
+  const editableTypes = ['dynamic','permanent','feel','plan','letter'];
+  const currentType = String(meta.type || 'dynamic');
+  const typeIsEditable = editableTypes.indexOf(currentType) !== -1;
+  // BucketManager 对“解除钉选”采用确定性的 permanent → dynamic 迁移。
+  // 钉选状态下只展示这条可原子保存的路径，避免 UI 承诺后端会拒绝的
+  // permanent → feel/plan/letter 一步迁移；解钉保存后即可继续改为其他类型。
+  const typeOptions = meta.pinned && typeIsEditable
+    ? ['permanent', 'dynamic']
+    : (typeIsEditable ? editableTypes : [currentType].concat(editableTypes));
   return `
     <details style="margin-top:14px;border:1px solid var(--border);border-radius:2px;padding:12px 14px;background:var(--surface-solid);">
       <summary style="cursor:pointer;font-weight:600;color:var(--accent);display:flex;align-items:center;gap:5px;"><svg class="icon" aria-hidden="true"><use href="#i-edit"></use></svg> 编辑这条记忆</summary>
@@ -8315,21 +8461,22 @@ function renderEditForm(bid, meta) {
         <label>名称</label>
         <input id="edit-name" type="text" value="${escAttr(meta.name || '')}" />
         <label>类型</label>
-        <select id="edit-type" style="width:160px;">
-          ${['dynamic','permanent','feel','plan','letter'].map(t =>
-            `<option value="${t}" ${meta.type === t ? 'selected' : ''}>${t}</option>`
+        <select id="edit-type" style="width:160px;" onchange="syncEditPinConstraints('type')" ${typeIsEditable ? '' : 'disabled title="特殊类型由对应工具维护，编辑其他字段时会保持原类型"'}>
+          ${typeOptions.map(t =>
+            `<option value="${escAttr(t)}" ${currentType === t ? 'selected' : ''}>${esc(t)}</option>`
           ).join('')}
         </select>
+        ${typeIsEditable ? '' : '<span></span><small style="color:var(--text-dim);margin-top:-8px;">特殊/未知类型保持不变</small>'}
         <label>主题（domain）</label>
         <input id="edit-domain" type="text" value="${escAttr((meta.domain||[]).join(', '))}" placeholder="逗号分隔，如：工作, 心情" />
         <label>标签</label>
         <input id="edit-tags" type="text" value="${escAttr((meta.tags||[]).join(', '))}" placeholder="逗号分隔" />
         <label>重要度</label>
-        <span><input id="edit-importance" type="range" min="1" max="10" value="${meta.importance || 5}" oninput="document.getElementById('edit-imp-val').textContent=this.value" style="vertical-align:middle;" /> <span id="edit-imp-val">${meta.importance || 5}</span>/10</span>
+        <span><input id="edit-importance" type="range" min="1" max="10" value="${safeImportance}" oninput="document.getElementById('edit-imp-val').textContent=this.value;syncEditPinConstraints('importance')" style="vertical-align:middle;" /> <span id="edit-imp-val">${safeImportance}</span>/10</span>
         <label>已解决</label>
         <span><input id="edit-resolved" type="checkbox" ${meta.resolved ? 'checked' : ''} /> <small style="color:var(--text-dim);">勾上后仅在关键词命中时重现（适合已闭环的 plan / 事件）</small></span>
         <label>钉选</label>
-        <span><input id="edit-pinned" type="checkbox" ${meta.pinned ? 'checked' : ''} /> <small style="color:var(--text-dim);">会自动锁 importance=10</small></span>
+        <span><input id="edit-pinned" type="checkbox" onchange="syncEditPinConstraints('pinned')" ${meta.pinned ? 'checked' : ''} /> <small id="edit-pin-hint" style="color:var(--text-dim);">钉选会同步为 permanent / importance=10</small></span>
         <label>已消化</label>
         <span><input id="edit-digested" type="checkbox" ${meta.digested ? 'checked' : ''} /></span>
         <label>主动遗忘</label>
@@ -8353,13 +8500,46 @@ function renderEditForm(bid, meta) {
     </details>`;
 }
 
+function syncEditPinConstraints(source) {
+  const pinnedEl = document.getElementById('edit-pinned');
+  const typeEl = document.getElementById('edit-type');
+  const importanceEl = document.getElementById('edit-importance');
+  const importanceValueEl = document.getElementById('edit-imp-val');
+  const hintEl = document.getElementById('edit-pin-hint');
+  // i/self、archived 等受保护类型不通过普通编辑器改变生命周期约束。
+  if (!pinnedEl || !typeEl || typeEl.disabled) return;
+
+  if (source === 'pinned' && pinnedEl.checked) {
+    typeEl.value = 'permanent';
+    if (importanceEl) importanceEl.value = '10';
+    if (importanceValueEl) importanceValueEl.textContent = '10';
+    if (hintEl) {
+      hintEl.textContent = '已同步为 permanent / importance=10';
+      hintEl.style.color = 'var(--accent)';
+    }
+    return;
+  }
+
+  const typeAllowsPin = typeEl.value === 'permanent';
+  const importanceAllowsPin = !importanceEl || Number(importanceEl.value) >= 10;
+  if (pinnedEl.checked && (!typeAllowsPin || !importanceAllowsPin)) {
+    pinnedEl.checked = false;
+    if (hintEl) {
+      hintEl.textContent = '已自动取消钉选；类型和重要度可在本次一并保存';
+      hintEl.style.color = 'var(--accent)';
+    }
+  }
+}
+
 async function bucketSaveEdit(bid) {
+  // 事件联动之外再做一次保存前校验，避免脚本赋值或浏览器差异留下矛盾字段。
+  syncEditPinConstraints('save');
   const newContent = document.getElementById('edit-content').value;
   // iter 1.8: 新增 why_remembered / dont_surface / weight，plan 才会有 weight
   const weightEl = document.getElementById('edit-weight');
+  const typeEl = document.getElementById('edit-type');
   const body = {
     name: document.getElementById('edit-name').value,
-    type: document.getElementById('edit-type').value,
     tags: document.getElementById('edit-tags').value,
     domain: document.getElementById('edit-domain').value,
     importance: parseInt(document.getElementById('edit-importance').value, 10),
@@ -8369,6 +8549,9 @@ async function bucketSaveEdit(bid) {
     dont_surface: document.getElementById('edit-dont-surface').checked,
     why_remembered: document.getElementById('edit-why').value,
   };
+  // i/self、archived 及未来特殊类型由专用生命周期维护；不要把浏览器
+  // select 的默认首项 dynamic 写回。普通类型仍允许沿用现有编辑入口。
+  if (typeEl && !typeEl.disabled) body.type = typeEl.value;
   if (weightEl) body.weight = parseFloat(weightEl.value) / 100;
   // 内容只在非空时带上，避免误清空
   if (newContent && newContent.trim()) body.content = newContent;
@@ -8385,7 +8568,7 @@ async function bucketSaveEdit(bid) {
     msg.innerHTML = _SV.ok + ' 已保存：' + esc((d.updated || []).join(', '));
     msg.style.color = 'var(--accent)';
     await showDetail(bid);
-    loadBuckets();
+    await loadBuckets();
   } catch (e) {
     msg.innerHTML = _SV.err + ' ' + esc(e.message);
     msg.style.color = 'var(--negative)';

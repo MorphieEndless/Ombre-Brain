@@ -189,7 +189,14 @@ async def trace_core(
         return f"未找到记忆桶: {bucket_id}"
 
     meta = bucket.get("metadata", {})
-    if 1 <= importance <= 10 and (meta.get("pinned") or meta.get("protected")):
+    current_pinned = parse_bool(meta.get("pinned"), default=False)
+    protected = parse_bool(meta.get("protected"), default=False)
+    unpinning_now = pinned == 0 and current_pinned
+    if (
+        1 <= importance <= 10
+        and (current_pinned or protected)
+        and not (unpinning_now and not protected)
+    ):
         return (
             f"记忆桶 {bucket_id} 是 pinned/protected 核心桶，importance 被锁定为 10，"
             "本次未修改。请先 trace(bucket_id, pinned=0)，再单独 trace(bucket_id, importance=...)。"
@@ -200,21 +207,75 @@ async def trace_core(
     # 都可能在对方提交前读到同一个「未满」快照。是否需要哪把锁在动 updates 之前就
     # 能从入参判断出来，所以先算好，再把整段检查+落盘包进对应的 quota turn。
     current_importance = int(meta.get("importance") or 0)
-    already_counted_importance = current_importance >= _HIGH_IMP_THRESHOLD and not (
-        meta.get("pinned") or meta.get("protected")
+    current_type = str(meta.get("type") or "dynamic").strip().lower()
+    pin_state_changed = pinned in (0, 1) and bool(pinned) != current_pinned
+    final_pinned = bool(pinned) if pinned in (0, 1) else current_pinned
+    final_type = current_type
+    if pinned == 1:
+        final_type = "permanent"
+    elif unpinning_now and not protected:
+        final_type = "dynamic"
+    requested_importance = (
+        int(importance) if 1 <= importance <= 10 else current_importance
     )
-    need_importance_lock = (
-        1 <= importance <= 10
-        and importance >= _HIGH_IMP_THRESHOLD
-        and not already_counted_importance
+    final_importance = 10 if pinned == 1 else requested_importance
+
+    def occupies_high_importance_slot(
+        *, value: int, is_pinned: bool, bucket_type: str
+    ) -> bool:
+        return (
+            value >= _HIGH_IMP_THRESHOLD
+            and not is_pinned
+            and not protected
+            and bucket_type not in ("letter", "archived")
+        )
+
+    occupied_high_before = occupies_high_importance_slot(
+        value=current_importance,
+        is_pinned=current_pinned,
+        bucket_type=current_type,
     )
-    need_pinned_lock = pinned == 1 and not bucket.get("metadata", {}).get("pinned")
+    occupies_high_after = occupies_high_importance_slot(
+        value=final_importance,
+        is_pinned=final_pinned,
+        bucket_type=final_type,
+    )
+    need_importance_lock = occupies_high_after and not occupied_high_before
+    need_pinned_lock = pin_state_changed
 
     async with AsyncExitStack() as quota_stack:
         if need_pinned_lock:
             await quota_stack.enter_async_context(_quota_turn("pinned"))
         if need_importance_lock:
             await quota_stack.enter_async_context(_quota_turn("high_importance"))
+
+        if need_pinned_lock or need_importance_lock:
+            locked_bucket = await rt.bucket_mgr.get(bucket_id)
+            if not locked_bucket:
+                return f"未找到记忆桶: {bucket_id}"
+            locked_meta = locked_bucket.get("metadata", {})
+            locked_snapshot = (
+                parse_bool(locked_meta.get("pinned"), default=False),
+                parse_bool(locked_meta.get("protected"), default=False),
+                str(locked_meta.get("type") or "dynamic").strip().lower(),
+                int(locked_meta.get("importance") or 0),
+            )
+            original_snapshot = (
+                current_pinned,
+                protected,
+                current_type,
+                current_importance,
+            )
+            if locked_snapshot != original_snapshot:
+                return (
+                    f"记忆桶 {bucket_id} 在本次修改期间已被其他请求更新，"
+                    "为避免覆盖或配额误判，请重试。"
+                )
+
+        if need_importance_lock:
+            final_importance = await enforce_high_importance_quota(
+                final_importance
+            )
 
         updates: dict = {}
         if name:
@@ -226,9 +287,7 @@ async def trace_core(
         if 0 <= arousal <= 1:
             updates["arousal"] = arousal
         if 1 <= importance <= 10:
-            if need_importance_lock:
-                importance = await enforce_high_importance_quota(importance)
-            updates["importance"] = importance
+            updates["importance"] = final_importance
         if tags:
             updates["tags"] = [t.strip() for t in tags.split(",") if t.strip()]
         if resolved in (0, 1):
@@ -241,6 +300,11 @@ async def trace_core(
                     if err:
                         return err
                 updates["importance"] = 10
+            elif need_importance_lock and "importance" not in updates:
+                # Unpinning turns the locked importance=10 into an ordinary
+                # high-importance slot.  Persist any quota degradation in the
+                # same bucket transaction as pinned=False.
+                updates["importance"] = final_importance
         if digested in (0, 1):
             updates["digested"] = bool(digested)
         if content:

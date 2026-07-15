@@ -13,6 +13,7 @@ from server_app import (
     MCPAcceptShim,
     MCPAuthMiddleware,
     NgrokHeaderMiddleware,
+    OriginCSRFGuardMiddleware,
     RuntimeLifecycle,
     build_http_app,
     install_runtime_lifespan,
@@ -146,6 +147,354 @@ async def test_accept_shim_leaves_non_mcp_routes_unchanged(path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("scheme", "host", "origin"),
+    [
+        ("https", "Ombre.Example:443", "HTTPS://ombre.example/"),
+        ("http", "ombre.example:80", "http://OMBRE.EXAMPLE///"),
+        ("https", "ombre.example:8443", "https://OMBRE.example:8443/"),
+        ("https", "[2001:DB8::1]:443", "https://[2001:db8::1]/"),
+    ],
+)
+async def test_csrf_guard_allows_normalized_same_origin_direct_request(
+    scheme, host, origin
+):
+    downstream = RecordingASGIApp()
+    middleware = OriginCSRFGuardMiddleware(downstream)
+    messages = []
+    scope = {
+        "type": "http",
+        "method": "PATCH",
+        "scheme": scheme,
+        "path": "/api/bucket/b1",
+        "client": ("198.51.100.4", 50123),
+        "headers": [
+            (b"host", host.encode("ascii")),
+            (b"origin", origin.encode("ascii")),
+        ],
+    }
+
+    await middleware(scope, _empty_receive, _collect_into(messages))
+
+    assert downstream.scopes == [scope]
+    assert messages[0]["status"] == 204
+
+
+@pytest.mark.asyncio
+async def test_csrf_guard_allows_public_origin_from_trusted_proxy(monkeypatch):
+    monkeypatch.setenv("OMBRE_TRUSTED_PROXY_CIDRS", "10.0.0.0/8")
+    downstream = RecordingASGIApp()
+    middleware = OriginCSRFGuardMiddleware(downstream)
+    messages = []
+    scope = {
+        "type": "http",
+        "method": "PATCH",
+        "scheme": "http",
+        "path": "/api/bucket/b1",
+        "client": ("10.20.30.40", 49152),
+        "headers": [
+            (b"host", b"127.0.0.1:8000"),
+            (b"origin", b"https://PUBLIC.example/"),
+            (b"x-forwarded-proto", b"https, http"),
+            (b"x-forwarded-host", b"public.example:443, proxy.internal"),
+        ],
+    }
+
+    await middleware(scope, _empty_receive, _collect_into(messages))
+
+    assert downstream.scopes == [scope]
+    assert messages[0]["status"] == 204
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("PATCH", "/api/bucket/b1/edit"),
+        ("POST", "/api/env-config"),
+        ("POST", "/api/config"),
+    ],
+)
+async def test_csrf_guard_uses_same_origin_fetch_signal_when_proxy_omits_headers(
+    monkeypatch,
+    method,
+    path,
+):
+    monkeypatch.setenv("OMBRE_TRUSTED_PROXY_CIDRS", "10.0.0.0/8")
+    downstream = RecordingASGIApp()
+    middleware = OriginCSRFGuardMiddleware(downstream)
+    messages = []
+    scope = {
+        "type": "http",
+        "method": method,
+        "scheme": "http",
+        "path": path,
+        "client": ("10.20.30.40", 49152),
+        "headers": [
+            (b"host", b"127.0.0.1:8000"),
+            (b"origin", b"https://public.example"),
+            (b"sec-fetch-site", b"same-origin"),
+        ],
+    }
+
+    await middleware(scope, _empty_receive, _collect_into(messages))
+
+    assert downstream.scopes == [scope]
+    assert messages[0]["status"] == 204
+
+
+@pytest.mark.asyncio
+async def test_csrf_guard_accepts_configured_public_origin_without_fetch_metadata():
+    downstream = RecordingASGIApp()
+    middleware = OriginCSRFGuardMiddleware(
+        downstream,
+        public_origin="HTTPS://Public.Example:443/mcp/",
+    )
+    messages = []
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/env-config",
+        "client": ("198.51.100.4", 50123),
+        "headers": [
+            (b"host", b"internal.service:8000"),
+            (b"origin", b"https://public.example"),
+        ],
+    }
+
+    await middleware(scope, _empty_receive, _collect_into(messages))
+
+    assert downstream.scopes == [scope]
+    assert messages[0]["status"] == 204
+
+
+@pytest.mark.asyncio
+async def test_csrf_guard_cross_site_signal_overrides_configured_public_origin():
+    downstream = RecordingASGIApp()
+    middleware = OriginCSRFGuardMiddleware(
+        downstream,
+        public_origin="https://public.example",
+    )
+    messages = []
+    scope = {
+        "type": "http",
+        "method": "PATCH",
+        "scheme": "http",
+        "path": "/api/bucket/b1",
+        "client": ("198.51.100.4", 50123),
+        "headers": [
+            (b"host", b"internal.service:8000"),
+            (b"origin", b"https://public.example"),
+            (b"sec-fetch-site", b"cross-site"),
+        ],
+    }
+
+    await middleware(scope, _empty_receive, _collect_into(messages))
+
+    assert downstream.scopes == []
+    assert messages[0]["status"] == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "origin",
+    ["null", "file://", "https://public.example/path", "not a URL"],
+)
+async def test_csrf_guard_rejects_invalid_origin_despite_same_origin_signal(origin):
+    downstream = RecordingASGIApp()
+    middleware = OriginCSRFGuardMiddleware(
+        downstream,
+        public_origin="https://public.example",
+    )
+    messages = []
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/env-config",
+        "client": ("198.51.100.4", 50123),
+        "headers": [
+            (b"host", b"internal.service:8000"),
+            (b"origin", origin.encode("ascii")),
+            (b"sec-fetch-site", b"same-origin"),
+        ],
+    }
+
+    await middleware(scope, _empty_receive, _collect_into(messages))
+
+    assert downstream.scopes == []
+    assert messages[0]["status"] == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "duplicate_name",
+    [
+        b"origin",
+        b"host",
+        b"sec-fetch-site",
+        b"forwarded",
+        b"x-forwarded-for",
+        b"x-forwarded-host",
+        b"x-forwarded-proto",
+    ],
+)
+async def test_csrf_guard_rejects_duplicate_security_headers(duplicate_name):
+    downstream = RecordingASGIApp()
+    middleware = OriginCSRFGuardMiddleware(
+        downstream,
+        public_origin="https://public.example",
+    )
+    messages = []
+    headers = [
+        (b"host", b"internal.service:8000"),
+        (b"origin", b"https://public.example"),
+        (b"sec-fetch-site", b"same-origin"),
+    ]
+    existing = next(
+        (value for name, value in headers if name == duplicate_name),
+        None,
+    )
+    if existing is None:
+        headers.extend(
+            [
+                (duplicate_name, b"synthetic"),
+                (duplicate_name, b"synthetic"),
+            ]
+        )
+    else:
+        headers.append((duplicate_name, existing))
+    scope = {
+        "type": "http",
+        "method": "PATCH",
+        "scheme": "http",
+        "path": "/api/bucket/b1/edit",
+        "client": ("198.51.100.4", 50123),
+        "headers": headers,
+    }
+
+    await middleware(scope, _empty_receive, _collect_into(messages))
+
+    assert downstream.scopes == []
+    assert messages[0]["status"] == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fetch_site", ["same-site", "cross-site"])
+async def test_csrf_guard_rejects_non_same_origin_fetch_signal_without_origin(
+    fetch_site,
+):
+    downstream = RecordingASGIApp()
+    middleware = OriginCSRFGuardMiddleware(downstream)
+    messages = []
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "scheme": "https",
+        "path": "/auth/login",
+        "client": ("198.51.100.4", 50123),
+        "headers": [
+            (b"host", b"ombre.example"),
+            (b"sec-fetch-site", fetch_site.encode("ascii")),
+        ],
+    }
+
+    await middleware(scope, _empty_receive, _collect_into(messages))
+
+    assert downstream.scopes == []
+    assert messages[0]["status"] == 403
+
+
+@pytest.mark.asyncio
+async def test_csrf_guard_ignores_spoofed_forwarding_headers(monkeypatch):
+    monkeypatch.setenv("OMBRE_TRUSTED_PROXY_CIDRS", "127.0.0.0/8,::1/128")
+    downstream = RecordingASGIApp()
+    middleware = OriginCSRFGuardMiddleware(downstream)
+    messages = []
+    scope = {
+        "type": "http",
+        "method": "PATCH",
+        "scheme": "https",
+        "path": "/api/bucket/b1",
+        "client": ("198.51.100.4", 50123),
+        "headers": [
+            (b"host", b"ombre.example"),
+            (b"origin", b"https://evil.example"),
+            (b"x-forwarded-proto", b"https"),
+            (b"x-forwarded-host", b"evil.example"),
+        ],
+    }
+
+    await middleware(scope, _empty_receive, _collect_into(messages))
+
+    assert downstream.scopes == []
+    assert messages[0]["status"] == 403
+
+
+@pytest.mark.asyncio
+async def test_csrf_guard_rejects_cross_origin_through_trusted_proxy(monkeypatch):
+    monkeypatch.setenv("OMBRE_TRUSTED_PROXY_CIDRS", "10.0.0.0/8")
+    downstream = RecordingASGIApp()
+    middleware = OriginCSRFGuardMiddleware(downstream)
+    messages = []
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/auth/login",
+        "client": ("10.20.30.40", 49152),
+        "headers": [
+            (b"host", b"127.0.0.1:8000"),
+            (b"origin", b"https://evil.example"),
+            (b"x-forwarded-proto", b"https"),
+            (b"x-forwarded-host", b"ombre.example"),
+        ],
+    }
+
+    await middleware(scope, _empty_receive, _collect_into(messages))
+
+    assert downstream.scopes == []
+    assert messages[0]["status"] == 403
+    assert json.loads(messages[1]["body"]) == {
+        "error": "Cross-origin request rejected"
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/mcp",
+        "/mcp/",
+        "/oauth/token",
+        "/.well-known/oauth-protected-resource/mcp",
+    ],
+)
+async def test_csrf_guard_keeps_bearer_and_oauth_routes_exempt(path):
+    downstream = RecordingASGIApp()
+    middleware = OriginCSRFGuardMiddleware(downstream)
+    messages = []
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "scheme": "https",
+        "path": path,
+        "client": ("198.51.100.4", 50123),
+        "headers": [
+            (b"host", b"ombre.example"),
+            (b"origin", b"https://cross-origin.example"),
+            (b"sec-fetch-site", b"cross-site"),
+        ],
+    }
+
+    await middleware(scope, _empty_receive, _collect_into(messages))
+
+    assert downstream.scopes == [scope]
+    assert messages[0]["status"] == 204
+
+
+@pytest.mark.asyncio
 async def test_ngrok_header_middleware_adds_skip_warning_header():
     downstream = RecordingASGIApp()
     middleware = NgrokHeaderMiddleware(downstream)
@@ -223,6 +572,7 @@ async def test_auth_middleware_rejects_missing_token_with_canonical_metadata_url
         "type": "http",
         "scheme": "http",
         "path": "/mcp",
+        "client": ("127.0.0.1", 49152),
         "headers": [
             (b"host", b"internal:8000"),
             (b"x-forwarded-proto", b"https, http"),
@@ -234,6 +584,38 @@ async def test_auth_middleware_rejects_missing_token_with_canonical_metadata_url
 
     assert downstream.scopes == []
     assert messages[0]["status"] == 401
+    payload = json.loads(messages[1]["body"])
+    assert payload["resource_metadata"] == (
+        "https://ombre.example/.well-known/oauth-protected-resource/mcp"
+    )
+
+
+@pytest.mark.asyncio
+async def test_auth_middleware_ignores_forwarded_resource_from_untrusted_peer(
+    monkeypatch,
+):
+    monkeypatch.setenv("OMBRE_TRUSTED_PROXY_CIDRS", "127.0.0.0/8,::1/128")
+    downstream = RecordingASGIApp()
+    middleware = MCPAuthMiddleware(
+        downstream,
+        auth_required=True,
+        token_validator=lambda *_args, **_kwargs: False,
+    )
+    messages = []
+    scope = {
+        "type": "http",
+        "scheme": "https",
+        "path": "/mcp",
+        "client": ("198.51.100.4", 50123),
+        "headers": [
+            (b"host", b"ombre.example:443"),
+            (b"x-forwarded-proto", b"http"),
+            (b"x-forwarded-host", b"evil.example"),
+        ],
+    }
+
+    await middleware(scope, _empty_receive, _collect_into(messages))
+
     payload = json.loads(messages[1]["body"])
     assert payload["resource_metadata"] == (
         "https://ombre.example/.well-known/oauth-protected-resource/mcp"
@@ -460,7 +842,11 @@ def test_build_http_app_uses_same_managed_stack_for_both_http_transports(transpo
             return Starlette()
 
     lifecycle = RuntimeLifecycle(logger=RecordingLogger())
-    settings = HTTPRuntimeSettings(auth_required=False, max_request_bytes=2048)
+    settings = HTTPRuntimeSettings(
+        auth_required=False,
+        max_request_bytes=2048,
+        public_origin="https://public.example",
+    )
 
     app = build_http_app(
         FakeMCP(),
@@ -473,12 +859,19 @@ def test_build_http_app_uses_same_managed_stack_for_both_http_transports(transpo
     middleware_names = {item.cls.__name__ for item in app.user_middleware}
     assert middleware_names >= {
         "CORSMiddleware",
+        "OriginCSRFGuardMiddleware",
         "MCPRequestBodyLimitMiddleware",
         "ManagementRequestBodyLimitMiddleware",
         "MCPAcceptShim",
         "MCPAuthMiddleware",
         "NgrokHeaderMiddleware",
     }
+    csrf_middleware = next(
+        item
+        for item in app.user_middleware
+        if item.cls is OriginCSRFGuardMiddleware
+    )
+    assert csrf_middleware.kwargs["public_origin"] == "https://public.example"
     assert app.state.ombre_http_settings is settings
     assert app.state.ombre_runtime_lifecycle is lifecycle
 

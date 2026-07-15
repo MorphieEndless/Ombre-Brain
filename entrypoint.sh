@@ -15,9 +15,9 @@
 # 处理逻辑：
 #   1. 配置路径取 $OMBRE_CONFIG_PATH，未设则退回 /app/config.yaml（老行为，兼容现有部署）。
 #   2. 确保父目录存在。
-#   3. 若该路径是目录（Docker 副作用）：rmdir / rm -rf 常规删除；删不掉就用
-#      `find -mindepth 1 -delete` 清空内容兜底（即便目录本身是挂载点删不掉），再试 rmdir。
-#   4. 删成功（路径已不存在）→ 从内置默认模板初始化一份。
+#   3. 若该路径已是目录，立即 fail closed。配置路径来自环境变量，绝不能对它
+#      `rm -rf`/`find -delete`；误指到记忆卷时那会删掉用户数据。
+#   4. 路径不存在则从内置默认模板初始化。
 #   5. 最终校验：路径必须是普通文件，否则打印清晰指引并 FATAL 退出（不带病启动）。
 
 IMAGE_ROOT="${OMBRE_IMAGE_ROOT:-/app}"
@@ -26,21 +26,16 @@ DEFAULT="$IMAGE_ROOT/config.default.yaml"
 
 mkdir -p "$(dirname "$CONFIG")" 2>/dev/null || true
 
-# --- 3. 若是目录，尽全力把它清掉 ---
+# --- 3. 目录绝不自动删除：它可能就是整个记忆卷 ---
 if [ -d "$CONFIG" ]; then
     echo "[entrypoint] '$CONFIG' is a directory (Docker created it because the host file was missing)."
-    echo "[entrypoint] Trying to remove it and re-initialize from defaults..."
-    rmdir "$CONFIG" 2>/dev/null || rm -rf "$CONFIG" 2>/dev/null || true
-    if [ -d "$CONFIG" ]; then
-        # 直接删除失败（多半是活动 bind mount，挂载点自身删不掉）。
-        # 兜底：清空目录内容（mindepth 1 = 不碰目录自身），再试着删掉空目录。
-        echo "[entrypoint] Direct removal failed; clearing its contents as a fallback..."
-        find "$CONFIG" -mindepth 1 -delete 2>/dev/null || true
-        rmdir "$CONFIG" 2>/dev/null || true
-    fi
+    echo "[entrypoint] FATAL: refusing to delete a directory supplied as OMBRE_CONFIG_PATH."
+    echo "[entrypoint] Point OMBRE_CONFIG_PATH at a file, for example:"
+    echo "[entrypoint]     /app/buckets/config.yaml"
+    exit 1
 fi
 
-# --- 4. 不存在则从默认模板初始化（上面删成功后会走到这；纯缺文件也走这）---
+# --- 4. 不存在则从默认模板初始化 ---
 if [ ! -e "$CONFIG" ]; then
     echo "[entrypoint] Initializing config from defaults at '$CONFIG'..."
     cp "$DEFAULT" "$CONFIG"

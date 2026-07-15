@@ -144,7 +144,7 @@
 
 - `letter_write(author="claude", content="...", title="...")` — 我写给她他。
 - `letter_write(author="user", content="...", user_name="...")` — 把她他写给我的留下。
-- `author` 必须是 `"user"` 或 `"claude"` 之一，没有别的值。
+- `author="user"` 表示用户侧，`author="ai"`（或与 `ai_name` 相同）表示 AI 侧；也可以直接传任意自定义署名字符串，读取时可用同一署名过滤。
 - `letter_read()` — 按时间倒序读最近 10 封。
 - `letter_read(query="那次离开后", author="claude")` — 语义检索 + 方向过滤。
 

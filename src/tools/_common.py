@@ -689,30 +689,34 @@ async def _merge_or_create_inner(
             except Exception as e:
                 rt.logger.warning(f"Merge failed, creating new / 合并失败，新建: {e}")
 
+    async def create_bucket(final_importance: int) -> str:
+        return await rt.bucket_mgr.create(
+            content=content,
+            tags=tags,
+            importance=final_importance,
+            domain=domain,
+            valence=valence,
+            arousal=arousal,
+            name=name or None,
+            why_remembered=why_remembered,
+            source_tool=source_tool,
+            grow_batch_id=grow_batch_id,
+            meaning=meaning,
+            media=media,
+            test_data=test_data,
+            # hold 的铁律：正文优先落盘。打标/embedding 可降级，但绝不压缩或撤销记忆。
+            allow_embedding_fallback=(raw_merge and source_tool == "hold"),
+        )
+
     if importance >= _HIGH_IMP_THRESHOLD:
-        # 权威判定放在真正落盘之前、加 quota 锁的窗口里：dispatch() 里那次
-        # enforce_high_importance_quota 发生在 analyze() 之前，两个并发请求
-        # 都可能拿到同一个「未满」快照——这里才是唯一决定是否越过硬上限的地方。
+        # The quota turn must include the durable create, not just the count.
+        # Releasing it after enforce() recreates the original TOCTOU window:
+        # several distinct-content holds can all observe one remaining slot.
         async with _quota_turn("high_importance"):
             importance = await enforce_high_importance_quota(importance)
-
-    bucket_id = await rt.bucket_mgr.create(
-        content=content,
-        tags=tags,
-        importance=importance,
-        domain=domain,
-        valence=valence,
-        arousal=arousal,
-        name=name or None,
-        why_remembered=why_remembered,
-        source_tool=source_tool,
-        grow_batch_id=grow_batch_id,
-        meaning=meaning,
-        media=media,
-        test_data=test_data,
-        # hold 的铁律：正文优先落盘。打标/embedding 可降级，但绝不压缩或撤销记忆。
-        allow_embedding_fallback=(raw_merge and source_tool == "hold"),
-    )
+            bucket_id = await create_bucket(importance)
+    else:
+        bucket_id = await create_bucket(importance)
     # create() 已在原文落盘后投递 embedding outbox，此处无需重复生成。
     # Managed runtime 下 queued 是正常成功态，不应在网络请求真正完成前误报
     # “向量失败”；没有 outbox 的兼容运行时才检查同步尝试的结果。

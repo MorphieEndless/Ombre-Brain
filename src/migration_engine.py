@@ -33,6 +33,7 @@ import os
 import shutil
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Iterable
 
@@ -56,8 +57,56 @@ TAIL_LOG_LINES = 15
 
 # 进程级锁：同一时刻只允许一个迁移任务
 _migration_lock = threading.Lock()
+_migration_owner_guard = threading.Lock()
+_migration_owner: "MigrationReservation | None" = None
 _migration_task: asyncio.Task | None = None
 _v3_runtime: Any = None
+
+
+@dataclass(frozen=True)
+class MigrationReservation:
+    """Opaque ownership token for one embedding migration attempt.
+
+    The web route reserves the process-wide migration slot *before* it creates
+    or resets the staging database and before it awaits the provider probe.
+    ``start_migration`` then transfers that same reservation to the background
+    task.  Keeping ownership explicit prevents a losing concurrent request
+    from touching another job's staging/checkpoint/outbox lifecycle.
+    """
+
+    job_id: str
+
+
+def reserve_migration() -> MigrationReservation | None:
+    """Atomically reserve the single migration slot without starting a task."""
+
+    global _migration_owner
+    if not _migration_lock.acquire(blocking=False):
+        logger.info("[migration] another migration already in progress; skip")
+        return None
+    reservation = MigrationReservation(job_id=uuid.uuid4().hex)
+    with _migration_owner_guard:
+        _migration_owner = reservation
+    return reservation
+
+
+def owns_migration_reservation(reservation: MigrationReservation) -> bool:
+    """Return whether ``reservation`` is the active migration owner."""
+
+    with _migration_owner_guard:
+        return _migration_owner is reservation
+
+
+def release_migration_reservation(reservation: MigrationReservation) -> bool:
+    """Release ``reservation`` iff it still owns the migration slot."""
+
+    global _migration_owner
+    with _migration_owner_guard:
+        if _migration_owner is not reservation:
+            return False
+        _migration_owner = None
+        _migration_lock.release()
+    return True
 
 
 def attach_v3_runtime(runtime) -> None:
@@ -435,25 +484,48 @@ def start_migration(
     cfg: MigrationConfig,
     loop: asyncio.AbstractEventLoop | None = None,
     on_complete: Callable[[bool], None] | None = None,
+    *,
+    reservation: MigrationReservation | None = None,
 ) -> asyncio.Task | None:
     """在指定 event loop 上启动后台迁移任务。
 
     同一时刻只允许一个迁移任务，重复调用返回 None。
     """
     global _migration_task
-    if not _migration_lock.acquire(blocking=False):
-        logger.info("[migration] another migration already in progress; skip")
+    active_reservation = reservation or reserve_migration()
+    if active_reservation is None:
+        return None
+    if not owns_migration_reservation(active_reservation):
+        logger.warning("[migration] rejected stale or foreign reservation")
         return None
 
     target_loop = loop or asyncio.get_event_loop()
+    callback_called = False
+
+    def _complete_once(success: bool) -> None:
+        nonlocal callback_called
+        if callback_called:
+            return
+        callback_called = True
+        if on_complete:
+            on_complete(success)
 
     async def _wrap():
         try:
-            await _run_migration(cfg, on_complete=on_complete)
+            await _run_migration(cfg, on_complete=_complete_once)
+        except BaseException:
+            # Cancellation and unexpected worker failures must still restore
+            # caller-owned resources such as the embedding outbox.
+            _complete_once(False)
+            raise
         finally:
-            _migration_lock.release()
+            release_migration_reservation(active_reservation)
 
-    task = target_loop.create_task(_wrap())
+    try:
+        task = target_loop.create_task(_wrap())
+    except BaseException:
+        release_migration_reservation(active_reservation)
+        raise
     _migration_task = task
     return task
 
@@ -464,12 +536,14 @@ def is_running() -> bool:
 
 def reset_for_test() -> None:
     """测试用：强制释放锁。"""
-    global _migration_task
-    if _migration_lock.locked():
-        try:
-            _migration_lock.release()
-        except RuntimeError:
-            pass
+    global _migration_owner, _migration_task
+    with _migration_owner_guard:
+        _migration_owner = None
+        if _migration_lock.locked():
+            try:
+                _migration_lock.release()
+            except RuntimeError:
+                pass
     _migration_task = None
 
 
@@ -480,6 +554,10 @@ __all__ = [
     "read_status",
     "write_status",
     "backup_db_once",
+    "MigrationReservation",
+    "reserve_migration",
+    "owns_migration_reservation",
+    "release_migration_reservation",
     "start_migration",
     "is_running",
     "reset_for_test",

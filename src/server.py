@@ -160,7 +160,7 @@ async def _fire_webhook(event: str, payload: dict) -> None:
     if hook_skip or not hook_url:
         return
     if not hook_url.startswith(("http://", "https://")):
-        logger.warning(f"OMBRE_HOOK_URL rejected: only http/https allowed (got {hook_url[:40]!r})")
+        logger.warning("OMBRE_HOOK_URL rejected: only http/https URLs are allowed")
         return
     try:
         body = {
@@ -171,7 +171,9 @@ async def _fire_webhook(event: str, payload: dict) -> None:
         async with httpx.AsyncClient(timeout=_WEBHOOK_TIMEOUT_SECONDS) as client:
             await client.post(hook_url, json=body)
     except Exception as e:
-        logger.warning(f"Webhook push failed ({event} → {hook_url}): {e}")
+        # Webhook credentials commonly live in the URL path/query.  Never put
+        # either the configured URL or httpx's URL-bearing exception text in logs.
+        logger.warning("Webhook push failed (%s): %s", event, type(e).__name__)
 
 # --- Initialize core components / 初始化核心组件 ---
 # 统一错误码体系（必须在任何业务初始化之前 configure，确保 errors.jsonl 路径生效）
@@ -403,7 +405,7 @@ _wsh.init_runtime(
 
 # =============================================================
 # 结构化操作日志 helpers（任务A，2026-05-03）
-# 给 11 个 @mcp.tool 入口统一打 entry/ok/err 三段日志，便于排查
+# 给 14 个 MCP 工具入口统一打 entry/ok/err 三段日志，便于排查
 # 客户端报 invalid_arguments / 静默错误等问题。
 # 输出格式：op=<name> phase=entry|ok|err key=value...
 # 所有可能含 PII 的字段（content / 信件正文等）只记 length，不记内容。
@@ -528,12 +530,56 @@ _tools_runtime.init(
 # 每个入口都不超过 10 行，便于一眼看清参数与归属
 # =============================================================
 @mcp.tool()
-async def breath() -> str:
+async def breath(
+    query: Optional[str] = "",
+    max_tokens: Optional[int] = 0,
+    domain: Optional[str] = "",
+    valence: Optional[float] = -1,
+    arousal: Optional[float] = -1,
+    max_results: Optional[int] = 0,
+    importance_min: Optional[int] = -1,
+    tags: Optional[str] = "",
+    catalog: Optional[bool] = False,
+) -> str:
     """无参数,睁眼看看自己记得什么:返回权重最高的未解决记忆 + 置顶核心准则。0 参数是刻意设计——claude.ai 按需加载工具时会跳过参数复杂的工具,拆成 0 参数才能保证每次对话自动浮现,不用手动触发。要按关键词找记忆用 breath_search(query=...);要用 catalog/tags/importance_min/valence/arousal/max_tokens 等高级模式用 breath_advanced(...)。"""
     return await _with_notice(
-        _t_breath.dispatch(),
+        _t_breath.dispatch(
+            query=query, max_tokens=max_tokens, domain=domain,
+            valence=valence, arousal=arousal, max_results=max_results,
+            importance_min=importance_min, tags=tags, catalog=catalog,
+        ),
         op="breath",
-        args={},
+        args={
+            "query": query, "max_tokens": max_tokens, "domain": domain,
+            "valence": valence, "arousal": arousal, "max_results": max_results,
+            "importance_min": importance_min, "tags": tags, "catalog": catalog,
+        },
+    )
+
+
+# Keep the advertised schema parameter-free so claude.ai still auto-loads the
+# default surfacing tool.  The callable deliberately retains the pre-2.6.8
+# signature behind that schema: clients which cached the old tool definition
+# may keep sending those arguments after an upgrade, and FastMCP otherwise
+# silently drops every unknown field before calling a zero-argument function.
+try:
+    _breath_public_tool = mcp._tool_manager.get_tool("breath")
+    if _breath_public_tool is None:
+        raise RuntimeError("registered breath tool is missing")
+    # Unknown/typoed legacy arguments must fail loudly instead of recreating
+    # the original bug by degrading a targeted request into default surfacing.
+    _breath_arg_model = _breath_public_tool.fn_metadata.arg_model
+    _breath_arg_model.model_config["extra"] = "forbid"
+    _breath_arg_model.model_rebuild(force=True)
+    _breath_public_tool.parameters = {
+        "properties": {},
+        "title": "breathArguments",
+        "type": "object",
+    }
+except (AttributeError, RuntimeError, TypeError, ValueError) as _breath_compat_exc:
+    logger.warning(
+        "breath legacy-argument compatibility adapter unavailable: %s",
+        _breath_compat_exc,
     )
 
 
@@ -977,7 +1023,16 @@ if __name__ == "__main__":
             ) if _mcp_auth_required
             else "关闭(免 token 直连，仅限可信内网/本机)",
         )
-        uvicorn.run(_app, host=_BIND_HOST, port=OMBRE_PORT)
+        # Forwarded headers are validated inside the application against
+        # OMBRE_TRUSTED_PROXY_CIDRS.  Uvicorn's default proxy middleware rewrites
+        # scope["client"] before our guards run, which discards the immediate
+        # proxy address and makes that trust decision impossible.
+        uvicorn.run(
+            _app,
+            host=_BIND_HOST,
+            port=OMBRE_PORT,
+            proxy_headers=False,
+        )
     else:
-        # stdio：工具已在启动入口处统一回灌进 mcp（12 个全暴露），这里直接跑。
+        # stdio：工具已在启动入口处统一回灌进 mcp（14 个全暴露），这里直接跑。
         mcp.run(transport=transport)

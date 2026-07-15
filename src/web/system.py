@@ -66,8 +66,57 @@ except ImportError:  # pragma: no cover
 
 _LOGS_DEFAULT_LIMIT = 200
 _LOGS_MAX_LIMIT = 2000
+_MAX_LOG_TAIL_SCAN_BYTES = 8 * 1024 * 1024
+_LOG_TAIL_CHUNK_BYTES = 64 * 1024
 _ERRORS_DEFAULT_LIMIT = 50
 _ERRORS_MAX_LIMIT = 500
+
+
+def _read_filtered_log_tail(
+    path: str,
+    *,
+    keep: tuple[str, ...] | None,
+    limit: int,
+    max_bytes: int = _MAX_LOG_TAIL_SCAN_BYTES,
+) -> list[str]:
+    """Return matching log lines oldest-first from a bounded file tail.
+
+    The dashboard only needs a small tail.  Reading the complete log file let
+    an oversized or unrotated log create a second, much larger in-memory copy.
+    Work backwards in fixed-size binary chunks and discard an incomplete line
+    when the byte budget is reached.
+    """
+
+    selected: list[str] = []
+    with open(path, "rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        position = handle.tell()
+        remaining = max(0, int(max_bytes))
+        carry = b""
+        while position > 0 and remaining > 0 and len(selected) < limit:
+            chunk_size = min(_LOG_TAIL_CHUNK_BYTES, position, remaining)
+            position -= chunk_size
+            remaining -= chunk_size
+            handle.seek(position)
+            block = handle.read(chunk_size) + carry
+            parts = block.split(b"\n")
+            carry = parts.pop(0)
+            for raw_line in reversed(parts):
+                line = raw_line.decode("utf-8", errors="replace").rstrip("\r")
+                if not line:
+                    continue
+                if keep is None or any(f" {level}: " in line for level in keep):
+                    selected.append(line)
+                    if len(selected) >= limit:
+                        break
+
+        if position == 0 and carry and len(selected) < limit:
+            line = carry.decode("utf-8", errors="replace").rstrip("\r")
+            if line and (keep is None or any(f" {level}: " in line for level in keep)):
+                selected.append(line)
+
+    selected.reverse()
+    return selected
 
 
 def _check(
@@ -1473,13 +1522,9 @@ def register(mcp) -> None:
                  "ALL": None}
         keep = allow.get(level, ("WARNING", "ERROR"))
         try:
-            with open(log_file, "r", encoding="utf-8", errors="replace") as f:
-                lines = f.readlines()
-            if keep is not None:
-                lines = [ln for ln in lines if any(f" {lv}: " in ln for lv in keep)]
-            lines = lines[-limit:]
+            lines = _read_filtered_log_tail(log_file, keep=keep, limit=limit)
             return JSONResponse({
-                "lines": [ln.rstrip("\n") for ln in lines],
+                "lines": lines,
                 "log_file": log_file,
                 "level": level,
                 "count": len(lines),

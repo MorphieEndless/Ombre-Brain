@@ -23,6 +23,7 @@ def _configured_base_url() -> str:
 
 
 BASE_URL = _configured_base_url()
+SETUP_TOKEN = os.environ.get("OMBRE_DOCKER_SETUP_TOKEN", "").strip()
 pytestmark = pytest.mark.skipif(
     not BASE_URL,
     reason="Docker Web integration service is not configured",
@@ -51,12 +52,27 @@ def test_desktop_management_api_first_run_and_authenticated_flow():
         protected_before = client.get("/api/config")
         assert protected_before.status_code == 401
 
-        weak_password = client.post("/auth/setup", json={"password": "123"})
+        setup_headers = (
+            {"X-Ombre-Setup-Token": SETUP_TOKEN} if SETUP_TOKEN else {}
+        )
+        if SETUP_TOKEN:
+            remote_without_token = client.post(
+                "/auth/setup",
+                json={"password": "docker-audit-password"},
+            )
+            assert remote_without_token.status_code == 403
+
+        weak_password = client.post(
+            "/auth/setup",
+            json={"password": "123"},
+            headers=setup_headers,
+        )
         assert weak_password.status_code == 400
 
         setup = client.post(
             "/auth/setup",
             json={"password": "docker-audit-password"},
+            headers=setup_headers,
         )
         assert setup.status_code == 200
         assert setup.json()["ok"] is True

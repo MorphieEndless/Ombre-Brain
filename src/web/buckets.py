@@ -11,8 +11,7 @@ web/buckets.py — 记忆桶管理 + 设置 + 锚点 + 自我认知读取
 ========================================
 """
 
-import os
-import re
+from contextlib import AsyncExitStack
 
 from starlette.requests import Request
 from starlette.responses import Response
@@ -28,9 +27,19 @@ except ImportError:  # pragma: no cover
     from ..utils import strip_wikilinks, parse_bool, atomic_update_config_yaml  # type: ignore
 
 try:
-    from tools._common import check_pinned_quota as _check_pinned_quota  # type: ignore
+    from tools._common import (  # type: ignore
+        _HIGH_IMP_THRESHOLD,
+        _quota_turn,
+        check_pinned_quota as _check_pinned_quota,
+        enforce_high_importance_quota as _enforce_high_importance_quota,
+    )
 except ImportError:  # pragma: no cover
-    from ..tools._common import check_pinned_quota as _check_pinned_quota  # type: ignore
+    from ..tools._common import (  # type: ignore
+        _HIGH_IMP_THRESHOLD,
+        _quota_turn,
+        check_pinned_quota as _check_pinned_quota,
+        enforce_high_importance_quota as _enforce_high_importance_quota,
+    )
 
 
 async def rename_human_in_buckets(old: str, new: str) -> dict:
@@ -40,65 +49,19 @@ async def rename_human_in_buckets(old: str, new: str) -> dict:
     用途：她/他改了称呼后，改名前就存在的老桶仍写着旧词（默认「用户」），breath 里
     新桶显示新名、老桶还是旧名，看起来"批量替换没生效"。这里一次性补齐。
 
-    刻意**直接改 frontmatter，不走 bucket_mgr.update**：update 会把 last_active 刷成现在，
-    改个称呼不该让全部记忆显得"刚刚动过"、扰乱衰减与浮现排序。content 改了的桶顺手重算
-    embedding（best-effort，无 key/standby 时静默跳过）。
+    每个桶都走 BucketManager 的正常事务边界，但不刷新 ``last_active``；
+    content 改变时派生索引也会按普通更新流程重建。
 
     返回 {buckets_changed, replacements}。old 为空 / old==new 时直接 no-op。"""
-    import frontmatter as _fm
-
-    if not old or not new or old == new:
-        return {"buckets_changed": 0, "replacements": 0}
-
-    pat = re.compile(re.escape(old))
-    bm = sh.bucket_mgr
-    dirs = list(bm._active_dirs) + [bm.archive_dir]
-    changed, total = 0, 0
-
-    for _root, _fname, fpath in bm._iter_md_files(dirs):
-        try:
-            post = _fm.load(fpath)
-        except Exception:
-            continue
-        n = 0
-        content_changed = False
-        new_content, c = pat.subn(new, post.content or "")
-        if c:
-            post.content = new_content
-            n += c
-            content_changed = True
-        for field in ("name", "why_remembered", "user_name"):
-            v = post.get(field)
-            if isinstance(v, str) and v:
-                nv, c2 = pat.subn(new, v)
-                if c2:
-                    post[field] = nv
-                    n += c2
-        if not n:
-            continue
-        try:
-            with open(fpath, "w", encoding="utf-8") as f:
-                f.write(_fm.dumps(post))
-        except OSError as e:
-            logger.warning(f"rename_human write failed {fpath}: {e}")
-            continue
-        changed += 1
-        total += n
-        if content_changed:
-            bid = post.get("id")
-            ee = sh.embedding_engine
-            if bid and ee and getattr(ee, "enabled", False):
-                try:
-                    await ee.generate_and_store(bid, post.content or "")
-                except Exception:
-                    pass
-
-    try:
-        bm._invalidate_bm25()
-    except Exception:
-        pass
-    logger.info(f"rename_human_in_buckets: '{old}'->'{new}' changed={changed} replacements={total}")
-    return {"buckets_changed": changed, "replacements": total}
+    result = await sh.bucket_mgr.replace_text_fields(old, new)
+    logger.info(
+        "rename_human_in_buckets: %r->%r changed=%s replacements=%s",
+        old,
+        new,
+        result["buckets_changed"],
+        result["replacements"],
+    )
+    return result
 
 
 def register(mcp) -> None:
@@ -155,7 +118,7 @@ def register(mcp) -> None:
 
     @mcp.custom_route("/api/bucket/{bucket_id}", methods=["GET"])
     async def api_bucket_detail(request: Request) -> Response:
-        """Get full bucket content by ID."""
+        """Get full raw bucket content plus display-only derived text by ID."""
         from starlette.responses import JSONResponse
         err = sh._require_auth(request)
         if err:
@@ -171,10 +134,15 @@ def register(mcp) -> None:
             triggered_feels = await sh.bucket_mgr.get_triggered_feels(bucket_id)
         except Exception as e:
             logger.warning(f"triggered_feels lookup failed / 反向链查询失败: {e}")
+        raw_content = bucket.get("content", "")
         return JSONResponse({
             "id": bucket["id"],
             "metadata": meta,
-            "content": strip_wikilinks(bucket.get("content", "")),
+            # Editing must round-trip the exact stored Markdown.  Keep the
+            # bracket-free presentation text separate so a metadata-only edit
+            # can never write a stripped [[wikilink]] body back to disk.
+            "content": raw_content,
+            "display_content": strip_wikilinks(raw_content),
             "score": sh.decay_engine.calculate_score(meta),
             "triggered_feels": triggered_feels,  # iter 1.9 D
         })
@@ -190,25 +158,74 @@ def register(mcp) -> None:
         if err:
             return err
         bucket_id = request.path_params["bucket_id"]
-        bucket = await sh.bucket_mgr.get(bucket_id)
-        if not bucket:
-            return JSONResponse({"error": "not found"}, status_code=404)
-        meta = bucket["metadata"]
-        new_pinned = not bool(meta.get("pinned", False))
-        update_kwargs: dict[str, object] = {"pinned": new_pinned}
-        # Pinning: importance jumps to 10 + type→permanent. Unpin reverts type→dynamic.
-        if new_pinned:
-            quota_err = await _check_pinned_quota()
-            if quota_err:
-                return JSONResponse({"error": quota_err}, status_code=400)
-            update_kwargs["importance"] = 10
-            update_kwargs["type"] = "permanent"
-        else:
-            if meta.get("type") == "permanent":
-                update_kwargs["type"] = "dynamic"
         try:
-            await sh.bucket_mgr.update(bucket_id, **update_kwargs)
-            return JSONResponse({"ok": True, "pinned": new_pinned})
+            # Both pin and unpin share the pinned turn.  Otherwise an unpin can
+            # race a new pin and make the latter reject against a stale count;
+            # more importantly, two new pins could both pass the same precheck.
+            async with AsyncExitStack() as quota_stack:
+                await quota_stack.enter_async_context(_quota_turn("pinned"))
+
+                bucket = await sh.bucket_mgr.get(bucket_id)
+                if not bucket:
+                    return JSONResponse({"error": "not found"}, status_code=404)
+                meta = bucket.get("metadata", {})
+                current_pinned = parse_bool(meta.get("pinned"), default=False)
+                new_pinned = not current_pinned
+                protected = parse_bool(meta.get("protected"), default=False)
+                update_kwargs: dict[str, object] = {"pinned": new_pinned}
+
+                if new_pinned:
+                    quota_err = await _check_pinned_quota()
+                    if quota_err:
+                        return JSONResponse({"error": quota_err}, status_code=400)
+                else:
+                    # A formerly pinned importance=10 bucket becomes an
+                    # ordinary high-importance bucket after unpinning.  Reserve
+                    # that quota atomically too; when full, demote to 8 in the
+                    # same BucketManager transaction.
+                    try:
+                        current_importance = int(meta.get("importance") or 0)
+                    except (TypeError, ValueError):
+                        current_importance = 0
+                    becomes_high_importance = (
+                        current_pinned
+                        and not protected
+                        and current_importance >= _HIGH_IMP_THRESHOLD
+                    )
+                    if becomes_high_importance:
+                        await quota_stack.enter_async_context(
+                            _quota_turn("high_importance")
+                        )
+                        update_kwargs["importance"] = (
+                            await _enforce_high_importance_quota(
+                                current_importance
+                            )
+                        )
+
+                ok = await sh.bucket_mgr.update(bucket_id, **update_kwargs)
+                if not ok:
+                    return JSONResponse({"error": "update failed"}, status_code=500)
+
+                persisted = await sh.bucket_mgr.get(bucket_id)
+                actual_pinned = parse_bool(
+                    (persisted or {}).get("metadata", {}).get("pinned"),
+                    default=False,
+                )
+                if not persisted or actual_pinned != new_pinned:
+                    return JSONResponse(
+                        {
+                            "error": "pin state was not persisted",
+                            "pinned": actual_pinned,
+                        },
+                        status_code=409,
+                    )
+                persisted_meta = persisted.get("metadata", {})
+                return JSONResponse({
+                    "ok": True,
+                    "pinned": actual_pinned,
+                    "importance": persisted_meta.get("importance"),
+                    "type": persisted_meta.get("type"),
+                })
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -494,26 +511,37 @@ def register(mcp) -> None:
             human = "人类"
         if len(human) > 20:
             return JSONResponse({"error": "human name must be ≤ 20 characters"}, status_code=400)
-        # 旧称呼（默认「用户」，与 dehydrator / import 的兜底同源）—— 用于把老桶里的旧词换成新名。
-        old_human = (sh.config.get("human") or "用户").strip() or "用户"
-        sh.config["human"] = human
-        # 同步活的 dehydrator.human：否则改名后、重启前，新记忆仍按旧称呼脱水。
-        if getattr(sh, "dehydrator", None) is not None and hasattr(sh.dehydrator, "human"):
-            sh.dehydrator.human = human
-        # 写回 config.yaml
-        try:
-            atomic_update_config_yaml(lambda save_config: save_config.__setitem__("human", human))
-        except Exception as e:
-            # 同上：写失败不能再只记 warning 后仍回成功，否则用户以为改名生效了，
-            # 重启后又变回旧称呼。
-            return JSONResponse({"error": f"称呼写入磁盘失败，未保存：{e}"}, status_code=500)
-        # 改名时把老桶里残留的旧称呼一起换成新名（name/content/why_remembered/user_name）。
-        renamed = {"buckets_changed": 0, "replacements": 0}
-        if old_human and old_human != human:
+        # Config read/write, live runtime update and the full-vault replacement
+        # are one outer transaction.  Without it, concurrent A->B and B->C
+        # requests can interleave their per-bucket writes and leave mixed names.
+        async with sh.bucket_mgr.human_name_change_turn():
+            # 旧称呼（默认「用户」，与 dehydrator / import 的兜底同源）—— 用于把老桶里的旧词换成新名。
+            old_human = (sh.config.get("human") or "用户").strip() or "用户"
             try:
-                renamed = await rename_human_in_buckets(old_human, human)
-            except Exception as _re:
-                logger.warning(f"human rename batch failed: {_re}")
+                atomic_update_config_yaml(
+                    lambda save_config: save_config.__setitem__("human", human)
+                )
+            except Exception as e:
+                # Do not mutate live state unless persistence succeeded.
+                return JSONResponse(
+                    {"error": f"称呼写入磁盘失败，未保存：{e}"},
+                    status_code=500,
+                )
+
+            sh.config["human"] = human
+            # 同步活的 dehydrator.human：否则改名后、重启前，新记忆仍按旧称呼脱水。
+            if getattr(sh, "dehydrator", None) is not None and hasattr(
+                sh.dehydrator, "human"
+            ):
+                sh.dehydrator.human = human
+
+            # 改名时把老桶里残留的旧称呼一起换成新名（name/content/why_remembered/user_name）。
+            renamed = {"buckets_changed": 0, "replacements": 0}
+            if old_human and old_human != human:
+                try:
+                    renamed = await rename_human_in_buckets(old_human, human)
+                except Exception as _re:
+                    logger.warning(f"human rename batch failed: {_re}")
         return JSONResponse({"ok": True, "human": human, "renamed": renamed})
 
     # ---- 手动「同步旧记忆」：把指定旧称呼（默认「用户」）批量换成当前称呼 ----
@@ -534,19 +562,21 @@ def register(mcp) -> None:
         from_term = from_raw.strip()
         if len(from_term) > 100:
             return JSONResponse({"error": "from must be at most 100 characters"}, status_code=400)
-        cur = (sh.config.get("human") or "人类").strip() or "人类"
         if not from_term:
             return JSONResponse({"error": "缺少要替换的旧称呼"}, status_code=400)
-        if from_term == cur:
-            return JSONResponse({
-                "ok": True, "from": from_term, "to": cur,
-                "renamed": {"buckets_changed": 0, "replacements": 0},
-                "note": "要替换的词与当前称呼相同，无需处理",
-            })
-        try:
-            stats = await rename_human_in_buckets(from_term, cur)
-        except Exception as e:
-            return JSONResponse({"error": str(e)}, status_code=500)
+        async with sh.bucket_mgr.human_name_change_turn():
+            # Re-read inside the same reservation used by name-change requests.
+            cur = (sh.config.get("human") or "人类").strip() or "人类"
+            if from_term == cur:
+                return JSONResponse({
+                    "ok": True, "from": from_term, "to": cur,
+                    "renamed": {"buckets_changed": 0, "replacements": 0},
+                    "note": "要替换的词与当前称呼相同，无需处理",
+                })
+            try:
+                stats = await rename_human_in_buckets(from_term, cur)
+            except Exception as e:
+                return JSONResponse({"error": str(e)}, status_code=500)
         return JSONResponse({"ok": True, "from": from_term, "to": cur, "renamed": stats})
 
 

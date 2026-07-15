@@ -619,7 +619,7 @@ docker compose -f deploy/docker-compose.yml up -d
 
 > ⚠️ **`dehydration.max_tokens` 不能太小**：Gemini 2.5 系列模型有「思考 token」开销，如果 max_tokens 设得太小（如 256/512），思考 token 会耗尽预算，JSON 响应被截断，导致所有记忆被错误分类为「未分类」。推荐 `gemini-2.0-flash`（无思考开销）或将 max_tokens 设为 `4096` 以上。
 
-> 🔐 **Hook 安全默认值**：`/breath-hook` 默认不再公开。它接受 Dashboard 登录 cookie，或 `hooks.token` / `OMBRE_HOOK_TOKEN`，token 可通过 `?token=...`、`X-Ombre-Hook-Token` 或 `Authorization: Bearer ...` 传入。只有在反向代理、Cloudflare Access 等外层已经做鉴权时，才建议把 `hooks.allow_public` / `OMBRE_HOOK_ALLOW_PUBLIC` 设为 `true`。
+> 🔐 **Hook 安全默认值**：`/breath-hook` 默认不再公开。它接受 Dashboard 登录 cookie，或 `hooks.token` / `OMBRE_HOOK_TOKEN`；token 只能通过 `X-Ombre-Hook-Token` 或 `Authorization: Bearer ...` 请求头传入，避免密钥进入 URL、代理日志和浏览器历史。只有在反向代理、Cloudflare Access 等外层已经做鉴权时，才建议把 `hooks.allow_public` / `OMBRE_HOOK_ALLOW_PUBLIC` 设为 `true`。
 >
 > 注：这里**只有 `/breath-hook`**。早期版本还有一个每次开场自动触发的 `/dream-hook`，已移除——`dream`（做梦消化）按设计哲学不是义务、不该被自动触发，只应在需要消化时由模型主动调用 `dream` 工具。
 

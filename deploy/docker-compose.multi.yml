@@ -32,11 +32,11 @@ services:
     container_name: ombre-ming
     restart: unless-stopped
     ports:
-      - "18001:8000"
+      - "${OMBRE_BIND_ADDRESS:-127.0.0.1}:18001:8000"
     environment:
       <<: *common-env
       OMBRE_OWNER_NAME: 小明
-      OMBRE_DASHBOARD_PASSWORD: ${OMBRE_MING_PASSWORD:-}
+      OMBRE_DASHBOARD_PASSWORD: ${OMBRE_MING_PASSWORD:?OMBRE_MING_PASSWORD is required}
       OMBRE_HOST_VAULT_DIR: ${OMBRE_MING_VAULT_DIR:-}
     volumes:
       - type: bind
@@ -50,11 +50,11 @@ services:
     container_name: ombre-hong
     restart: unless-stopped
     ports:
-      - "18002:8000"
+      - "${OMBRE_BIND_ADDRESS:-127.0.0.1}:18002:8000"
     environment:
       <<: *common-env
       OMBRE_OWNER_NAME: 小红
-      OMBRE_DASHBOARD_PASSWORD: ${OMBRE_HONG_PASSWORD:-}
+      OMBRE_DASHBOARD_PASSWORD: ${OMBRE_HONG_PASSWORD:?OMBRE_HONG_PASSWORD is required}
       OMBRE_HOST_VAULT_DIR: ${OMBRE_HONG_VAULT_DIR:-}
     volumes:
       - type: bind

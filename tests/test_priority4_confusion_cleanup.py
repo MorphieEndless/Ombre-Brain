@@ -284,8 +284,154 @@ async def test_dashboard_oauth_switch_persists_to_config(monkeypatch, tmp_path):
     assert payload["ok"] is True
     assert payload["restart_required"] is True
     assert payload["mcp_require_auth_effective"] is True
-    assert config_api.sh.config["mcp_require_auth"] is False
+    # Startup-bound settings remain the effective runtime snapshot until restart.
+    assert config_api.sh.config["mcp_require_auth"] is True
     assert persisted["mcp_require_auth"] is False
+
+
+@pytest.mark.asyncio
+async def test_dashboard_mcp_startup_settings_require_persistence_and_do_not_publish_on_failure(
+    monkeypatch,
+):
+    runtime = {"mcp_require_auth": True, "mcp_auth_mode": "oauth"}
+    monkeypatch.setattr(config_api.sh, "_require_auth", lambda _request: None)
+    monkeypatch.setattr(config_api.sh, "config", runtime)
+    mcp = FakeMCP()
+    config_api.register(mcp)
+
+    not_persisted = await mcp.routes[("POST", "/api/config")](
+        JsonRequest({"mcp_require_auth": False})
+    )
+    assert not_persisted.status_code == 400
+    assert runtime == {"mcp_require_auth": True, "mcp_auth_mode": "oauth"}
+
+    monkeypatch.setattr(
+        config_api,
+        "atomic_update_config_yaml",
+        lambda _mutate: (_ for _ in ()).throw(OSError("read-only mount")),
+    )
+    failed = await mcp.routes[("POST", "/api/config")](
+        JsonRequest(
+            {
+                "mcp_require_auth": False,
+                "mcp_auth_mode": "token",
+                "persist": True,
+            }
+        )
+    )
+    assert failed.status_code == 500
+    assert runtime == {"mcp_require_auth": True, "mcp_auth_mode": "oauth"}
+
+
+@pytest.mark.asyncio
+async def test_dashboard_public_mcp_address_persists_round_trips_and_clears(
+    monkeypatch, tmp_path
+):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump({"deployment": {"profile": "advanced"}}), encoding="utf-8"
+    )
+    monkeypatch.setattr(config_api.sh, "_require_auth", lambda _request: None)
+    monkeypatch.setattr(
+        config_api.sh,
+        "config",
+        {"mcp_require_auth": True, "deployment": {"profile": "advanced"}},
+    )
+    monkeypatch.setattr(config_api.sh, "in_docker", lambda: False)
+    monkeypatch.setattr(utils, "config_file_path", lambda: str(config_path))
+    mcp = FakeMCP()
+    config_api.register(mcp)
+
+    saved = await mcp.routes[("POST", "/api/config")](
+        JsonRequest(
+            {
+                "deployment": {"public_url": "https://OB.Example:443/mcp"},
+                "persist": True,
+            }
+        )
+    )
+    saved_payload = _json(saved)
+    reloaded = await mcp.routes[("GET", "/api/config")](JsonRequest())
+
+    assert saved.status_code == 200
+    assert saved_payload["restart_required"] is True
+    assert saved_payload["deployment"]["public_url"] == "https://ob.example"
+    assert saved_payload["deployment"]["public_url_effective"] == ""
+    reloaded_payload = _json(reloaded)
+    assert reloaded_payload["deployment"]["public_url"] == "https://ob.example"
+    assert reloaded_payload["deployment"]["public_url_effective"] == ""
+    assert reloaded_payload["restart_required"] is True
+    assert config_api.sh.config["deployment"] == {"profile": "advanced"}
+    persisted = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert persisted["deployment"] == {
+        "profile": "advanced",
+        "public_url": "https://ob.example",
+    }
+
+    cleared = await mcp.routes[("POST", "/api/config")](
+        JsonRequest({"deployment": {"public_url": ""}, "persist": True})
+    )
+    cleared_payload = _json(cleared)
+    persisted = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+    assert cleared_payload["deployment"]["public_url"] == ""
+    assert persisted["deployment"] == {"profile": "advanced"}
+
+
+@pytest.mark.asyncio
+async def test_dashboard_public_mcp_address_rejects_non_origin_without_mutation(
+    monkeypatch, tmp_path
+):
+    config_path = tmp_path / "config.yaml"
+    original = {"deployment": {"public_url": "https://safe.example"}}
+    config_path.write_text(yaml.safe_dump(original), encoding="utf-8")
+    monkeypatch.setattr(config_api.sh, "_require_auth", lambda _request: None)
+    monkeypatch.setattr(config_api.sh, "config", dict(original))
+    monkeypatch.setattr(utils, "config_file_path", lambda: str(config_path))
+    mcp = FakeMCP()
+    config_api.register(mcp)
+
+    response = await mcp.routes[("POST", "/api/config")](
+        JsonRequest(
+            {
+                "deployment": {"public_url": "https://safe.example/other?x=1"},
+                "persist": True,
+            }
+        )
+    )
+
+    assert response.status_code == 400
+    assert yaml.safe_load(config_path.read_text(encoding="utf-8")) == original
+    assert config_api.sh.config == original
+
+
+@pytest.mark.asyncio
+async def test_dashboard_public_mcp_address_write_failure_is_not_published_to_runtime(
+    monkeypatch
+):
+    runtime = {"deployment": {"public_url": "https://old.example"}}
+    monkeypatch.setattr(config_api.sh, "_require_auth", lambda _request: None)
+    monkeypatch.setattr(config_api.sh, "config", runtime)
+    monkeypatch.setattr(
+        config_api,
+        "atomic_update_config_yaml",
+        lambda _mutate: (_ for _ in ()).throw(OSError("read-only mount")),
+    )
+    mcp = FakeMCP()
+    config_api.register(mcp)
+
+    response = await mcp.routes[("POST", "/api/config")](
+        JsonRequest(
+            {
+                "deployment": {"public_url": "https://new.example/mcp"},
+                "persist": True,
+            }
+        )
+    )
+
+    assert response.status_code == 500
+    assert "persist failed" in _json(response)["error"]
+    assert runtime == {"deployment": {"public_url": "https://old.example"}}
 
 
 @pytest.mark.asyncio

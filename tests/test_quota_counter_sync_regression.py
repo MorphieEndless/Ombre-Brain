@@ -66,6 +66,43 @@ async def test_unpin_via_trace_frees_pinned_quota(bucket_mgr):
 
 
 @pytest.mark.asyncio
+async def test_trace_unpin_reserves_new_high_importance_slot(
+    bucket_mgr,
+    monkeypatch,
+):
+    """A pinned 10 starts consuming the ordinary high quota when unpinned."""
+    install_runtime(bucket_mgr)
+    monkeypatch.setattr("tools._common._HIGH_IMP_HARD_CAP", 1)
+    monkeypatch.setattr("tools._common._HIGH_IMP_SOFT_WARN", 1)
+
+    await bucket_mgr.create(content="existing high slot", importance=9)
+    pinned_id = await bucket_mgr.create(content="will be unpinned", pinned=True)
+
+    await trace_core(pinned_id, pinned=0)
+
+    unpinned = await bucket_mgr.get(pinned_id)
+    assert unpinned["metadata"]["pinned"] is False
+    assert unpinned["metadata"]["type"] == "dynamic"
+    assert unpinned["metadata"]["importance"] == 8
+    assert await count_high_importance() == 1
+
+
+@pytest.mark.asyncio
+async def test_trace_can_unpin_and_lower_importance_atomically(bucket_mgr):
+    install_runtime(bucket_mgr)
+    pinned_id = await bucket_mgr.create(content="lower while unpinning", pinned=True)
+
+    result = await trace_core(pinned_id, pinned=0, importance=7)
+
+    unpinned = await bucket_mgr.get(pinned_id)
+    assert "pinned=False" in result
+    assert "importance=7" in result
+    assert unpinned["metadata"]["pinned"] is False
+    assert unpinned["metadata"]["type"] == "dynamic"
+    assert unpinned["metadata"]["importance"] == 7
+
+
+@pytest.mark.asyncio
 async def test_permanent_type_does_not_occupy_pinned_quota(bucket_mgr):
     """旧根因锁死：解钉后桶留在 permanent 类型/目录，不得再占 pinned 配额。
 

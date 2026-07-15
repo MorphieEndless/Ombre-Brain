@@ -38,7 +38,11 @@ from ._verbatim import render_stored_bucket
 _FALLBACK_LOG_INTERVAL_SEC = 300
 _fallback_log_state = {"last_ts": 0.0, "suppressed": 0}
 _SURFACE_POLICY = SurfacePolicyVM.default()
-_BUDGET_NOTICE = "token 预算不足：下一条浮现记忆未被截断或摘要，请提高 max_tokens 后重试。"
+_BUDGET_NOTICE = (
+    "token 预算不足：有 {omitted} 条主要浮现记忆因放不下剩余预算而未返回；"
+    "已返回正文均保持完整，未截断或摘要。"
+    "当前约使用 {used}/{limit} token，如需被省略的整桶请提高 max_tokens 后重试。"
+)
 
 
 def _bucket_has_tags(meta: dict, tag_filter: list) -> bool:
@@ -50,6 +54,10 @@ def _bucket_has_tags(meta: dict, tag_filter: list) -> bool:
 
 def _can_surface(bucket: dict) -> bool:
     return _SURFACE_POLICY.evaluate_bucket(bucket, mode="spontaneous").allowed
+
+
+def _budget_notice(*, omitted: int, used: int, limit: int) -> str:
+    return _BUDGET_NOTICE.format(omitted=omitted, used=used, limit=limit)
 
 
 async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -> str:
@@ -78,7 +86,7 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
     pinned_ids = {b["id"] for b in pinned_buckets}
     pinned_results = []
     token_budget = max_tokens
-    budget_blocked = False
+    primary_omitted = 0
     for b in pinned_buckets:
         try:
             rendered, entry_tokens = render_stored_bucket(
@@ -86,8 +94,8 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
                 f"📌 [核心准则] [bucket_id:{b['id']}]",
             )
             if entry_tokens > token_budget:
-                budget_blocked = True
-                break
+                primary_omitted += 1
+                continue
             pinned_results.append(rendered)
             token_budget -= entry_tokens
         except Exception as e:
@@ -209,7 +217,7 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
     candidates = candidates[:max_results]
 
     dynamic_results = []
-    for b in (candidates if not budget_blocked else []):
+    for b in candidates:
         try:
             score = rt.decay_engine.calculate_score(b["metadata"])
             rendered, entry_tokens = render_stored_bucket(
@@ -217,8 +225,8 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
                 f"[权重:{score:.2f}] [bucket_id:{b['id']}]",
             )
             if entry_tokens > token_budget:
-                budget_blocked = True
-                break
+                primary_omitted += 1
+                continue
             dynamic_results.append(rendered)
             token_budget -= entry_tokens
         except Exception as e:
@@ -226,8 +234,12 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
             continue
 
     if not pinned_results and not dynamic_results:
-        if budget_blocked:
-            return _BUDGET_NOTICE
+        if primary_omitted:
+            return _budget_notice(
+                omitted=primary_omitted,
+                used=max_tokens - token_budget,
+                limit=max_tokens,
+            )
         if rt.mark_op:
             rt.mark_op("breath_empty")
         stats = await rt.bucket_mgr.get_stats()
@@ -269,7 +281,7 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
                     cond_b = False
             if cond_a or cond_b:
                 passive_pool.append(b)
-        if passive_pool and not budget_blocked:
+        if passive_pool and not primary_omitted:
             random.shuffle(passive_pool)
             for b in passive_pool[:2]:
                 try:
@@ -278,8 +290,7 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
                         f"💤 [久未浮现] [bucket_id:{b['id']}]",
                     )
                     if entry_tokens > token_budget:
-                        budget_blocked = True
-                        break
+                        continue
                     passive_results.append(rendered)
                     token_budget -= entry_tokens
                 except Exception as e:
@@ -291,7 +302,7 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
     # 设计意图：让已解决的记忆有小概率重新出现，制造"忽然想起"的温度。
     # 与无结果兜底逻辑并存；不替换主流程。
     dream_results: list[str] = []
-    if not budget_blocked and random.random() < 0.03:
+    if not primary_omitted and random.random() < 0.03:
         try:
             shown_ids = {b["id"] for b in candidates}
             resolved_pool = [
@@ -311,8 +322,7 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
                             f"✨ [偶遇] [bucket_id:{b['id']}]",
                         )
                         if entry_tokens > token_budget:
-                            budget_blocked = True
-                            break
+                            continue
                         dream_results.append(rendered)
                         token_budget -= entry_tokens
                         rt.logger.info(f"Dream surface triggered / 偶遇机制触发: {b['id']}")
@@ -330,6 +340,12 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
         parts.append("=== 久未浮现 ===\n" + "\n---\n".join(passive_results))
     if dream_results:
         parts.append("=== 偶然想起 ===\n" + "\n---\n".join(dream_results))
-    if budget_blocked:
-        parts.append(_BUDGET_NOTICE)
+    if primary_omitted:
+        parts.append(
+            _budget_notice(
+                omitted=primary_omitted,
+                used=max_tokens - token_budget,
+                limit=max_tokens,
+            )
+        )
     return "\n\n".join(parts)

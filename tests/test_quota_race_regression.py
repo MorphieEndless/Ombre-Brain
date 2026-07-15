@@ -13,7 +13,7 @@ import asyncio
 import pytest
 
 import tools._runtime as rt
-from tools._common import count_high_importance, count_pinned
+from tools._common import count_high_importance, count_pinned, merge_or_create
 from tools.hold.pinned import store_pinned
 from tools.trace.core import trace_core
 
@@ -85,6 +85,44 @@ async def test_concurrent_trace_promote_does_not_exceed_cap(bucket_mgr, monkeypa
         if b["metadata"]["importance"] == 9:
             promoted += 1
     assert promoted == 1, f"应该只有 1 个并发 trace 真正提到 9，实际 {promoted} 个"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_distinct_hold_creates_do_not_exceed_high_cap(
+    bucket_mgr,
+    monkeypatch,
+):
+    install_runtime(bucket_mgr)
+    monkeypatch.setattr("tools._common._HIGH_IMP_HARD_CAP", 3)
+    monkeypatch.setattr("tools._common._HIGH_IMP_SOFT_WARN", 3)
+
+    for i in range(2):
+        await bucket_mgr.create(content=f"existing high hold {i}", importance=9)
+
+    await asyncio.gather(*[
+        merge_or_create(
+            content=f"distinct concurrent hold {i}",
+            tags=[],
+            importance=9,
+            domain=["并发"],
+            valence=0.5,
+            arousal=0.5,
+            raw_merge=True,
+            source_tool="hold",
+        )
+        for i in range(5)
+    ])
+
+    assert await count_high_importance() == 3
+    created = [
+        bucket
+        for bucket in await bucket_mgr.list_all(include_archive=False)
+        if bucket["content"].startswith("distinct concurrent hold")
+    ]
+    assert sum(
+        int(bucket["metadata"].get("importance") or 0) >= 9
+        for bucket in created
+    ) == 1
 
 
 @pytest.mark.asyncio

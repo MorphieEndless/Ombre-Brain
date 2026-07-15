@@ -9,9 +9,12 @@ web/embedding.py — 向量化后端摘要 / 迁移重算 / 本地 Ollama 模型
 """
 
 import asyncio
+import contextvars
+import functools
 import os
 import httpx
 import json as _json_lib
+import threading
 
 from starlette.requests import Request
 from starlette.responses import Response
@@ -59,6 +62,128 @@ _OLLAMA_MIRRORS = {
 
 _ollama_pull_state: dict = {"running": False, "model": "", "percent": 0, "status": "idle", "error": ""}
 _ollama_pull_task: "asyncio.Task | None" = None  # 持有引用防止被 GC
+_ollama_pull_lock = threading.Lock()
+_ollama_pull_owner_guard = threading.Lock()
+_ollama_pull_owner: object | None = None
+_ollama_pull_request_state: contextvars.ContextVar[dict | None] = (
+    contextvars.ContextVar("ombre_ollama_pull_request_state", default=None)
+)
+_migration_request_state: contextvars.ContextVar[dict | None] = (
+    contextvars.ContextVar("ombre_embedding_migration_request_state", default=None)
+)
+
+
+def _reserve_ollama_pull() -> object | None:
+    """Atomically reserve the one process-wide Ollama pull slot."""
+
+    global _ollama_pull_owner
+    if not _ollama_pull_lock.acquire(blocking=False):
+        return None
+    owner = object()
+    with _ollama_pull_owner_guard:
+        _ollama_pull_owner = owner
+    return owner
+
+
+def _owns_ollama_pull(owner: object) -> bool:
+    with _ollama_pull_owner_guard:
+        return _ollama_pull_owner is owner
+
+
+def _release_ollama_pull(owner: object) -> bool:
+    global _ollama_pull_owner
+    with _ollama_pull_owner_guard:
+        if _ollama_pull_owner is not owner:
+            return False
+        _ollama_pull_owner = None
+        _ollama_pull_lock.release()
+    return True
+
+
+def _with_migration_reservation(handler):
+    """Reserve migration ownership before the route's first await.
+
+    The reservation remains request-owned during target construction, stale
+    staging cleanup, provider probing, and outbox shutdown.  Once the worker is
+    created, ``start_migration`` owns the same token until its ``finally``.
+    """
+
+    @functools.wraps(handler)
+    async def _wrapped(request: Request) -> Response:
+        from starlette.responses import JSONResponse
+
+        err = sh._require_auth(request)
+        if err:
+            return err
+        try:
+            from migration_engine import (  # type: ignore
+                release_migration_reservation,
+                reserve_migration,
+            )
+        except ImportError:
+            from ..migration_engine import (
+                release_migration_reservation,
+                reserve_migration,
+            )
+
+        reservation = reserve_migration()
+        if reservation is None:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": "另一个迁移任务正在进行；请稍后再试或等其完成",
+                },
+                status_code=409,
+            )
+
+        state = {"reservation": reservation, "transferred": False}
+        context_token = _migration_request_state.set(state)
+        try:
+            return await handler(request)
+        finally:
+            _migration_request_state.reset(context_token)
+            if not state["transferred"]:
+                release_migration_reservation(reservation)
+
+    return _wrapped
+
+
+def _with_ollama_pull_reservation(handler):
+    """Reserve the Ollama pull slot before parsing the request body."""
+
+    @functools.wraps(handler)
+    async def _wrapped(request: Request) -> Response:
+        from starlette.responses import JSONResponse
+
+        err = sh._require_auth(request)
+        if err:
+            return err
+        owner = _reserve_ollama_pull()
+        if owner is None:
+            return JSONResponse(
+                {"ok": False, "error": "已有拉取任务在进行中"},
+                status_code=409,
+            )
+
+        global _ollama_pull_state
+        _ollama_pull_state = {
+            "running": True,
+            "model": "",
+            "percent": 0,
+            "status": "validating",
+            "error": "",
+        }
+        state = {"owner": owner, "transferred": False}
+        context_token = _ollama_pull_request_state.set(state)
+        try:
+            return await handler(request)
+        finally:
+            _ollama_pull_request_state.reset(context_token)
+            if not state["transferred"] and _owns_ollama_pull(owner):
+                _ollama_pull_state["running"] = False
+                _release_ollama_pull(owner)
+
+    return _wrapped
 
 # --- backfill（只补缺失向量，区别于 migrate 全库重算）---
 # 用途：v2.2 前建的桶（尤其 permanent）可能没有向量，
@@ -84,9 +209,18 @@ def _ollama_base() -> str:
     return raw.rstrip("/").removesuffix("/v1").rstrip("/")
 
 
-async def _ollama_pull_run(ollama_url: str, name: str) -> None:
+async def _ollama_pull_run(
+    ollama_url: str,
+    name: str,
+    *,
+    reservation: object | None = None,
+) -> None:
     """后台流式拉模型，进度写入 _ollama_pull_state。"""
     global _ollama_pull_state
+    owner = reservation or _reserve_ollama_pull()
+    if owner is None or not _owns_ollama_pull(owner):
+        logger.info("[ollama] another model pull already owns the slot; skip")
+        return
     _ollama_pull_state = {"running": True, "model": name, "percent": 0, "status": "starting", "error": ""}
     try:
         # trust_env=False：本地/容器 ollama 不走系统代理（否则 Clash/V2Ray 开着会 502）
@@ -122,8 +256,15 @@ async def _ollama_pull_run(ollama_url: str, name: str) -> None:
                         _ollama_pull_state.update(running=False, status="success", percent=100)
                         return
         _ollama_pull_state["running"] = False
+    except asyncio.CancelledError:
+        _ollama_pull_state.update(running=False, status="cancelled")
+        raise
     except Exception as e:
         _ollama_pull_state.update(running=False, status="error", error=str(e)[:200])
+    finally:
+        if _owns_ollama_pull(owner):
+            _ollama_pull_state["running"] = False
+            _release_ollama_pull(owner)
 
 
 async def _backfill_run() -> None:
@@ -266,6 +407,7 @@ def register(mcp) -> None:
         return JSONResponse(info)
 
     @mcp.custom_route("/api/embedding/migrate", methods=["POST"])
+    @_with_migration_reservation
     async def api_embedding_migrate(request: Request) -> Response:
         """启动后台迁移任务：用目标后端重算所有 bucket 的 embedding。
 
@@ -280,9 +422,6 @@ def register(mcp) -> None:
         已有任务在跑返回 409。
         """
         from starlette.responses import JSONResponse
-        err = sh._require_auth(request)
-        if err:
-            return err
 
         try:
             body = await sh._read_json_object(request)
@@ -315,22 +454,16 @@ def register(mcp) -> None:
 
         try:
             from migration_engine import (  # type: ignore
-                MigrationConfig, start_migration, is_running,
+                MigrationConfig, start_migration,
                 status_path_for as _mig_status_path_for,
                 staging_db_path_for, reset_stale_migration_state, target_signature,
             )
         except ImportError:
             from .migration_engine import (  # type: ignore
-                MigrationConfig, start_migration, is_running,
+                MigrationConfig, start_migration,
                 status_path_for as _mig_status_path_for,
                 staging_db_path_for, reset_stale_migration_state, target_signature,
             )
-
-        if is_running():
-            return JSONResponse({
-                "ok": False,
-                "error": "另一个迁移任务正在进行；请稍后再试或等其完成",
-            }, status_code=409)
 
         # 构造目标引擎（不替换 global，跑完才替）
         target_cfg = _json_lib.loads(_json_lib.dumps(sh.config))  # 深拷贝
@@ -485,16 +618,29 @@ def register(mcp) -> None:
 
         # Migration rewrites the same SQLite index. Stop the normal queue
         # worker for the migration window, then restart it in the callback.
-        if outbox_was_running:
-            await outbox.stop()
-
-        task = start_migration(mig_cfg, on_complete=_on_complete)
+        request_state = _migration_request_state.get()
+        if request_state is None:  # pragma: no cover - decorator invariant
+            raise RuntimeError("migration route lost its reservation")
+        try:
+            if outbox_was_running:
+                await outbox.stop()
+            task = start_migration(
+                mig_cfg,
+                on_complete=_on_complete,
+                reservation=request_state["reservation"],
+            )
+        except BaseException:
+            # A request cancellation during ``outbox.stop()`` must not leave
+            # the normal index writer disabled after the reservation unwinds.
+            _restart_outbox()
+            raise
         if task is None:
             _restart_outbox()
             return JSONResponse({
                 "ok": False,
                 "error": "无法启动迁移任务（锁未获得）",
             }, status_code=409)
+        request_state["transferred"] = True
 
         return JSONResponse({
             "ok": True,
@@ -625,14 +771,10 @@ def register(mcp) -> None:
         return JSONResponse(out)
 
     @mcp.custom_route("/api/embedding/local/pull", methods=["POST"])
+    @_with_ollama_pull_reservation
     async def api_embedding_local_pull(request: Request) -> Response:
         """触发后台拉模型。body: {model?: 'bge-m3', mirror?: 'official'|'modelscope'|<自定义前缀>}。"""
         from starlette.responses import JSONResponse
-        err = sh._require_auth(request)
-        if err:
-            return err
-        if _ollama_pull_state.get("running"):
-            return JSONResponse({"ok": False, "error": "已有拉取任务在进行中"}, status_code=409)
         try:
             body = await request.json()
         except Exception:
@@ -651,16 +793,32 @@ def register(mcp) -> None:
         prefix = _OLLAMA_MIRRORS.get(mirror_raw, mirror_raw if mirror_raw not in ("", "official") else "")
         name = f"{prefix}{model}" if prefix else model
         base = _ollama_base()
+        _ollama_pull_state.update(model=name, status="checking")
         # 可达性预检，避免后台任务静默失败
         try:
             async with httpx.AsyncClient(timeout=5.0, trust_env=False) as c:
                 vr = await c.get(f"{base}/api/version")
                 vr.raise_for_status()
         except Exception as e:
+            _ollama_pull_state.update(
+                running=False,
+                status="error",
+                error=str(e)[:200],
+            )
             return JSONResponse({"ok": False, "error": f"无法连接 ollama（{base}）：{str(e)[:120]}"}, status_code=502)
         import asyncio as _aio
         global _ollama_pull_task
-        _ollama_pull_task = _aio.create_task(_ollama_pull_run(base, name))
+        request_state = _ollama_pull_request_state.get()
+        if request_state is None:  # pragma: no cover - decorator invariant
+            raise RuntimeError("Ollama pull route lost its reservation")
+        _ollama_pull_task = _aio.create_task(
+            _ollama_pull_run(
+                base,
+                name,
+                reservation=request_state["owner"],
+            )
+        )
+        request_state["transferred"] = True
         return JSONResponse({"ok": True, "started": True, "pulling": name})
 
     @mcp.custom_route("/api/embedding/local/pull/status", methods=["GET"])

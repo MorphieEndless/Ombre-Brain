@@ -29,11 +29,13 @@ bucket_manager.py — 记忆桶的增删改查与多维索引
 import os
 import re
 import asyncio
+import hashlib
+import json
 import logging
 import math
-import shutil
 import threading
 import time
+import tempfile
 import uuid
 from contextlib import asynccontextmanager
 from datetime import date, datetime
@@ -49,51 +51,134 @@ except Exception:
             return None
 
 
+class _CrossLoopAsyncLock:
+    """An async mutex that is safe across FastMCP event loops and threads."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+
+    async def __aenter__(self):
+        while not self._lock.acquire(blocking=False):
+            await asyncio.sleep(0.01)
+        return self
+
+    async def __aexit__(self, _exc_type, _exc, _tb) -> None:
+        self._lock.release()
+
+
 @asynccontextmanager
 async def _filesystem_turn(base_dir: str, key: str, timeout_seconds: float = 30.0):
-    """Cross-thread/cross-loop mutual exclusion via atomic lock-file creation.
+    """Cross-thread/cross-loop/process mutual exclusion via an OS file lease.
 
     A plain ``asyncio.Lock`` only serializes tasks scheduled on the same event
     loop; FastMCP may dispatch requests from different loops/threads (see the
     identical rationale in tools/_common.py's ``_filesystem_content_turn``), so
     quota check-then-write sequences (anchor's 24-cap) need an OS-level guard
     instead of an in-process one.
+
+    The kernel owns the lease for as long as this context keeps its descriptor
+    open.  This has two important properties that an mtime-based lock file does
+    not: a slow live operation can never have its lock stolen after an arbitrary
+    age, while a crashed process releases the lease automatically.  The key is
+    hashed before it becomes a filename, so an untrusted bucket id cannot escape
+    ``.locks`` or create nested paths.
     """
     if not base_dir:
         yield
         return
     lock_dir = Path(base_dir) / ".locks"
     lock_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = lock_dir / f"{key}.lock"
+    lock_id = hashlib.sha256(str(key).encode("utf-8", errors="surrogatepass")).hexdigest()
+    lock_path = lock_dir / f"{lock_id}.lock"
     token = f"{os.getpid()}:{threading.get_ident()}:{uuid.uuid4().hex}"
-    stale_seconds = 60.0
     deadline = time.monotonic() + timeout_seconds
-    acquired = False
-    while not acquired:
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(lock_path, flags, 0o600)
+    handle = os.fdopen(descriptor, "r+b", buffering=0)
+
+    # Windows byte-range locks require the byte to exist.  Creating it before
+    # attempting the lease is harmless on POSIX, where flock locks the file.
+    handle.seek(0, os.SEEK_END)
+    if handle.tell() == 0:
+        handle.write(b"\0")
+    handle.seek(0)
+
+    def _try_acquire() -> bool:
         try:
-            descriptor = os.open(lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        except FileExistsError:
-            try:
-                if time.time() - lock_path.stat().st_mtime > stale_seconds:
-                    lock_path.unlink(missing_ok=True)
-                    continue
-            except OSError:
-                pass
-            if time.monotonic() >= deadline:
-                raise TimeoutError(f"timed out waiting for {key} lock")
-            await asyncio.sleep(0.01)
-        else:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(token)
-            acquired = True
+            if os.name == "nt":  # pragma: no branch - platform-specific
+                import msvcrt
+
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:  # pragma: no cover - exercised in Linux CI/container
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except (BlockingIOError, OSError):
+            return False
+
+    def _release() -> None:
+        if os.name == "nt":  # pragma: no branch - platform-specific
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:  # pragma: no cover - exercised in Linux CI/container
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+    acquired = False
     try:
+        while not acquired:
+            acquired = _try_acquire()
+            if acquired:
+                break
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"timed out waiting for filesystem lease {lock_id}")
+            await asyncio.sleep(0.01)
+
+        owner = json.dumps(
+            {
+                "state": "held",
+                "token": token,
+                "pid": os.getpid(),
+                "thread": threading.get_ident(),
+                "acquired_at": time.time(),
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        handle.seek(0)
+        handle.write(owner)
+        handle.truncate()
         yield
     finally:
         try:
-            if lock_path.read_text(encoding="utf-8") == token:
-                lock_path.unlink(missing_ok=True)
+            if acquired:
+                released = json.dumps(
+                    {
+                        "state": "released",
+                        "token": token,
+                        "pid": os.getpid(),
+                        "released_at": time.time(),
+                    },
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                ).encode("ascii")
+                handle.seek(0)
+                handle.write(released)
+                handle.truncate()
+                _release()
         except OSError:
             pass
+        finally:
+            handle.close()
 
 
 def _clamp_importance(v, source: str) -> int:
@@ -166,6 +251,35 @@ logger = logging.getLogger("ombre_brain.bucket")
 _atomic_write_text = atomic_write_text  # Backward-compatible private alias.
 
 
+def _atomic_create_text(path: str, text: str) -> None:
+    """Publish a complete text file atomically, refusing an existing target.
+
+    ``atomic_write_text`` intentionally replaces its destination, which is the
+    right behavior for updates but unsafe for creation races.  Build the full
+    file beside the destination and publish it with a hard link: link creation
+    is atomic and fails with ``FileExistsError`` instead of overwriting.
+    """
+
+    target = os.path.abspath(path)
+    parent = os.path.dirname(target)
+    os.makedirs(parent, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{os.path.basename(target)}.create.",
+        dir=parent,
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.link(temporary, target)
+    finally:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+
+
 # ============================================================
 # 调参面板 / Tunable constants
 # ------------------------------------------------------------
@@ -179,6 +293,10 @@ _DEFAULT_AROUSAL = 0.3
 _DEFAULT_IMPORTANCE = 5
 _PINNED_IMPORTANCE = 10           # pinned/protected 桶 importance 锁定值
 _DEFAULT_DOMAIN_NAME = "未分类"     # 未提供 domain 时的占位
+_EDITABLE_BUCKET_TYPES = frozenset(
+    {"dynamic", "permanent", "feel", "plan", "letter", "i", "self"}
+)
+_PLAN_STATUSES = frozenset({"active", "resolved", "abandoned"})
 
 # --- 字段截断长度（避免 frontmatter 肨胀）---
 _SOURCE_TOOL_MAX = 32
@@ -224,6 +342,8 @@ _METADATA_TEXT_LIMITS = {
 _RIPPLE_HOURS = 48.0       # ±该小时内的桶被轻微唤醒
 _RIPPLE_MAX_BUCKETS = 5    # 一次 touch 最多唤醒几个邻居（有界 I/O）
 _RIPPLE_BOOST = 0.3        # 唤醒时 activation_count 增量
+_MAX_METADATA_DEPTH = 16
+_MAX_METADATA_NODES = 10_000
 
 # --- search 评分 ---
 _VECTOR_TOPK = 50          # embedding 预取 top_k（仅作 semantic 分源，不窄化候选集）
@@ -283,26 +403,6 @@ class BucketManager:
         self.fuzzy_threshold = config.get("matching", {}).get("fuzzy_threshold", 50)
         self.max_results = config.get("matching", {}).get("max_results", 5)
 
-        # --- Wikilink config / 双链配置 ---
-        wikilink_cfg = config.get("wikilink", {})
-        self.wikilink_enabled = wikilink_cfg.get("enabled", True)
-        self.wikilink_use_tags = wikilink_cfg.get("use_tags", False)
-        self.wikilink_use_domain = wikilink_cfg.get("use_domain", True)
-        self.wikilink_use_auto_keywords = wikilink_cfg.get("use_auto_keywords", True)
-        self.wikilink_auto_top_k = wikilink_cfg.get("auto_top_k", 8)
-        self.wikilink_min_len = wikilink_cfg.get("min_keyword_len", 2)
-        self.wikilink_exclude_keywords = set(wikilink_cfg.get("exclude_keywords", []))
-        self.wikilink_stopwords = {
-            "的", "了", "在", "是", "我", "有", "和", "就", "不", "人",
-            "都", "一个", "上", "也", "很", "到", "说", "要", "去",
-            "你", "会", "着", "没有", "看", "好", "自己", "这", "他", "她",
-            "我们", "你们", "他们", "然后", "今天", "昨天", "明天", "一下",
-            "the", "and", "for", "are", "but", "not", "you", "all", "can",
-            "had", "her", "was", "one", "our", "out", "has", "have", "with",
-            "this", "that", "from", "they", "been", "said", "will", "each",
-        }
-        self.wikilink_stopwords |= {w.lower() for w in self.wikilink_exclude_keywords}
-
         # --- Search scoring weights / 检索权重配置 ---
         scoring = config.get("scoring_weights", {})
         self.w_topic = scoring.get("topic_relevance", 4.0)
@@ -334,7 +434,16 @@ class BucketManager:
         # Active-bucket cache and its on-disk fingerprint are invalidated after writes.
         self._active_cache: "list[dict] | None" = None
         self._active_file_state: dict[str, tuple[int, int]] = {}
-        self._active_cache_lock = asyncio.Lock()
+        self._active_cache_state_guard = threading.RLock()
+        self._active_cache_generation = 0
+        self._active_cache_lock = _CrossLoopAsyncLock()
+        # Synchronous CRUD paths ask for IDs repeatedly.  A complete index
+        # turns migration conflict/apply checks from O(imported × vault) into
+        # one O(vault) build plus O(1) lookups.  Managed writes invalidate it;
+        # external changes do so when the normal vault poll observes them.
+        self._bucket_path_index_guard = threading.RLock()
+        self._bucket_path_index: dict[str, str] = {}
+        self._bucket_path_index_ready = False
         # 见 _bucket_turn：archive()/update()/delete()/touch() 各自独立做
         # find_file → load → mutate → atomic_write，互不知会。并发命中同一个
         # bucket_id 时（比如衰减引擎后台 archive() 撞上一次 trace/hold 的
@@ -492,12 +601,18 @@ class BucketManager:
                     yield root, fname, os.path.join(root, fname)
 
     @staticmethod
-    def _primary_domain(domain: list[str] | None) -> str:
+    def _primary_domain(domain: list[str] | str | None) -> str:
         """取 domain[0] 作为主域子目录名，空/缺失 → 默认 ``未分类``。
 
         在 create / _move_bucket / archive 三处使用。sanitize_name 后才能当路径用。
         """
-        return sanitize_name(domain[0]) if domain else _DEFAULT_DOMAIN_NAME
+        if isinstance(domain, str):
+            primary = domain.strip()
+        elif domain:
+            primary = str(domain[0]).strip()
+        else:
+            primary = ""
+        return sanitize_name(primary) if primary else _DEFAULT_DOMAIN_NAME
 
     def _max_bucket_bytes(self) -> int:
         raw = (self.config.get("limits") or {}).get(
@@ -690,10 +805,15 @@ class BucketManager:
 
         名字沿用历史（各写路径已在调它），实际是「集合变更」的统一失效钩子。
         """
-        self._bm25_dirty = True
-        self._active_cache = None
-        self._active_file_state = {}
-        self._last_file_state_check = 0.0
+        with self._active_cache_state_guard:
+            self._active_cache_generation += 1
+            self._bm25_dirty = True
+            self._active_cache = None
+            self._active_file_state = {}
+            self._last_file_state_check = 0.0
+        with self._bucket_path_index_guard:
+            self._bucket_path_index_ready = False
+            self._bucket_path_index = {}
 
     def _cache_bump(
         self,
@@ -704,31 +824,37 @@ class BucketManager:
         file_path: str = "",
     ) -> None:
         """touch/ripple 只改了某桶的激活字段（集合没变）→ 就地更新缓存，不清整表。"""
-        if self._active_cache is None:
-            return
-        for b in self._active_cache:
-            if b.get("id") == bucket_id:
-                m = b.get("metadata")
-                if isinstance(m, dict):
-                    if last_active is not None:
-                        m["last_active"] = last_active
-                    if activation_count is not None:
-                        m["activation_count"] = activation_count
-                break
-        if file_path:
-            self._refresh_cached_file_state(file_path)
+        with self._active_cache_state_guard:
+            # Even with no published cache, a concurrent builder may have
+            # parsed the pre-touch file.  Bumping the generation makes its
+            # eventual publish fail the CAS and forces a rescan.
+            self._active_cache_generation += 1
+            if self._active_cache is None:
+                return
+            for b in self._active_cache:
+                if b.get("id") == bucket_id:
+                    m = b.get("metadata")
+                    if isinstance(m, dict):
+                        if last_active is not None:
+                            m["last_active"] = last_active
+                        if activation_count is not None:
+                            m["activation_count"] = activation_count
+                    break
+            if file_path:
+                self._refresh_cached_file_state(file_path)
 
     def _refresh_cached_file_state(self, file_path: str) -> None:
         """Acknowledge an internal in-place write without invalidating the cache."""
-        if self._active_cache is None:
-            return
-        normalized = os.path.normcase(os.path.abspath(file_path))
-        try:
-            stat = os.stat(file_path)
-            self._active_file_state[normalized] = (stat.st_mtime_ns, stat.st_size)
-        except OSError:
-            self._active_file_state.pop(normalized, None)
-        self._last_file_state_check = time.monotonic()
+        with self._active_cache_state_guard:
+            if self._active_cache is None:
+                return
+            normalized = os.path.normcase(os.path.abspath(file_path))
+            try:
+                stat = os.stat(file_path)
+                self._active_file_state[normalized] = (stat.st_mtime_ns, stat.st_size)
+            except OSError:
+                self._active_file_state.pop(normalized, None)
+            self._last_file_state_check = time.monotonic()
 
     def _scan_active_file_state(self) -> dict[str, tuple[int, int]]:
         """Return a cheap metadata fingerprint for every active Markdown file."""
@@ -745,12 +871,13 @@ class BucketManager:
         return state
 
     def external_change_status(self) -> dict[str, Any]:
-        return {
-            "poll_seconds": self.external_change_poll_seconds,
-            "detected": self._external_changes_detected,
-            "last_detected": self._last_external_change,
-            "cached_files": len(self._active_file_state),
-        }
+        with self._active_cache_state_guard:
+            return {
+                "poll_seconds": self.external_change_poll_seconds,
+                "detected": self._external_changes_detected,
+                "last_detected": self._last_external_change,
+                "cached_files": len(self._active_file_state),
+            }
 
     def _reconcile_external_changes(
         self,
@@ -923,26 +1050,16 @@ class BucketManager:
         if name:
             name = self._sanitize_text(name)
 
-        # --- iter 2.0: 允许调用方提供可读 bucket_id（feel 分钟级命名等）---
-        # 冲突时追加 ``_<ss>``（秒），再冲突追加 ``_<2hex>`` 随机后缀，
-        # 兜底用纯 UUID，保证不会无限循环。
-        if bucket_id_override:
-            candidate = sanitize_name(bucket_id_override) or generate_bucket_id()
-            bucket_id = candidate
-            if self._find_bucket_file(bucket_id):
-                ss = datetime.now().strftime("%S")
-                bucket_id = f"{candidate}_{ss}"
-                tries = 0
-                while self._find_bucket_file(bucket_id) and tries < 5:
-                    bucket_id = f"{candidate}_{uuid.uuid4().hex[:2]}"
-                    tries += 1
-                if self._find_bucket_file(bucket_id):
-                    logger.warning(
-                        f"bucket_id_override '{candidate}' 反复冲突，回落到随机 id"
-                    )
-                    bucket_id = generate_bucket_id()
-        else:
-            bucket_id = generate_bucket_id()
+        # Candidate selection is finalized immediately before the no-overwrite
+        # write while holding that exact ID's normal bucket turn.  The value
+        # here is provisional so metadata normalization can include a useful
+        # source label without doing an unsafe check-then-write.
+        preferred_bucket_id = (
+            sanitize_name(bucket_id_override) or generate_bucket_id()
+            if bucket_id_override
+            else generate_bucket_id()
+        )
+        bucket_id = preferred_bucket_id
         # 桶名 = "YYYY-MM-DD HH-MM-SS [LLM生成的标题]"，无标题时仅用时间戳。
         # 使用连字符替代冒号，避免 sanitize_name 后续编辑时把冒号去掉破坏可读性。
         _ts = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
@@ -1024,10 +1141,6 @@ class BucketManager:
         meaning_item = self._normalize_meaning_item(meaning)
         if meaning_item:
             metadata["meaning"] = [meaning_item]
-        persisted_media = await self.media_store.persist(bucket_id, media)
-        normalized_media = self._normalize_media(persisted_media)
-        if normalized_media:
-            metadata["media"] = normalized_media
         # --- iter 1.8: plan 的「承诺重量」0.0-1.0，与 importance 不同 ---
         # importance = 这件事多重要；weight = 这件事压在我心头多重。
         if bucket_type == "plan" and weight is not None:
@@ -1062,10 +1175,6 @@ class BucketManager:
                 # 失败不阻塞写入主流程
                 logger.warning(f"first_of_kind check failed / 首次标记检测失败: {e}")
 
-        # --- Assemble Markdown file (frontmatter + body) ---
-        # --- 组装 Markdown 文件 ---
-        post = frontmatter.Post(linked_content, **metadata)  # type: ignore[arg-type]
-
         # --- Choose directory by type + primary domain ---
         # --- 按类型 + 主题域选择存储目录 ---
         if bucket_type == "permanent" or pinned:
@@ -1089,19 +1198,70 @@ class BucketManager:
         target_dir = os.path.join(type_dir, primary_domain)
         os.makedirs(target_dir, exist_ok=True)
 
-        # --- Filename: readable_name_bucketID.md (Obsidian friendly) ---
-        # --- 文件名：可读名称_桶ID.md ---
-        if bucket_name and bucket_name != bucket_id:
-            filename = f"{bucket_name}_{bucket_id}.md"
-        else:
-            filename = f"{bucket_id}.md"
-        file_path = safe_path(target_dir, filename)
+        def _candidate_ids():
+            yield preferred_bucket_id
+            if bucket_id_override:
+                yield f"{preferred_bucket_id}_{datetime.now().strftime('%S')}"
+                for _attempt in range(5):
+                    yield f"{preferred_bucket_id}_{uuid.uuid4().hex[:2]}"
+            while True:
+                yield generate_bucket_id()
 
-        try:
-            _atomic_write_text(file_path, frontmatter.dumps(post))
-        except OSError as e:
-            logger.error(f"Failed to write bucket file / 写入桶文件失败: {file_path}: {e}")
-            raise
+        # Finalize the ID, persist any ID-keyed media and publish the Markdown
+        # while holding the same turn used by update/migrate/delete.  The
+        # second existence check closes the former create-vs-migrate TOCTOU.
+        collision_count = 0
+        for candidate_id in _candidate_ids():
+            async with self._bucket_turn(candidate_id):
+                if self._find_bucket_file(candidate_id):
+                    collision_count += 1
+                    continue
+
+                if bucket_name and bucket_name != candidate_id:
+                    filename = f"{bucket_name}_{candidate_id}.md"
+                else:
+                    filename = f"{candidate_id}.md"
+                candidate_path = safe_path(target_dir, filename)
+                if os.path.exists(candidate_path):
+                    collision_count += 1
+                    continue
+
+                bucket_id = candidate_id
+                metadata["id"] = bucket_id
+                metadata.pop("media", None)
+                persisted_media = await self.media_store.persist(bucket_id, media)
+                normalized_media = self._normalize_media(persisted_media)
+                if normalized_media:
+                    metadata["media"] = normalized_media
+
+                post = frontmatter.Post(  # type: ignore[arg-type]
+                    linked_content,
+                    **metadata,
+                )
+                try:
+                    _atomic_create_text(candidate_path, frontmatter.dumps(post))
+                except FileExistsError:
+                    # An unmanaged writer may not honor the bucket turn.  The
+                    # no-overwrite publish still protects its file; choose a
+                    # fresh ID instead of replacing it.
+                    collision_count += 1
+                    continue
+                except OSError as e:
+                    logger.error(
+                        "Failed to write bucket file / 写入桶文件失败: "
+                        "%s: %s",
+                        candidate_path,
+                        e,
+                    )
+                    raise
+                break
+
+        if collision_count > 6:
+            logger.warning(
+                "bucket_id_override %r repeatedly conflicted; used random id %s",
+                preferred_bucket_id,
+                bucket_id,
+            )
 
         logger.info(
             f"Created bucket / 创建记忆桶: {bucket_id} ({bucket_name}) → {primary_domain}/"
@@ -1204,15 +1364,197 @@ class BucketManager:
             logger.info(f"Moved bucket / 移动记忆桶: {filename} → {target_dir}/")
         return str(new_path)
 
+    def _bucket_target_path(
+        self,
+        file_path: str,
+        bucket_type: str,
+        domain: Optional[list[str]] = None,
+        status: str = "",
+    ) -> str:
+        """Return the canonical storage path for an editable bucket type.
+
+        The frontmatter ``type`` is the logical source of truth, but the vault
+        layout is part of the public Obsidian contract too.  Keeping this
+        mapping in one place prevents dashboard edits from changing metadata
+        without moving the Markdown file.
+        """
+        normalized_type = str(bucket_type or "dynamic").strip().lower()
+        if normalized_type not in _EDITABLE_BUCKET_TYPES:
+            raise ValueError(f"unsupported editable bucket type: {normalized_type}")
+
+        if normalized_type == "permanent":
+            type_dir = self.permanent_dir
+            subdir = self._primary_domain(domain)
+        elif normalized_type == "feel":
+            type_dir = self.feel_dir
+            subdir = "沉淀物"
+        elif normalized_type == "plan":
+            type_dir = self.plan_dir
+            normalized_status = str(status or "active").strip().lower()
+            subdir = normalized_status if normalized_status in _PLAN_STATUSES else "active"
+        elif normalized_type == "letter":
+            type_dir = self.letter_dir
+            subdir = "history"
+        else:
+            # ``i`` / ``self`` are private logical channels, not separate
+            # physical stores.  They intentionally live under dynamic/<domain>.
+            type_dir = self.dynamic_dir
+            subdir = self._primary_domain(domain)
+
+        target_dir = os.path.join(type_dir, subdir)
+        os.makedirs(target_dir, exist_ok=True)
+        return str(safe_path(target_dir, os.path.basename(file_path)))
+
+    @staticmethod
+    def _same_path(left: str, right: str) -> bool:
+        return os.path.normcase(os.path.abspath(left)) == os.path.normcase(
+            os.path.abspath(right)
+        )
+
+    def _commit_bucket_update(
+        self,
+        file_path: str,
+        target_path: str,
+        serialized: str,
+    ) -> str:
+        """Commit an update without leaving type/path split-brain on failure.
+
+        In-place edits use the normal atomic writer.  A directory migration is
+        copy-on-commit: atomically write the complete new file at its canonical
+        destination, then remove the untouched source.  If source removal
+        fails, delete the new copy and keep the original as the sole truth.
+        Existing destination files are never overwritten.
+        """
+        if self._same_path(file_path, target_path):
+            _atomic_write_text(file_path, serialized)
+            return file_path
+
+        if os.path.exists(target_path):
+            raise FileExistsError(
+                f"bucket migration target already exists: {target_path}"
+            )
+
+        _atomic_write_text(target_path, serialized)
+        try:
+            os.remove(file_path)
+        except Exception:
+            try:
+                os.remove(target_path)
+            except OSError as rollback_error:
+                logger.critical(
+                    "Failed to roll back bucket migration target %s: %s",
+                    target_path,
+                    rollback_error,
+                )
+            raise
+
+        logger.info(
+            "Moved bucket / 移动记忆桶: %s → %s/",
+            os.path.basename(file_path),
+            os.path.dirname(target_path),
+        )
+        return target_path
     def _bucket_turn(self, bucket_id: str):
         """Serialize archive()/update()/delete()/touch() on the same bucket_id.
-
         Uses the same cross-loop/cross-process lock-file mechanism as
         ``tools/_common.py``'s ``_quota_turn`` rather than an ``asyncio.Lock``
         — FastMCP may dispatch requests from different event loops/threads,
         so an in-process lock would not actually serialize them.
         """
         return _filesystem_turn(str(self.base_dir), f"bucket-{bucket_id}")
+
+    def human_name_change_turn(self):
+        """Serialize config + vault human-name migrations as one transaction.
+
+        Per-bucket turns protect each Markdown write, but they cannot by
+        themselves stop two full-vault rename jobs from interleaving.  Routes
+        that change or synchronize the human display name hold this outer
+        process/cross-process lease from the config read through the last
+        bucket replacement.
+        """
+
+        return _filesystem_turn(
+            str(self.base_dir),
+            "settings-human-name",
+            timeout_seconds=300.0,
+        )
+
+    async def replace_text_fields(self, old: str, new: str) -> dict[str, int]:
+        """Replace a display term through managed per-bucket transactions.
+
+        This is used when the configured human name changes.  It deliberately
+        does not bump ``last_active``: a display-name migration is not a memory
+        activation.  Each bucket is re-read while holding the normal
+        cross-process bucket lock and then committed through ``_update_locked``
+        so atomic writes, derived-index updates, ledger/projection events and
+        concurrent edits retain the same guarantees as every other mutation.
+        """
+
+        if not old or not new or old == new:
+            return {"buckets_changed": 0, "replacements": 0}
+
+        pattern = re.compile(re.escape(old))
+        bucket_ids: list[str] = []
+        seen: set[str] = set()
+        directories = list(self._active_dirs) + [self.archive_dir]
+        for _root, _filename, file_path in self._iter_md_files(directories):
+            bucket = self._load_bucket(file_path)
+            bucket_id = str((bucket or {}).get("id") or "").strip()
+            if bucket_id and bucket_id not in seen:
+                seen.add(bucket_id)
+                bucket_ids.append(bucket_id)
+
+        changed = 0
+        total = 0
+        for bucket_id in bucket_ids:
+            async with self._bucket_turn(bucket_id):
+                file_path = self._find_bucket_file(bucket_id)
+                if not file_path:
+                    continue
+                try:
+                    post = frontmatter.load(file_path)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to load bucket for text replacement %s: %s",
+                        bucket_id,
+                        exc,
+                    )
+                    continue
+
+                replacements = 0
+                updates: dict[str, str] = {}
+                # A callable replacement is literal.  Passing ``new`` directly
+                # would interpret user-controlled ``\\1``/``\\g<name>`` syntax
+                # as regular-expression group references.
+                content, count = pattern.subn(lambda _match: new, post.content or "")
+                if count:
+                    updates["content"] = content
+                    replacements += count
+                for field in ("name", "why_remembered", "user_name"):
+                    value = post.get(field)
+                    if not isinstance(value, str) or not value:
+                        continue
+                    replaced, count = pattern.subn(lambda _match: new, value)
+                    if count:
+                        updates[field] = replaced
+                        replacements += count
+
+                if not updates:
+                    continue
+                try:
+                    committed = await self._update_locked(bucket_id, **updates)
+                except (OSError, ValueError) as exc:
+                    logger.warning(
+                        "Text replacement rejected for bucket %s: %s",
+                        bucket_id,
+                        exc,
+                    )
+                    continue
+                if committed:
+                    changed += 1
+                    total += replacements
+
+        return {"buckets_changed": changed, "replacements": total}
 
     # ---------------------------------------------------------
     # Update bucket
@@ -1308,14 +1650,74 @@ class BucketManager:
             logger.warning(f"Failed to load bucket for update / 加载桶失败: {file_path}: {e}")
             return False
 
-        # --- Pinned/protected buckets: lock importance to 10, ignore importance changes ---
-        # --- 钉选/保护桶：importance 不可修改，强制保持 10 ---
+        # Work out the final pin/type state before mutating the post.  Type is
+        # also a physical-storage decision, so unsupported values must fail
+        # here instead of being written into frontmatter and reported as a
+        # successful edit.
         was_pinned = parse_bool(post.get("pinned", False), default=False)
-        is_pinned = was_pinned or parse_bool(
-            post.get("protected", False), default=False
+        is_protected = parse_bool(post.get("protected", False), default=False)
+        current_type = str(post.get("type") or "dynamic").strip().lower()
+        will_be_pinned = parse_bool(
+            kwargs.get("pinned", was_pinned), default=was_pinned
         )
-        if is_pinned:
-            kwargs.pop("importance", None)  # silently ignore importance update
+
+        requested_type: str | None = None
+        if "type" in kwargs:
+            requested_type = str(kwargs["type"] or "").strip().lower()
+            if requested_type not in _EDITABLE_BUCKET_TYPES:
+                logger.warning(
+                    "update() rejected unsupported type=%r for bucket=%s",
+                    requested_type,
+                    bucket_id,
+                )
+                return False
+            if current_type == "archived":
+                logger.warning(
+                    "update() rejected type change on archived bucket=%s",
+                    bucket_id,
+                )
+                return False
+
+        forced_type: str | None = None
+        if will_be_pinned:
+            forced_type = "permanent"
+        elif "pinned" in kwargs and was_pinned and not is_protected:
+            # A true pinned bucket demotes when explicitly unpinned.  Explicit
+            # permanent memories (was_pinned=False) remain permanent.
+            forced_type = "dynamic"
+
+        if forced_type is not None:
+            if requested_type is not None and requested_type != forced_type:
+                logger.warning(
+                    "update() rejected incompatible pinned/type transition "
+                    "bucket=%s pinned=%s type=%s",
+                    bucket_id,
+                    will_be_pinned,
+                    requested_type,
+                )
+                return False
+            kwargs["type"] = forced_type
+            requested_type = forced_type
+
+        if (
+            requested_type is not None
+            and requested_type != current_type
+            and is_protected
+            and requested_type != "permanent"
+        ):
+            logger.warning(
+                "update() rejected protected bucket type transition "
+                "bucket=%s type=%s",
+                bucket_id,
+                requested_type,
+            )
+            return False
+
+        # pinned/protected buckets lock importance at 10.  An atomic
+        # pinned=False + importance=N transition is allowed, because the final
+        # state is no longer pinned; this is needed for quota-safe unpinning.
+        if will_be_pinned or is_protected:
+            kwargs.pop("importance", None)
 
         # --- Update only fields that were passed in / 只改传入的字段 ---
         if "content" in kwargs:
@@ -1444,10 +1846,30 @@ class BucketManager:
             post["last_active"] = now_iso()
             post["activation_count"] = int(post.get("activation_count") or 0) + 1
 
+        final_type = str(post.get("type") or current_type).strip().lower()
+        target_path = file_path
+        if final_type in _EDITABLE_BUCKET_TYPES:
+            target_path = self._bucket_target_path(
+                file_path,
+                final_type,
+                post.get("domain") or [_DEFAULT_DOMAIN_NAME],
+                str(post.get("status") or "active"),
+            )
+
         try:
-            _atomic_write_text(file_path, frontmatter.dumps(post))
-        except OSError as e:
-            logger.error(f"Failed to write bucket update / 写入桶更新失败: {file_path}: {e}")
+            committed_path = self._commit_bucket_update(
+                file_path,
+                target_path,
+                frontmatter.dumps(post),
+            )
+        except (OSError, ValueError) as e:
+            logger.error(
+                "Failed to commit bucket update / 提交桶更新失败: "
+                "%s -> %s: %s",
+                file_path,
+                target_path,
+                e,
+            )
             return False
 
         if bump_active:
@@ -1455,32 +1877,8 @@ class BucketManager:
                 bucket_id,
                 last_active=post["last_active"],
                 activation_count=post["activation_count"],
-                file_path=file_path,
+                file_path=committed_path,
             )
-
-        # --- Auto-move: pinned → permanent/ ---
-        # --- 自动移动：钉选 → permanent/ ---
-        # NOTE: resolved buckets are NOT auto-archived here.
-        # They stay in dynamic/ and decay naturally until score < threshold.
-        # 注意：resolved 桶不在此自动归档，留在 dynamic/ 随衰减引擎自然归档。
-        domain: list[str] = post.get("domain") or ["未分类"]  # type: ignore[assignment]
-        if kwargs.get("pinned") and post.get("type") != "permanent":
-            post["type"] = "permanent"
-            _atomic_write_text(file_path, frontmatter.dumps(post))
-            self._move_bucket(file_path, self.permanent_dir, domain)
-        # --- Reverse: unpin → demote only buckets that were actually pinned.
-        # `type=permanent` is also a first-class bucket type, so an idempotent
-        # pinned=False update must not move explicit permanent memories.
-        elif (
-            "pinned" in kwargs
-            and not kwargs.get("pinned")
-            and was_pinned
-            and not parse_bool(post.get("protected", False), default=False)
-            and post.get("type") == "permanent"
-        ):
-            post["type"] = "dynamic"
-            _atomic_write_text(file_path, frontmatter.dumps(post))
-            self._move_bucket(file_path, self.dynamic_dir, domain)
 
         logger.info(f"Updated bucket / 更新记忆桶: {bucket_id}")
 
@@ -1512,6 +1910,15 @@ class BucketManager:
 
     async def hard_delete_test_bucket(self, bucket_id: str, *, reason: str = "") -> dict:
         """Physically erase only a bucket born as explicitly erasable test data."""
+        async with self._bucket_turn(bucket_id):
+            return await self._hard_delete_test_bucket_locked(bucket_id, reason=reason)
+
+    async def _hard_delete_test_bucket_locked(
+        self,
+        bucket_id: str,
+        *,
+        reason: str = "",
+    ) -> dict:
         file_path = self._find_bucket_file(bucket_id)
         if not file_path:
             return {"ok": False, "error": "not_found"}
@@ -1593,9 +2000,11 @@ class BucketManager:
                     self.archive_dir,
                     f"{os.path.splitext(os.path.basename(file_path))[0]}_{bucket_id}.md",
                 )
-            _atomic_write_text(dest, frontmatter.dumps(post))
-            if dest != file_path:
-                os.remove(file_path)
+            self._commit_bucket_update(
+                file_path,
+                str(dest),
+                frontmatter.dumps(post),
+            )
         except OSError as e:
             logger.error(f"Failed to soft-delete bucket / 软删除桶文件失败: {file_path}: {e}")
             return False
@@ -1645,13 +2054,18 @@ class BucketManager:
 
         ripple=False 可跳过读全库的时间涟漪（性能 P2：批量浮现时不值当为它多跑 list_all）。
         """
+        # Commit the source touch first, then release its turn before taking
+        # any neighbour turns.  Keeping the source lock while acquiring a
+        # target lock lets concurrent A->B and B->A ripples deadlock.
         async with self._bucket_turn(bucket_id):
-            await self._touch_locked(bucket_id, ripple=ripple)
+            reference_time = await self._touch_locked(bucket_id)
+        if ripple and reference_time is not None:
+            await self._time_ripple(bucket_id, reference_time)
 
-    async def _touch_locked(self, bucket_id: str, ripple: bool = True) -> None:
+    async def _touch_locked(self, bucket_id: str) -> datetime | None:
         file_path = self._find_bucket_file(bucket_id)
         if not file_path:
-            return
+            return None
 
         try:
             post = frontmatter.load(file_path)
@@ -1666,13 +2080,9 @@ class BucketManager:
                 file_path=file_path,
             )
 
-            # --- Time ripple: boost nearby memories within ±48h ---
-            # --- 时间涟漪：±48小时内的记忆轻微唤醒 ---
-            if ripple:
-                current_time = parse_iso_datetime(
-                    post.get("created", post.get("last_active", ""))
-                )
-                await self._time_ripple(bucket_id, current_time)
+            current_time = parse_iso_datetime(
+                post.get("created", post.get("last_active", ""))
+            )
             self._record_ledger_event(
                 "TraceTouched",
                 bucket_id,
@@ -1680,8 +2090,10 @@ class BucketManager:
                 post.content or "",
                 dict(post.metadata),
             )
+            return current_time
         except Exception as e:
             logger.warning(f"Failed to touch bucket / 触碰桶失败: {bucket_id}: {e}")
+            return None
 
     async def touch_many(self, bucket_ids: list, ripple: bool = False) -> None:
         """批量 touch（性能 P2）：breath 浮现后一次性更新一批桶的激活，供后台任务调用。
@@ -1715,41 +2127,69 @@ class BucketManager:
                 break
             if bucket["id"] == source_id:
                 continue
-            meta = bucket.get("metadata", {})
-            # Skip pinned/permanent/feel
-            if meta.get("pinned") or meta.get("protected") or meta.get("type") in ("permanent", "feel"):
+            target_id = str(bucket.get("id") or "")
+            if not target_id:
                 continue
 
-            created_str = meta.get("created", meta.get("last_active", ""))
+            # The list_all row is only a candidate snapshot.  Take the normal
+            # target turn, locate it again and re-read all eligibility fields
+            # before writing so a concurrent edit/archive/delete cannot be
+            # overwritten or resurrected from stale data.
             try:
-                created = parse_iso_datetime(created_str)
-                delta_hours = abs((reference_time - created).total_seconds()) / 3600
-            except (ValueError, TypeError):
-                continue
+                async with self._bucket_turn(target_id):
+                    file_path = self._find_bucket_file(target_id)
+                    if not file_path:
+                        continue
+                    normalized_path = os.path.normcase(os.path.abspath(file_path))
+                    active = False
+                    for active_dir in self._active_dirs:
+                        normalized_dir = os.path.normcase(os.path.abspath(active_dir))
+                        try:
+                            if os.path.commonpath((normalized_path, normalized_dir)) == normalized_dir:
+                                active = True
+                                break
+                        except ValueError:
+                            continue
+                    if not active:
+                        continue
 
-            if delta_hours <= hours:
-                # Boost activation_count by _RIPPLE_BOOST (fractional), don't change last_active
-                file_path = self._find_bucket_file(bucket["id"])
-                if not file_path:
-                    continue
-                try:
                     post = frontmatter.load(file_path)
+                    if str(post.get("id") or target_id) != target_id:
+                        continue
+                    if (
+                        parse_bool(post.get("pinned"), default=False)
+                        or parse_bool(post.get("protected"), default=False)
+                        or parse_bool(post.get("tombstone"), default=False)
+                        or post.get("deleted_at")
+                        or str(post.get("type") or "dynamic").strip().lower()
+                        in ("permanent", "feel", "archived")
+                    ):
+                        continue
+
+                    created_str = post.get("created", post.get("last_active", ""))
+                    created = parse_iso_datetime(created_str)
+                    delta_hours = abs((reference_time - created).total_seconds()) / 3600
+                    if delta_hours > hours:
+                        continue
+
                     current_count = float(post.get("activation_count") or 0)  # type: ignore[arg-type]
+                    if not math.isfinite(current_count) or current_count < 0:
+                        current_count = 0.0
                     # Store as float for fractional increments; calculate_score handles it
                     post["activation_count"] = round(current_count + _RIPPLE_BOOST, 1)
                     _atomic_write_text(file_path, frontmatter.dumps(post))
                     self._cache_bump(
-                        bucket["id"],
+                        target_id,
                         activation_count=post["activation_count"],
                         file_path=file_path,
                     )
                     rippled += 1
-                except Exception as _ripple_exc:
-                    logger.warning(
-                        f"[ripple] Failed to update activation_count for {bucket['id']!r}: "
-                        f"{type(_ripple_exc).__name__}: {_ripple_exc}"
-                    )
-                    continue
+            except Exception as _ripple_exc:
+                logger.warning(
+                    f"[ripple] Failed to update activation_count for {target_id!r}: "
+                    f"{type(_ripple_exc).__name__}: {_ripple_exc}"
+                )
+                continue
 
     # ---------------------------------------------------------
     # Multi-dimensional search (core feature)
@@ -2103,44 +2543,83 @@ class BucketManager:
             return buckets
 
         # Active buckets use a parsed cache, but Obsidian/Git/manual edits may
-        # bypass BucketManager. Periodically stat the Markdown files; parsing
-        # is only repeated when path/mtime/size changed.
+        # bypass BucketManager.  The build mutex is cross-loop; the short state
+        # guard and generation form a CAS with every managed write.  File state
+        # is scanned both before and after parsing so an external editor cannot
+        # make us publish old content paired with a new fingerprint.
         async with self._active_cache_lock:
             previous_cache: list[dict] | None = None
-            now = time.monotonic()
-            if self._active_cache is not None:
-                poll_due = (
-                    self.external_change_poll_seconds == 0
-                    or now - self._last_file_state_check
-                    >= self.external_change_poll_seconds
-                )
-                if not poll_due:
-                    return [dict(bucket) for bucket in self._active_cache]
+            while True:
+                now = time.monotonic()
+                with self._active_cache_state_guard:
+                    generation = self._active_cache_generation
+                    cached = self._active_cache
+                    if cached is not None:
+                        poll_due = (
+                            self.external_change_poll_seconds == 0
+                            or now - self._last_file_state_check
+                            >= self.external_change_poll_seconds
+                        )
+                        if not poll_due:
+                            return [dict(bucket) for bucket in cached]
+                        cached_state = dict(self._active_file_state)
+                    else:
+                        poll_due = False
+                        cached_state = {}
 
-                current_state = self._scan_active_file_state()
-                self._last_file_state_check = now
-                if current_state == self._active_file_state:
-                    return [dict(bucket) for bucket in self._active_cache]
+                if cached is not None and poll_due:
+                    current_state = self._scan_active_file_state()
+                    with self._active_cache_state_guard:
+                        if generation != self._active_cache_generation:
+                            previous_cache = None
+                            continue
+                        self._last_file_state_check = now
+                        if current_state == cached_state:
+                            current_cache = self._active_cache
+                            if current_cache is not None:
+                                return [dict(bucket) for bucket in current_cache]
+                            continue
 
-                previous_cache = [dict(bucket) for bucket in self._active_cache]
-                self._active_cache = None
-                self._bm25_dirty = True
-                self._external_changes_detected += 1
-                self._last_external_change = now_iso()
+                        previous_cache = [dict(bucket) for bucket in cached]
+                        self._active_cache_generation += 1
+                        generation = self._active_cache_generation
+                        self._active_cache = None
+                        self._active_file_state = {}
+                        self._bm25_dirty = True
+                        self._external_changes_detected += 1
+                        self._last_external_change = now_iso()
+                        with self._bucket_path_index_guard:
+                            self._bucket_path_index_ready = False
+                            self._bucket_path_index = {}
 
-            buckets = []
-            for _root, _fname, file_path in self._iter_md_files(self._active_dirs):
-                bucket = self._load_bucket(file_path)
-                if bucket:
-                    buckets.append(bucket)
+                with self._active_cache_state_guard:
+                    generation = self._active_cache_generation
 
-            self._active_cache = [dict(bucket) for bucket in buckets]
-            self._active_file_state = self._scan_active_file_state()
-            self._last_file_state_check = time.monotonic()
-            if previous_cache is not None:
-                self._reconcile_external_changes(previous_cache, buckets)
+                state_before = self._scan_active_file_state()
+                buckets = []
+                for _root, _fname, file_path in self._iter_md_files(
+                    self._active_dirs
+                ):
+                    bucket = self._load_bucket(file_path)
+                    if bucket:
+                        buckets.append(bucket)
+                state_after = self._scan_active_file_state()
 
-            return buckets
+                if state_before != state_after:
+                    await asyncio.sleep(0)
+                    continue
+
+                with self._active_cache_state_guard:
+                    if generation != self._active_cache_generation:
+                        previous_cache = None
+                        continue
+                    self._active_cache = [dict(bucket) for bucket in buckets]
+                    self._active_file_state = state_after
+                    self._last_file_state_check = time.monotonic()
+
+                if previous_cache is not None:
+                    self._reconcile_external_changes(previous_cache, buckets)
+                return buckets
 
     # ---------------------------------------------------------
     # Statistics (counts per category + total size)
@@ -2216,19 +2695,21 @@ class BucketManager:
             os.makedirs(archive_subdir, exist_ok=True)
 
             dest = safe_path(archive_subdir, os.path.basename(file_path))
-            # 防撞名：archive/ 里已有同名文件时，追加 bucket_id 后缀，避免 shutil.move
+            # 防撞名：archive/ 里已有同名文件时，追加 bucket_id 后缀，避免
             # 把一条早先归档的记忆悄悄覆盖掉（与 delete() 的软删除保护一致）。
             if os.path.exists(dest) and os.path.abspath(dest) != os.path.abspath(file_path):
                 stem = os.path.splitext(os.path.basename(file_path))[0]
                 dest = safe_path(archive_subdir, f"{stem}_{bucket_id}.md")
 
-            # Update type marker then move file / 更新类型标记后移动文件
+            # Commit the archived metadata at the destination before removing
+            # the untouched source.  A failed move must not leave an
+            # ``type=archived`` file stranded in an active directory.
             post["type"] = "archived"
-            _atomic_write_text(file_path, frontmatter.dumps(post))
-
-            # Use shutil.move for cross-filesystem safety
-            # 使用 shutil.move 保证跨文件系统安全
-            shutil.move(file_path, str(dest))
+            self._commit_bucket_update(
+                file_path,
+                str(dest),
+                frontmatter.dumps(post),
+            )
         except Exception as e:
             logger.error(
                 f"Failed to archive bucket / 归档桶失败: {bucket_id}: {e}"
@@ -2278,6 +2759,35 @@ class BucketManager:
     # Internal: find bucket file across all three directories
     # 内部：在三个目录中查找桶文件
     # ---------------------------------------------------------
+    def _ensure_bucket_path_index(self) -> None:
+        """Build the complete ID → path index once for bulk conflict checks."""
+
+        with self._bucket_path_index_guard:
+            if self._bucket_path_index_ready:
+                return
+            # 含 archive：软删除后的桶仍然需要可被内部路径查找。
+            dirs = [
+                self.permanent_dir,
+                self.dynamic_dir,
+                self.archive_dir,
+                self.feel_dir,
+                self.plan_dir,
+                self.letter_dir,
+            ]
+            index: dict[str, str] = {}
+            for _root, fname, full_path in self._iter_md_files(dirs):
+                stem = fname[:-3]
+                index.setdefault(stem, full_path)
+                try:
+                    post = frontmatter.load(full_path)
+                    stored_id = str(post.get("id") or "")
+                except Exception:
+                    stored_id = ""
+                if stored_id:
+                    index.setdefault(stored_id, full_path)
+            self._bucket_path_index = index
+            self._bucket_path_index_ready = True
+
     def _find_bucket_file(self, bucket_id: str) -> Optional[str]:
         """
         Recursively search permanent/dynamic/archive for a bucket file
@@ -2286,24 +2796,45 @@ class BucketManager:
         """
         if not bucket_id:
             return None
-        # 含 archive：软删除后的桶仍然需要可被内部路径查找。
-        dirs = [self.permanent_dir, self.dynamic_dir, self.archive_dir,
-                self.feel_dir, self.plan_dir, self.letter_dir]
-        candidates = []
+
+        with self._bucket_path_index_guard:
+            path = self._bucket_path_index.get(bucket_id)
+            if path and os.path.isfile(path):
+                return path
+            if path:
+                # An unmanaged move/delete can invalidate a hit before the
+                # periodic full-vault poll.  Drop it; the next poll rebuilds
+                # the complete index and discovers any replacement location.
+                self._bucket_path_index.pop(bucket_id, None)
+                self._bucket_path_index_ready = False
+            index_ready = self._bucket_path_index_ready
+        if index_ready:
+            return None
+
+        # Preserve the cheap common path for ordinary single-bucket CRUD: most
+        # managed filenames contain the ID, so there is no reason to parse the
+        # full vault merely to serve one get/update.  Bulk migration explicitly
+        # prewarms the complete index via _ensure_bucket_path_index().
+        dirs = [
+            self.permanent_dir,
+            self.dynamic_dir,
+            self.archive_dir,
+            self.feel_dir,
+            self.plan_dir,
+            self.letter_dir,
+        ]
         for _root, fname, full_path in self._iter_md_files(dirs):
-            name_part = fname[:-3]  # remove .md
-            if name_part == bucket_id or name_part.endswith(f"_{bucket_id}"):
+            stem = fname[:-3]
+            if stem == bucket_id or stem.endswith(f"_{bucket_id}"):
+                with self._bucket_path_index_guard:
+                    self._bucket_path_index[bucket_id] = full_path
                 return full_path
-            candidates.append(full_path)
-        # Fallback: check frontmatter id field (for imported files where filename ≠ id)
-        for full_path in candidates:
-            try:
-                post = frontmatter.load(full_path)
-                if post.get("id") == bucket_id:
-                    return full_path
-            except Exception:
-                pass
-        return None
+
+        # Imported/renamed files may not encode their ID in the filename.
+        self._ensure_bucket_path_index()
+        with self._bucket_path_index_guard:
+            path = self._bucket_path_index.get(bucket_id)
+            return path if path and os.path.isfile(path) else None
 
     # ---------------------------------------------------------
     # Internal: load bucket data from .md file
@@ -2351,17 +2882,91 @@ class BucketManager:
             return default
 
     @classmethod
-    def _normalize_metadata_value(cls, value):
-        """Return JSON-safe metadata values from YAML frontmatter reads."""
+    def _normalize_metadata_value(
+        cls,
+        value,
+        *,
+        _depth: int = 0,
+        _seen: set[int] | None = None,
+        _budget: list[int] | None = None,
+    ):
+        """Return bounded, alias-free JSON-safe YAML metadata.
+
+        SafeLoader blocks object construction but still permits recursive and
+        exponentially shared aliases.  Reject repeated containers and cap the
+        expansion before rebuilding untrusted frontmatter into ordinary lists.
+        """
+        if _depth > _MAX_METADATA_DEPTH:
+            raise ValueError("bucket metadata exceeds nesting-depth limit")
+        if _seen is None:
+            _seen = set()
+        if _budget is None:
+            _budget = [_MAX_METADATA_NODES]
+        _budget[0] -= 1
+        if _budget[0] < 0:
+            raise ValueError("bucket metadata exceeds node limit")
         if isinstance(value, datetime):
             return value.isoformat()
         if isinstance(value, date):
             return value.isoformat()
+        if value is None or isinstance(value, (str, bool, int)):
+            return value
+        if isinstance(value, float):
+            # RFC 8259/JSON has no NaN or infinity.  Normalize YAML's .nan and
+            # .inf scalars to null; known numeric fields below then apply their
+            # documented defaults instead of poisoning dashboard responses.
+            return value if math.isfinite(value) else None
+        if isinstance(value, (bytes, bytearray, memoryview, set, frozenset)):
+            raise ValueError(
+                f"bucket metadata contains non-JSON-safe value: {type(value).__name__}"
+            )
         if isinstance(value, dict):
-            return {k: cls._normalize_metadata_value(v) for k, v in value.items()}
+            identity = id(value)
+            if identity in _seen:
+                raise ValueError("bucket metadata contains recursive/shared aliases")
+            _seen.add(identity)
+            normalized: dict[str, Any] = {}
+            for key, item in value.items():
+                if isinstance(key, datetime):
+                    normalized_key = key.isoformat()
+                elif isinstance(key, date):
+                    normalized_key = key.isoformat()
+                elif key is None or isinstance(key, (str, bool, int)):
+                    normalized_key = str(key)
+                elif isinstance(key, float) and math.isfinite(key):
+                    normalized_key = str(key)
+                else:
+                    raise ValueError(
+                        "bucket metadata contains a non-JSON mapping key"
+                    )
+                if normalized_key in normalized:
+                    raise ValueError(
+                        "bucket metadata contains colliding normalized keys"
+                    )
+                normalized[normalized_key] = cls._normalize_metadata_value(
+                    item,
+                    _depth=_depth + 1,
+                    _seen=_seen,
+                    _budget=_budget,
+                )
+            return normalized
         if isinstance(value, (list, tuple)):
-            return [cls._normalize_metadata_value(v) for v in value]
-        return value
+            identity = id(value)
+            if identity in _seen:
+                raise ValueError("bucket metadata contains recursive/shared aliases")
+            _seen.add(identity)
+            return [
+                cls._normalize_metadata_value(
+                    v,
+                    _depth=_depth + 1,
+                    _seen=_seen,
+                    _budget=_budget,
+                )
+                for v in value
+            ]
+        raise ValueError(
+            f"bucket metadata contains unsupported scalar: {type(value).__name__}"
+        )
 
     def _load_bucket(self, file_path: str) -> Optional[dict]:
         """
@@ -2370,10 +2975,9 @@ class BucketManager:
         """
         try:
             post = frontmatter.load(file_path)
-            metadata = {
-                key: self._normalize_metadata_value(value)
-                for key, value in dict(post.metadata).items()
-            }
+            # Normalize the metadata object as one graph so aliases shared by
+            # different top-level keys cannot reset the node/depth budgets.
+            metadata = self._normalize_metadata_value(dict(post.metadata))
             domain_value = metadata.get("domain")
             if isinstance(domain_value, str):
                 metadata["domain"] = [domain_value] if domain_value.strip() else []
@@ -2382,9 +2986,34 @@ class BucketManager:
             elif not isinstance(domain_value, list):
                 metadata["domain"] = list(domain_value) if isinstance(domain_value, tuple) else [str(domain_value)]
             # 兼容老桶可能存储了 'V0.9'、'[我的视角:V0.3]' 等字符串格式
-            for field, default in (("valence", 0.5), ("arousal", 0.3)):
+            for field, default in (
+                ("valence", 0.5),
+                ("arousal", 0.3),
+                ("model_valence", 0.5),
+                ("weight", 0.5),
+            ):
                 if field in metadata:
                     metadata[field] = self._sanitize_float_field(metadata[field], default)
+            # YAML is an external input boundary (manual files, migration ZIP,
+            # GitHub restore).  Never let arbitrary scalar strings reach JSON
+            # consumers that treat these fields as numbers.
+            metadata["importance"] = _clamp_importance(
+                metadata.get("importance", 5), f"load:{Path(file_path).name}"
+            )
+            try:
+                activation_count = float(metadata.get("activation_count", 0) or 0)
+                if not math.isfinite(activation_count) or activation_count < 0:
+                    raise ValueError("invalid activation_count")
+                metadata["activation_count"] = (
+                    int(activation_count)
+                    if activation_count.is_integer()
+                    else round(activation_count, 3)
+                )
+            except (TypeError, ValueError, OverflowError):
+                metadata["activation_count"] = 0
+            # Defense in depth: future scalar branches must not accidentally
+            # reintroduce NaN/bytes/set values to web JSON consumers.
+            json.dumps(metadata, ensure_ascii=False, allow_nan=False)
             return {
                 "id": post.get("id", Path(file_path).stem),
                 "metadata": metadata,

@@ -10,6 +10,8 @@
 
 向导写入现有 `config.yaml`，不会创建第二套配置。OAuth 与传输模式在进程启动时绑定，保存后必须重启。系统体检的“实际生效配置”同时显示已保存值、当前进程值、环境变量来源和持久卷状态；只有环境变量确实改变保存值时才告警。
 
+公网安全模式中的“公网连接地址”是 OAuth 与 MCP 共同使用的外部来源地址。可以粘贴域名、`https://域名` 或完整的 `https://域名/mcp`，系统会保存为规范化的 HTTPS origin，并自动生成 `/mcp` 地址。修改地址后需重启服务，并让 MCP 客户端重新连接/授权；绑定旧地址的授权码或 refresh token 会返回 `invalid_grant`，不会继续签发随后必然 401 的 token。
+
 Docker/Zeabur 的持久卷统一挂载 `/app/buckets`，配置路径为 `/app/buckets/config.yaml`。Zeabur 从 GitHub 部署时只需添加模型 Key、挂载该卷、绑定 HTTPS 域名，再从向导选择“公网安全模式”。不要在平台中长期保留 `OMBRE_MCP_REQUIRE_AUTH` 或 `OMBRE_TRANSPORT`，除非明确希望平台覆盖 Dashboard。
 
 这份文档说明 Ombre Brain 在断网、模型限流、外部编辑和备份恢复时真正保证什么。
@@ -79,11 +81,13 @@ python tools/check_buckets.py --json
 | ZIP 上传被拒绝 | 本地 vault 未写入 | 按错误修复损坏、路径穿越、重复项或清单不一致，重新导出 |
 | SQLite quick_check 失败 | Markdown 真源通常仍在 | 先备份 Markdown，移走损坏的派生库，再重建向量；不要删除 Markdown |
 | outbox 长时间不下降 | 记忆正文仍安全 | 查看熔断状态、最近错误、Key/模型/维度和 provider 连通性 |
+| 编辑记忆或保存 Key 提示 `Cross-origin request rejected` | 写请求被来源防护拒绝，原数据未改动 | 优先升级到 2.7.1，保存正确公网地址并重启；2.7.0 临时排障只能让反代保留公网 Host，并把 `X-Forwarded-Proto` / `X-Forwarded-Host` 精确设为浏览器 Origin |
 
 ## 访问控制
 
 - Dashboard 会话默认 30 天过期，可通过 `OMBRE_DASHBOARD_SESSION_DAYS` 调整为 1-365 天。认证文件与 token 文件使用原子写入，并在支持的系统上限制为仅文件所有者可读写。
 - 登录和 OAuth 授权共用失败限流。`X-Forwarded-For` / `X-Forwarded-Proto` / `X-Forwarded-Host` 只在请求确实来自可信反代时采用；内置 Tunnel 使用回环地址，外置 nginx/Caddy/容器反代应通过 `OMBRE_TRUSTED_PROXY_CIDRS` 添加准确 CIDR，不能使用 `0.0.0.0/0`。
+- 内置 JSON OAuth 状态按单进程部署设计。官方 Docker/Render 启动方式使用单 worker；自行部署时不要启动多个 Web worker 或多个共享同一数据卷的副本，否则授权状态不具备跨进程事务保证。
 - `limits.max_management_request_bytes` 限制普通 Dashboard/OAuth 写请求；导入文本和迁移 ZIP 仍使用各自更大的流式上限。
 - `/api/update-info` 包含数据目录和容器信息，因此需要 Dashboard 登录；公开健康检查仅使用 `/health` 和 `/api/version`。
 

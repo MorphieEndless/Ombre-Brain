@@ -421,7 +421,24 @@ Dashboard：`http://localhost:18001`
 > - **裸机（纯 Python）**：直接监听 `OMBRE_PORT`，默认 `18001`。这个「默认端口」只对裸机有意义。
 > - 一句话：**看到「默认端口从 X 改成 Y」这类更新说明，Docker 用户可以忽略，你的 `ports` 映射不受影响。**
 
-**VPS 部署注意**：`deploy/docker-compose.yml` 默认端口是 `127.0.0.1:18001`（仅本机访问）。如果没有反代，可改为 `0.0.0.0:18001` 对外开放，再配合 Cloudflare Tunnel 或 nginx 反代到 443。
+**VPS 部署注意**：`deploy/docker-compose.yml` 默认端口是 `127.0.0.1:18001`（仅本机访问）。同机 nginx/Caddy 反代时应继续保留这个回环绑定；只有确实需要让另一台主机或容器直接连接、并已用防火墙限制来源时，才改为 `0.0.0.0`。
+
+nginx 终止 HTTPS 时必须把浏览器看到的公网来源准确传给 OB；额外添加 CORS 响应头不能修复 `Cross-origin request rejected`：
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:18001;
+    proxy_http_version 1.1;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-Host $http_host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_buffering off;
+    proxy_read_timeout 3600s;
+}
+```
+
+外置代理还要在 `.env` 中把**直接连接 OB 的最后一跳代理 CIDR**加入 `OMBRE_TRUSTED_PROXY_CIDRS`，再 `docker compose ... up -d --force-recreate`。不要填写客户端公网 IP、域名或 `0.0.0.0/0`；非默认 HTTPS 端口应使用保留端口的 `$http_host`。v2.7.0 被 403 卡住、连热更新和重启都无法操作时，按 [运维文档的手动脱困步骤](docs/OPERATIONS.md#nginx-反代与-v270-脱困) 从宿主机升级。
 
 ### 不用 Docker（纯 Python）
 
@@ -573,7 +590,7 @@ cp config.example.yaml config.yaml
 docker compose -f deploy/docker-compose.yml up -d
 ```
 
-配合 nginx / Caddy 反代到 443 端口，或直接用 Dashboard 内置的 Cloudflare Tunnel 管理器。
+配合 nginx / Caddy 反代到 443 端口时使用上文完整的 Host、`X-Forwarded-*` 和可信代理 CIDR 配置，或直接使用 Dashboard 内置的 Cloudflare Tunnel 管理器。不要靠添加 CORS 头绕过 Dashboard 的来源校验。
 
 ---
 
@@ -583,7 +600,7 @@ docker compose -f deploy/docker-compose.yml up -d
 
 | 标签页 | 功能 |
 |---|---|
-| **记忆** | 桶列表，按 domain / type 筛选，单桶可 pin / resolve / 主动遗忘 / 归档；不提供物理删除 |
+| **记忆** | 桶列表，按 domain / type 筛选，支持综合分或创建时间排序、首页/末页和指定页码跳转；单桶可 pin / resolve / 主动遗忘 / 归档，不提供物理删除 |
 | **Breath 调试** | 模拟检索查询，查看每个桶的四维评分分解 |
 | **记忆网络** | 基于 embedding 相似度的桶关系图 |
 | **③ 引擎** | 内联填写 LLM / Embedding API Key，在线修改参数，点「保存 Key」立即热更新 |

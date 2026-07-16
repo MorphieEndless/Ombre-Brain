@@ -223,13 +223,17 @@
   }
 
   .bucket-list { display: flex; flex-direction: column; gap: 8px; }
+  .bucket-viewbar { display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0;color:var(--text-dim);font-size:12px; }
+  .bucket-sort-control { display:inline-flex;align-items:center;gap:7px; }
+  .bucket-sort-control select { height:32px;padding:0 28px 0 10px;border:1px solid var(--border-strong);border-radius:10px;background:var(--surface-solid);color:var(--text);font:inherit;cursor:pointer; }
+  .bucket-sort-note { color:var(--text-light);font-size:11px; }
   .bucket-bulkbar { display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0;padding:10px 14px;border:none;border-radius:14px;background:var(--surface-solid);box-shadow:4px 4px 11px var(--shadow-dark-subtle), -3px -3px 8px var(--shadow-light); }
   .bucket-bulkbar-actions { display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto; }
   .bucket-select { width:17px;height:17px;accent-color:var(--accent);flex:0 0 auto; }
   .developer-only { display:none; }
   body.developer-mode .developer-only { display:inline-flex; }
   /* 记忆桶翻页器 / bucket pager */
-  .bucket-pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 18px 0 4px; }
+  .bucket-pager { display: flex; align-items: center; justify-content: center; flex-wrap:wrap; gap: 8px; margin: 18px 0 4px; }
   .pager-btn {
     padding: 6px 14px; font-size: 12.5px; border-radius: 10px; cursor: pointer; font-family: inherit;
     border: 1px solid var(--border-strong); background: var(--surface-solid); color: var(--text);
@@ -238,6 +242,8 @@
   .pager-btn:hover:not(:disabled) { color: var(--accent); }
   .pager-btn:disabled { opacity: .4; cursor: default; box-shadow: inset 2px 2px 5px var(--shadow-dark-subtle); }
   .pager-info { font-family: 'Share Tech Mono', monospace; font-size: 12px; color: var(--text-dim); }
+  .pager-jump { display:inline-flex;align-items:center;gap:5px;color:var(--text-dim);font-size:12px; }
+  .pager-input { width:58px;height:30px;padding:0 6px;text-align:center;border:1px solid var(--border-strong);border-radius:8px;background:var(--surface);color:var(--text);font-family:'Share Tech Mono',monospace; }
   .bucket-row {
     display: flex;
     flex-direction: column;
@@ -1935,6 +1941,18 @@
 
 <div class="content" id="list-view">
   <div class="filters" id="filters"></div>
+  <div class="bucket-viewbar">
+    <label class="bucket-sort-control" for="bucket-sort">
+      <i data-lucide="clock" style="width:14px;height:14px;"></i>
+      时间顺序
+      <select id="bucket-sort" onchange="setBucketSort(this.value)" aria-label="记忆桶排序方式">
+        <option value="score">综合分优先</option>
+        <option value="created_desc">最新创建优先</option>
+        <option value="created_asc">最早创建优先</option>
+      </select>
+    </label>
+    <span class="bucket-sort-note" id="bucket-sort-note">按综合衰减分排列</span>
+  </div>
   <div class="bucket-bulkbar">
     <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);height:32px;"><input id="bucket-select-all" type="checkbox" onchange="selectAllFiltered(this.checked)" style="accent-color:var(--accent);cursor:pointer;"> 全选当前筛选</label>
     <span id="bucket-selected-count" style="color:var(--text-dim);font-size:12px;">已选 0</span>
@@ -4182,8 +4200,38 @@ async function readJsonSafe(resp) {
 const BASE = location.origin;
 let allBuckets = [];
 let currentFilter = 'all';
+var BUCKET_SORT_MODES = ['score', 'created_desc', 'created_asc'];
+var bucketSort = 'score';
+try {
+  var storedBucketSort = localStorage.getItem('ombreBucketSort');
+  if (BUCKET_SORT_MODES.includes(storedBucketSort)) bucketSort = storedBucketSort;
+} catch (_) { /* localStorage unavailable: keep the compatible score default */ }
+var bucketLoadGeneration = 0;
 var selectedBucketIds = new Set();
 var developerMode = localStorage.getItem('ombreDeveloperMode') === 'true';
+
+function syncBucketSortControl() {
+  var control = document.getElementById('bucket-sort');
+  if (control) control.value = bucketSort;
+  var note = document.getElementById('bucket-sort-note');
+  if (!note) return;
+  note.textContent = bucketSort === 'created_desc'
+    ? '按首次记录时间倒序；最新记忆在前，未知时间排末尾'
+    : bucketSort === 'created_asc'
+      ? '按首次记录时间正序；最早记忆在前，未知时间排末尾'
+      : '按综合衰减分排列';
+}
+
+async function setBucketSort(value) {
+  var normalized = BUCKET_SORT_MODES.includes(value) ? value : 'score';
+  bucketSort = normalized;
+  try { localStorage.setItem('ombreBucketSort', bucketSort); } catch (_) {}
+  bucketPage = 1;
+  syncBucketSortControl();
+  await loadBuckets();
+}
+
+syncBucketSortControl();
 
 function setDeveloperMode(enabled) {
   developerMode = !!enabled;
@@ -4322,12 +4370,20 @@ function doSearch() {
 }
 
 async function loadBuckets() {
+  var generation = ++bucketLoadGeneration;
+  var requestedSort = bucketSort;
   try {
-    const res = await fetch(BASE + '/api/buckets');
+    var sortQuery = requestedSort === 'score'
+      ? ''
+      : '?sort=' + encodeURIComponent(requestedSort);
+    const res = await fetch(BASE + '/api/buckets' + sortQuery);
     const data = await res.json();
     if (!res.ok || !Array.isArray(data)) {
       throw new Error((data && data.error) ? data.error : `HTTP ${res.status}`);
     }
+    // Rapid sort changes can leave an older request finishing last. Never let
+    // that stale response overwrite the currently selected chronological view.
+    if (generation !== bucketLoadGeneration || requestedSort !== bucketSort) return;
     var previousIds = new Set((allBuckets || []).map(function(b){return b.id;}));
     var hadPrevious = previousIds.size > 0;
     allBuckets = data;
@@ -4341,6 +4397,7 @@ async function loadBuckets() {
     renderBuckets(filterBuckets(allBuckets), true);
     if (data.length === 0 && window.ObPet) window.ObPet.react('empty');
   } catch (e) {
+    if (generation !== bucketLoadGeneration || requestedSort !== bucketSort) return;
     document.getElementById('bucket-list').innerHTML = '<div class="loading">加载失败: ' + esc(e.message) + '</div>';
     if (window.ObPet) window.ObPet.react('connection_error');
   }
@@ -4369,24 +4426,40 @@ function buildFilters() {
     { key: 'digested', label: '<i data-lucide="leaf"></i> 已消化' },
     { key: 'archived', label: '<i data-lucide="archive"></i> 归档' },
   ];
-  const visibleDomains = Array.from(domains).slice(0, 10);
-  const availableFilters = types.map(function(t) { return t.key; })
-    .concat(visibleDomains.map(function(d) { return 'domain:' + d; }));
+  const typeKeys = types.map(function(t) { return t.key; });
   // domain 筛选可能因最后一个相关桶被编辑而消失；这时才安全退回“全部”。
-  if (!availableFilters.includes(currentFilter)) currentFilter = 'all';
+  if (currentFilter.startsWith('domain:')) {
+    if (!domains.has(currentFilter.slice(7))) currentFilter = 'all';
+  } else if (!typeKeys.includes(currentFilter)) {
+    currentFilter = 'all';
+  }
+  const visibleDomains = Array.from(domains).slice(0, 10);
+  // 排序会改变 domain 的首次出现顺序。即使当前 domain 掉出前 10，
+  // 也保留它的活动按钮，而不是悄悄清空用户的筛选。
+  var currentDomain = currentFilter.startsWith('domain:') ? currentFilter.slice(7) : '';
+  if (currentDomain && !visibleDomains.includes(currentDomain)) {
+    if (visibleDomains.length >= 10) visibleDomains[visibleDomains.length - 1] = currentDomain;
+    else visibleDomains.push(currentDomain);
+  }
   filters.innerHTML = types.map(function(t) {
-    return '<button class="filter-btn ' + (t.key === currentFilter ? 'active' : '') + '" data-filter="' + escAttr(t.key) + '">' + t.label + '</button>';
+    var active = t.key === currentFilter;
+    return '<button class="filter-btn ' + (active ? 'active' : '') + '" aria-pressed="' + (active ? 'true' : 'false') + '" data-filter="' + escAttr(t.key) + '">' + t.label + '</button>';
   }).join('') + visibleDomains.map(function(d) {
     var key = 'domain:' + d;
-    return '<button class="filter-btn ' + (key === currentFilter ? 'active' : '') + '" data-filter="' + escAttr(key) + '">' + esc(d) + '</button>';
+    var active = key === currentFilter;
+    return '<button class="filter-btn ' + (active ? 'active' : '') + '" aria-pressed="' + (active ? 'true' : 'false') + '" data-filter="' + escAttr(key) + '">' + esc(d) + '</button>';
   }).join('');
 
   // buildFilters 会在每次数据刷新后运行；覆盖处理器，避免重复累积监听器。
   filters.onclick = function(e) {
     var btn = e.target.closest('.filter-btn');
     if (!btn) return;
-    filters.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
+    filters.querySelectorAll('.filter-btn').forEach(function(b) {
+      b.classList.remove('active');
+      b.setAttribute('aria-pressed', 'false');
+    });
     btn.classList.add('active');
+    btn.setAttribute('aria-pressed', 'true');
     currentFilter = btn.dataset.filter;
     renderBuckets(filterBuckets(allBuckets));
   };
@@ -4417,20 +4490,51 @@ function renderBuckets(buckets, preservePage) {
   _paintBuckets();
 }
 
+function _normalizeBucketPage(value, totalPages, fallbackPage) {
+  var maxPage = Number(totalPages);
+  maxPage = Number.isFinite(maxPage) && maxPage >= 1 ? Math.trunc(maxPage) : 1;
+  var fallback = Number(fallbackPage);
+  fallback = Number.isFinite(fallback) ? Math.trunc(fallback) : 1;
+  fallback = Math.min(maxPage, Math.max(1, fallback));
+  if (value === null || value === undefined || String(value).trim() === '') return fallback;
+  var parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(maxPage, Math.max(1, Math.trunc(parsed)));
+}
+
+function _visibleBucketTotalPages() {
+  var visibleCount = (_curBuckets || []).filter(function(b) { return !b.dont_surface; }).length;
+  return Math.max(1, Math.ceil(visibleCount / BUCKETS_PER_PAGE));
+}
+
 function gotoBucketPage(n) {
-  bucketPage = n;
+  bucketPage = _normalizeBucketPage(n, _visibleBucketTotalPages(), bucketPage);
   _paintBuckets();
   var list = document.getElementById('bucket-list');
   if (list) list.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+function jumpToBucketPage() {
+  var input = document.getElementById('bucket-page-input');
+  if (!input) return;
+  gotoBucketPage(input.value);
+}
+
 function _bucketPagerHtml(total, totalPages) {
   if (totalPages <= 1) return '';
-  return '<div class="bucket-pager">' +
-    '<button class="pager-btn"' + (bucketPage <= 1 ? ' disabled' : '') + ' onclick="gotoBucketPage(' + (bucketPage - 1) + ')">‹ 上一页</button>' +
-    '<span class="pager-info">' + bucketPage + ' / ' + totalPages + ' 页 · 共 ' + total + '</span>' +
-    '<button class="pager-btn"' + (bucketPage >= totalPages ? ' disabled' : '') + ' onclick="gotoBucketPage(' + (bucketPage + 1) + ')">下一页 ›</button>' +
-  '</div>';
+  return '<nav class="bucket-pager" aria-label="记忆桶分页">' +
+    '<button type="button" class="pager-btn" aria-label="跳到第一页"' + (bucketPage <= 1 ? ' disabled' : '') + ' onclick="gotoBucketPage(1)">« 首页</button>' +
+    '<button type="button" class="pager-btn" aria-label="上一页"' + (bucketPage <= 1 ? ' disabled' : '') + ' onclick="gotoBucketPage(' + (bucketPage - 1) + ')">‹ 上一页</button>' +
+    '<span class="pager-info" role="status" aria-live="polite">' + bucketPage + ' / ' + totalPages + ' 页 · 共 ' + total + '</span>' +
+    '<button type="button" class="pager-btn" aria-label="下一页"' + (bucketPage >= totalPages ? ' disabled' : '') + ' onclick="gotoBucketPage(' + (bucketPage + 1) + ')">下一页 ›</button>' +
+    '<button type="button" class="pager-btn" aria-label="跳到最后一页"' + (bucketPage >= totalPages ? ' disabled' : '') + ' onclick="gotoBucketPage(' + totalPages + ')">末页 »</button>' +
+    '<form class="pager-jump" onsubmit="event.preventDefault();jumpToBucketPage()">' +
+      '<label for="bucket-page-input">第</label>' +
+      '<input class="pager-input" id="bucket-page-input" type="number" inputmode="numeric" min="1" max="' + totalPages + '" step="1" value="' + bucketPage + '" aria-label="输入页码">' +
+      '<span>页</span>' +
+      '<button type="submit" class="pager-btn" aria-label="跳转到输入页码">跳转</button>' +
+    '</form>' +
+  '</nav>';
 }
 
 function _paintBuckets() {
@@ -4441,13 +4545,14 @@ function _paintBuckets() {
   var visible = _curBuckets.filter(function(b) { return !b.dont_surface; });
   renderForgottenGroup(forgotten);
   if (!visible.length) {
+    bucketPage = 1;
     list.innerHTML = '<div class="loading">没有记忆桶 / No buckets</div>';
+    syncBucketSelectionUi();
     return;
   }
   // 分页：每页 BUCKETS_PER_PAGE 个，底部翻页
   var totalPages = Math.ceil(visible.length / BUCKETS_PER_PAGE);
-  if (bucketPage > totalPages) bucketPage = totalPages;
-  if (bucketPage < 1) bucketPage = 1;
+  bucketPage = _normalizeBucketPage(bucketPage, totalPages, 1);
   var startIdx = (bucketPage - 1) * BUCKETS_PER_PAGE;
   var pageItems = visible.slice(startIdx, startIdx + BUCKETS_PER_PAGE);
   list.innerHTML = pageItems.map(function(b) {
@@ -4464,9 +4569,21 @@ function _paintBuckets() {
     var firstBadge = b.first_of_kind ? ' <i data-lucide="sparkles" title="首次出现" style="width:12px;height:12px;color:var(--accent);vertical-align:-1px;"></i>' : '';
     var vPos = Math.round(b.valence * 100);
     var modelV = b.model_valence != null ? ' → V' + b.model_valence.toFixed(1) : '';
-    var timeAgo = formatTimeAgo(b.last_active || b.created);
+    var activityTime = firstValidBucketTime(
+      b.last_active_epoch_ms, b.last_active, b.created_epoch_ms, b.created
+    );
+    var chronologicalSort = bucketSort === 'created_desc' || bucketSort === 'created_asc';
+    var shownTime = chronologicalSort
+      ? firstValidBucketTime(b.created_epoch_ms, b.created)
+      : activityTime;
+    var timeLabel = chronologicalSort
+      ? (shownTime ? '创建 ' + formatCompactBucketTime(shownTime) : '创建时间未知')
+      : (shownTime ? '活跃 ' + formatTimeAgo(shownTime) : '活跃时间未知');
+    var timeTitle = chronologicalSort
+      ? (shownTime ? '首次记录时间：' + formatExactBucketTime(shownTime) : '首次记录时间未知')
+      : (shownTime ? '最近活跃时间：' + formatExactBucketTime(shownTime) : '最近活跃时间未知');
     // 久未浮现（>45 天且非钉选/锚点/已遗忘）→ 稀疏虚线，视觉上「模糊、遥远」
-    var stale = !b.pinned && !b.anchor && !b.dont_surface && daysSince(b.last_active || b.created) >= 45;
+    var stale = !b.pinned && !b.anchor && !b.dont_surface && daysSince(activityTime) >= 45;
     var rowCls = 'bucket-row' + (stale ? ' faded' : '');
     var inlineStyle = b.dont_surface ? 'opacity:0.45;' : '';
     var rowClick = 'onclick="showDetail(this.dataset.id)"';
@@ -4484,7 +4601,7 @@ function _paintBuckets() {
           emotionHtml +
           '<span class="score">' + (b.score != null ? b.score.toFixed(2) : '—') + '</span>' +
         '</div>' +
-        '<span class="time">' + esc(timeAgo) + '</span>' +
+        '<span class="time" title="' + escAttr(timeTitle) + '">' + esc(timeLabel) + '</span>' +
       '</div>' +
       '<div class="bucket-row-bottom"><span class="preview">' + esc(b.content_preview) + '</span></div>' +
     '</div>';
@@ -5327,9 +5444,23 @@ window._updateWeightLabel = function(v) {
   if (el) el.textContent = v + '% · ' + weightAnchorLabel(parseFloat(v) / 100);
 };
 
-function formatTimeAgo(iso) {
-  if (!iso) return '—';
+function parseBucketDate(iso) {
+  if (iso === null || iso === undefined || String(iso).trim() === '') return null;
   var d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function firstValidBucketTime() {
+  for (var i = 0; i < arguments.length; i++) {
+    var parsed = parseBucketDate(arguments[i]);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function formatTimeAgo(iso) {
+  var d = parseBucketDate(iso);
+  if (!d) return '—';
   var now = new Date();
   var hours = Math.floor((now - d) / 3600000);
   if (hours < 1) return '刚刚';
@@ -5339,10 +5470,25 @@ function formatTimeAgo(iso) {
   return Math.floor(days/30) + 'mo前';
 }
 
+function formatCompactBucketTime(iso) {
+  var d = parseBucketDate(iso);
+  if (!d) return '—';
+  function pad(value) { return String(value).padStart(2, '0'); }
+  var now = new Date();
+  var datePart = d.getFullYear() === now.getFullYear()
+    ? pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+    : d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  return datePart + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+
+function formatExactBucketTime(iso) {
+  var d = parseBucketDate(iso);
+  return d ? d.toLocaleString('zh-CN', { hour12: false }) : '—';
+}
+
 function daysSince(iso) {
-  if (!iso) return 0;
-  var d = new Date(iso);
-  if (isNaN(d)) return 0;
+  var d = parseBucketDate(iso);
+  if (!d) return 0;
   return (Date.now() - d.getTime()) / 86400000;
 }
 
@@ -7154,8 +7300,27 @@ loadVersionBadge();
     var log = function(line) { if (logBox) logBox.textContent += line + '\n'; };
 
     try {
-      var r = await fetch(BASE + '/api/do-update', { method: 'POST', credentials: 'include' });
-      if (!r.ok) { log('请求失败：' + r.status); return; }
+      // 热更新不是可重试写操作，不能走会对瞬时 502/503/504 自动重试的
+      // authFetch；否则代理丢失首个响应时可能重复发起更新任务。
+      var r = await fetch(BASE + '/api/do-update', {
+        method: 'POST', credentials: 'include'
+      });
+      if (r.status === 401) {
+        checkAuth();
+        log('登录状态已失效，请重新登录后重试。');
+        return;
+      }
+      if (!r.ok) {
+        var failure = {};
+        try { failure = await readJsonSafe(r); } catch (parseError) {
+          failure = {error: parseError.message};
+        }
+        log('请求失败（HTTP ' + r.status + '）：' + (failure.error || '未知错误'));
+        if (r.status === 403 && failure.error === 'Cross-origin request rejected') {
+          log('这不是 CORS 缺失。请让 nginx 保留公网 Host/HTTPS 转发头，并把最后一跳代理 CIDR 加入 OMBRE_TRUSTED_PROXY_CIDRS。');
+        }
+        return;
+      }
 
       var reader = r.body.getReader();
       var decoder = new TextDecoder();

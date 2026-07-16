@@ -22,9 +22,19 @@ from . import _shared as sh
 logger = sh.logger
 
 try:
-    from utils import strip_wikilinks, parse_bool, atomic_update_config_yaml  # type: ignore
+    from utils import (  # type: ignore
+        atomic_update_config_yaml,
+        parse_bool,
+        parse_iso_datetime,
+        strip_wikilinks,
+    )
 except ImportError:  # pragma: no cover
-    from ..utils import strip_wikilinks, parse_bool, atomic_update_config_yaml  # type: ignore
+    from ..utils import (  # type: ignore
+        atomic_update_config_yaml,
+        parse_bool,
+        parse_iso_datetime,
+        strip_wikilinks,
+    )
 
 try:
     from tools._common import (  # type: ignore
@@ -40,6 +50,14 @@ except ImportError:  # pragma: no cover
         check_pinned_quota as _check_pinned_quota,
         enforce_high_importance_quota as _enforce_high_importance_quota,
     )
+
+
+def _datetime_epoch_ms(value) -> int | None:
+    """Return one server-normalized instant for Dashboard sorting/display."""
+    try:
+        return round(parse_iso_datetime(value).timestamp() * 1000)
+    except (OSError, OverflowError, TypeError, ValueError):
+        return None
 
 
 async def rename_human_in_buckets(old: str, new: str) -> dict:
@@ -68,11 +86,21 @@ def register(mcp) -> None:
 
     @mcp.custom_route("/api/buckets", methods=["GET"])
     async def api_buckets(request: Request) -> Response:
-        """List all buckets with metadata (no content for efficiency)."""
+        """List buckets, optionally ordered by their first-recorded time."""
         from starlette.responses import JSONResponse
         err = sh._require_auth(request)
         if err:
             return err
+        sort_mode = str(request.query_params.get("sort", "score") or "score").strip()
+        allowed_sort_modes = {"score", "created_desc", "created_asc"}
+        if sort_mode not in allowed_sort_modes:
+            return JSONResponse(
+                {
+                    "error": "invalid sort mode",
+                    "allowed": sorted(allowed_sort_modes),
+                },
+                status_code=400,
+            )
         try:
             all_buckets = await sh.bucket_mgr.list_all(include_archive=True)
             result = []
@@ -80,6 +108,8 @@ def register(mcp) -> None:
                 meta = b.get("metadata", {})
                 if meta.get("deleted_at"):
                     continue
+                created_epoch_ms = _datetime_epoch_ms(meta.get("created"))
+                last_active_epoch_ms = _datetime_epoch_ms(meta.get("last_active"))
                 result.append({
                     "id": b["id"],
                     "name": meta.get("name", b["id"]),
@@ -94,7 +124,9 @@ def register(mcp) -> None:
                     "pinned": meta.get("pinned", False),
                     "digested": meta.get("digested", False),
                     "created": meta.get("created", ""),
+                    "created_epoch_ms": created_epoch_ms,
                     "last_active": meta.get("last_active", ""),
+                    "last_active_epoch_ms": last_active_epoch_ms,
                     "activation_count": meta.get("activation_count", 0),
                     "score": sh.decay_engine.calculate_score(meta),
                     "content_preview": strip_wikilinks(b.get("content", ""))[:200],
@@ -110,7 +142,24 @@ def register(mcp) -> None:
                         and meta["provenance"].get("erasable") is True
                     ),
                 })
-            result.sort(key=lambda x: x["score"], reverse=True)
+            if sort_mode == "score":
+                # Preserve the long-standing Dashboard default while making
+                # equal-score ordering deterministic across os.walk refreshes.
+                result.sort(key=lambda item: (-float(item["score"]), str(item["id"])))
+            else:
+                descending = sort_mode == "created_desc"
+
+                def created_sort_key(item: dict) -> tuple[int, int, str]:
+                    timestamp = item["created_epoch_ms"]
+                    if timestamp is None:
+                        # Legacy/hand-written buckets can lack a valid created
+                        # value. Unknown times always stay at the end, not at
+                        # an arbitrary extreme of either chronological view.
+                        return (1, 0, str(item["id"]))
+                    ordered_timestamp = -timestamp if descending else timestamp
+                    return (0, ordered_timestamp, str(item["id"]))
+
+                result.sort(key=created_sort_key)
             return JSONResponse(result)
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=500)

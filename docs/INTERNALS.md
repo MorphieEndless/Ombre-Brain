@@ -412,7 +412,7 @@ feel 桶自身：
 | `/auth/login` | POST | 公开 | 密码登录，颁发 cookie（7 天） |
 | `/auth/logout` | POST | 公开 | 注销 |
 | `/auth/change-password` | POST | 🔒 | 修改密码（环境变量密码模式下禁用） |
-| `/api/buckets` | GET | 🔒 | 桶列表（带评分、不带正文，仅预览） |
+| `/api/buckets` | GET | 🔒 | 桶列表（带评分、不带正文，仅预览）。`sort=score\|created_desc\|created_asc`，默认综合分；时间排序解析 `created` 的真实时区，未知时间置后。响应同时给出服务端规范化的 `created_epoch_ms` / `last_active_epoch_ms`，确保容器与浏览器时区不同时排序和显示仍一致。 |
 | `/api/bucket/{id}` | GET | 🔒 | 桶详情（含正文）。iter 1.9 起额外返回 `triggered_feels: [{id,name,created}]` —— 反向链：哪些 feel 桶把这条作为 `triggered_by` |
 | `/api/bucket/{id}/pin` | POST | 🔒 | 切换 pinned（自动同步 type permanent⇄dynamic） |
 | `/api/bucket/{id}/resolve` | POST | 🔒 | 切换 resolved |

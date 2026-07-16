@@ -181,16 +181,26 @@ async def test_csrf_guard_allows_normalized_same_origin_direct_request(
 
 
 @pytest.mark.asyncio
-async def test_csrf_guard_allows_public_origin_from_trusted_proxy(monkeypatch):
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("PATCH", "/api/bucket/b1"),
+        ("POST", "/api/restart"),
+        ("POST", "/api/do-update"),
+    ],
+)
+async def test_csrf_guard_allows_public_origin_from_trusted_proxy(
+    monkeypatch, method, path
+):
     monkeypatch.setenv("OMBRE_TRUSTED_PROXY_CIDRS", "10.0.0.0/8")
     downstream = RecordingASGIApp()
     middleware = OriginCSRFGuardMiddleware(downstream)
     messages = []
     scope = {
         "type": "http",
-        "method": "PATCH",
+        "method": method,
         "scheme": "http",
-        "path": "/api/bucket/b1",
+        "path": path,
         "client": ("10.20.30.40", 49152),
         "headers": [
             (b"host", b"127.0.0.1:8000"),
@@ -213,6 +223,8 @@ async def test_csrf_guard_allows_public_origin_from_trusted_proxy(monkeypatch):
         ("PATCH", "/api/bucket/b1/edit"),
         ("POST", "/api/env-config"),
         ("POST", "/api/config"),
+        ("POST", "/api/restart"),
+        ("POST", "/api/do-update"),
     ],
 )
 async def test_csrf_guard_uses_same_origin_fetch_signal_when_proxy_omits_headers(

@@ -248,3 +248,72 @@ def test_v1_environment_names_remain_compatible(monkeypatch, tmp_path):
     assert config["dehydration"]["base_url"] == "https://legacy.example/v1"
     assert os.environ["OMBRE_DASHBOARD_PASSWORD"] == "legacy-password"
     assert config["media_dir"] == str(tmp_path / "vault" / "_media")
+
+
+@pytest.mark.asyncio
+async def test_embedding_provider_tuple_rebuilds_and_persists_once(
+    monkeypatch, tmp_path
+):
+    runtime_config = {
+        "embedding": {
+            "enabled": True,
+            "api_key": "old-key",
+            "api_format": "ollama",
+            "base_url": "",
+            "model": "bge-m3",
+        }
+    }
+    rebuild_snapshots = []
+    persisted_configs = []
+
+    def rebuild_once():
+        rebuild_snapshots.append(dict(runtime_config["embedding"]))
+        return SimpleNamespace(enabled=True)
+
+    def persist_once(mutate):
+        saved = {}
+        mutate(saved)
+        persisted_configs.append(saved)
+
+    monkeypatch.setattr(config_api.sh, "_require_auth", lambda request: None)
+    monkeypatch.setattr(
+        config_api.sh, "_project_env_path", lambda: str(tmp_path / ".env")
+    )
+    monkeypatch.setattr(config_api.sh, "config", runtime_config)
+    monkeypatch.setattr(
+        config_api.sh, "embedding_engine", SimpleNamespace(enabled=True)
+    )
+    monkeypatch.setattr(config_api, "_rebuild_embedding_runtime", rebuild_once)
+    monkeypatch.setattr(config_api, "atomic_update_config_yaml", persist_once)
+
+    updates = {
+        "OMBRE_EMBED_API_KEY": "new-key",
+        "OMBRE_EMBED_BASE_URL": "https://api.siliconflow.cn/v1",
+        "OMBRE_EMBED_MODEL": "BAAI/bge-m3",
+        "OMBRE_EMBED_FORMAT": "openai_compat",
+    }
+    mcp = FakeMCP()
+    config_api.register(mcp)
+    response = await mcp.routes[("POST", "/api/env-config")](
+        JsonRequest({"updates": updates})
+    )
+    payload = json.loads(response.body)
+
+    assert payload["ok"] is True
+    assert payload["partial"] is False
+    assert payload["updated"] == list(updates)
+    assert len(rebuild_snapshots) == 1
+    assert rebuild_snapshots[0] == {
+        "enabled": True,
+        "api_key": "new-key",
+        "api_format": "openai_compat",
+        "base_url": "https://api.siliconflow.cn/v1",
+        "model": "BAAI/bge-m3",
+    }
+    assert len(persisted_configs) == 1
+    assert persisted_configs[0]["embedding"]["api_key"] == "new-key"
+    assert persisted_configs[0]["embedding"]["base_url"] == updates[
+        "OMBRE_EMBED_BASE_URL"
+    ]
+    assert persisted_configs[0]["embedding"]["model"] == "BAAI/bge-m3"
+    assert persisted_configs[0]["embedding"]["api_format"] == "openai_compat"

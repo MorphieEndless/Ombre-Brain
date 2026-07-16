@@ -3,12 +3,15 @@ import hashlib
 import json
 import sqlite3
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
 from bucket_manager import BucketManager
 from embedding_engine import EmbeddingEngine
 from embedding_outbox import EmbeddingOutbox, content_hash
+from tools import _common as common
+from tools import _runtime as rt
 from web import embedding as embedding_web
 
 
@@ -49,6 +52,9 @@ class RecordingEngine:
     def list_all_ids(self):
         return list(self.hashes)
 
+    def list_content_ids(self):
+        return [bucket_id for bucket_id, digest in self.hashes.items() if digest]
+
     def list_content_hashes(self):
         return dict(self.hashes)
 
@@ -80,6 +86,379 @@ class FailingEngine(RecordingEngine):
 
 class DisabledEngine(RecordingEngine):
     enabled = False
+
+
+class ObservableEngine(RecordingEngine):
+    def __init__(self):
+        super().__init__()
+        self.manager = None
+        self.meaning_started = asyncio.Event()
+        self.release_meaning = asyncio.Event()
+        self.visible_during_meaning = None
+
+    async def get_embedding(self, bucket_id):
+        return [0.1, 0.2, 0.3] if bucket_id in self.hashes else None
+
+    async def generate_and_store_meaning(self, bucket_id, _meaning):
+        self.visible_during_meaning = (
+            await self.manager.get(bucket_id) is not None
+        )
+        self.meaning_started.set()
+        await self.release_meaning.wait()
+        return True
+
+
+@pytest.mark.asyncio
+async def test_stale_empty_reconcile_keeps_new_pending_item(tmp_path):
+    config = _config(tmp_path)
+    engine = RecordingEngine()
+    manager = BucketManager(config, embedding_engine=engine)
+    outbox = EmbeddingOutbox(config, manager, engine)
+
+    assert outbox.enqueue("fresh-id", "fresh content") is True
+    await outbox.reconcile(buckets=[], include_archive=False)
+
+    assert outbox.is_pending("fresh-id") is True
+
+
+@pytest.mark.asyncio
+async def test_stale_content_reconcile_never_overwrites_newer_pending_hash(
+    tmp_path,
+):
+    config = _config(tmp_path)
+    engine = RecordingEngine()
+    manager = BucketManager(config, embedding_engine=engine)
+    outbox = EmbeddingOutbox(config, manager, engine)
+    bucket_id = "same-id"
+    old_content = "old content snapshot"
+    new_content = "new content already queued"
+    engine.hashes[bucket_id] = content_hash(old_content)
+    assert outbox.enqueue(bucket_id, new_content) is True
+
+    await outbox.reconcile(
+        buckets=[{
+            "id": bucket_id,
+            "content": old_content,
+            "metadata": {},
+        }],
+        include_archive=False,
+    )
+
+    assert outbox.is_pending(bucket_id) is True
+    assert outbox._items[bucket_id]["content_hash"] == content_hash(
+        new_content
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconcile_does_not_requeue_a_worker_completed_mid_scan(tmp_path):
+    config = _config(tmp_path)
+    bucket_id = "completed-during-reconcile"
+    content = "the worker already stored this exact content"
+    digest = content_hash(content)
+
+    class Manager:
+        async def get(self, requested_id):
+            assert requested_id == bucket_id
+            return {"id": bucket_id, "content": content, "metadata": {}}
+
+    class CompletingEngine(RecordingEngine):
+        def __init__(self):
+            super().__init__()
+            self.outbox = None
+            self.completed = False
+
+        def list_content_hashes(self):
+            if not self.completed:
+                self.completed = True
+                self.hashes[bucket_id] = digest
+                self.outbox._complete(bucket_id, digest)
+            return dict(self.hashes)
+
+    engine = CompletingEngine()
+    outbox = EmbeddingOutbox(config, Manager(), engine)
+    engine.outbox = outbox
+    assert outbox.enqueue(bucket_id, content) is True
+
+    queued = await outbox.reconcile(
+        buckets=[{"id": bucket_id, "content": content, "metadata": {}}],
+        include_archive=False,
+    )
+
+    assert queued == 0
+    assert outbox.is_pending(bucket_id) is False
+
+
+@pytest.mark.asyncio
+async def test_reconcile_refreshes_stale_bucket_content_before_queueing(tmp_path):
+    config = _config(tmp_path)
+    bucket_id = "edited-after-caller-snapshot"
+    old_content = "old caller snapshot"
+    new_content = "new Markdown truth already indexed"
+    engine = RecordingEngine()
+    engine.hashes[bucket_id] = content_hash(new_content)
+
+    class Manager:
+        async def get(self, requested_id):
+            assert requested_id == bucket_id
+            return {"id": bucket_id, "content": new_content, "metadata": {}}
+
+    outbox = EmbeddingOutbox(config, Manager(), engine)
+    queued = await outbox.reconcile(
+        buckets=[{"id": bucket_id, "content": old_content, "metadata": {}}],
+        include_archive=False,
+    )
+
+    assert queued == 0
+    assert outbox.status()["pending"] == 0
+
+
+def test_ensure_pending_never_overwrites_newer_content(tmp_path):
+    config = _config(tmp_path)
+    engine = RecordingEngine()
+    manager = BucketManager(config, embedding_engine=engine)
+    outbox = EmbeddingOutbox(config, manager, engine)
+    bucket_id = "repair-cas"
+    new_content = "newer content already queued"
+
+    assert outbox.enqueue(bucket_id, new_content) is True
+    assert outbox.ensure_pending(bucket_id, "stale repair content") is True
+
+    assert outbox._items[bucket_id]["content_hash"] == content_hash(
+        new_content
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconcile_queues_content_for_meaning_only_index_row(tmp_path):
+    config = _config(tmp_path)
+    engine = RecordingEngine()
+    manager = BucketManager(config, embedding_engine=engine)
+    outbox = EmbeddingOutbox(config, manager, engine)
+    bucket_id = "meaning-only"
+    engine.hashes[bucket_id] = ""
+
+    async def get_bucket(requested_id):
+        assert requested_id == bucket_id
+        return {
+            "id": bucket_id,
+            "content": "正文仍然需要自己的向量",
+            "metadata": {"meaning": ["独立的 meaning"]},
+        }
+
+    manager.get = get_bucket
+
+    queued = await outbox.reconcile(
+        buckets=[{
+            "id": bucket_id,
+            "content": "正文仍然需要自己的向量",
+            "metadata": {"meaning": ["独立的 meaning"]},
+        }],
+        include_archive=False,
+    )
+
+    assert queued == 1
+    assert outbox.is_pending(bucket_id) is True
+
+
+@pytest.mark.asyncio
+async def test_reconcile_index_read_failure_does_not_queue_whole_vault(
+    tmp_path,
+):
+    config = _config(tmp_path)
+
+    class BrokenIndexEngine(RecordingEngine):
+        content_reader_called = False
+
+        def list_content_ids(self):
+            self.content_reader_called = True
+            raise sqlite3.OperationalError("database is busy")
+
+    engine = BrokenIndexEngine()
+    manager = BucketManager(config, embedding_engine=engine)
+    outbox = EmbeddingOutbox(config, manager, engine)
+
+    queued = await outbox.reconcile(buckets=[{
+        "id": "existing",
+        "content": "must not trigger a full reindex storm",
+        "metadata": {},
+    }])
+
+    assert queued == 0
+    assert engine.content_reader_called is True
+    assert outbox.status()["pending"] == 0
+
+
+@pytest.mark.asyncio
+async def test_reconcile_hash_read_failure_falls_back_to_index_ids(tmp_path):
+    config = _config(tmp_path)
+
+    class BrokenHashEngine(RecordingEngine):
+        def list_content_hashes(self):
+            raise sqlite3.OperationalError("database is busy")
+
+    engine = BrokenHashEngine()
+    bucket_id = "already-indexed"
+    engine.hashes[bucket_id] = content_hash("stored content")
+    manager = BucketManager(config, embedding_engine=engine)
+    outbox = EmbeddingOutbox(config, manager, engine)
+
+    queued = await outbox.reconcile(buckets=[{
+        "id": bucket_id,
+        "content": "stored content",
+        "metadata": {},
+    }])
+
+    assert queued == 0
+    assert outbox.status()["pending"] == 0
+
+
+@pytest.mark.asyncio
+async def test_transient_failure_survives_stale_reconcile_and_recovers(
+    tmp_path,
+):
+    config = _config(tmp_path)
+
+    class RecoveringEngine(RecordingEngine):
+        failing = True
+
+        async def generate_and_store(self, bucket_id, content):
+            self.calls.append((bucket_id, content))
+            if self.failing:
+                return False
+            self.hashes[bucket_id] = content_hash(content)
+            return True
+
+    engine = RecoveringEngine()
+    manager = BucketManager(config, embedding_engine=engine)
+    outbox = EmbeddingOutbox(config, manager, engine)
+    manager.attach_embedding_outbox(outbox)
+    outbox._running = True
+    bucket_id = await manager.create(content="retry after stale reconcile")
+    outbox._running = False
+
+    assert await outbox.process_once() is True
+    assert outbox.status()["retrying"] == 1
+    attempts = outbox._items[bucket_id]["attempts"]
+
+    await outbox.reconcile(buckets=[], include_archive=False)
+    assert outbox.is_pending(bucket_id) is True
+    assert outbox._items[bucket_id]["attempts"] == attempts
+
+    engine.failing = False
+    outbox.retry_now()
+    assert await outbox.process_once() is True
+    assert outbox.is_pending(bucket_id) is False
+    assert engine.hashes[bucket_id] == content_hash(
+        "retry after stale reconcile"
+    )
+
+
+@pytest.mark.asyncio
+async def test_merge_or_create_repairs_missing_outbox_item_without_false_warning(
+    tmp_path,
+    monkeypatch,
+):
+    config = _config(tmp_path)
+    config["merge_threshold"] = 75
+    engine = ObservableEngine()
+    manager = BucketManager(config, embedding_engine=engine)
+    engine.manager = manager
+    outbox = EmbeddingOutbox(config, manager, engine)
+    manager.attach_embedding_outbox(outbox)
+    outbox._running = True
+    monkeypatch.setattr(manager, "search", lambda *_args, **_kwargs: _empty())
+
+    original_create = manager.create
+
+    async def create_then_drop_pending(**kwargs):
+        bucket_id = await original_create(**kwargs)
+        outbox.discard(bucket_id)
+        return bucket_id
+
+    async def _empty():
+        return []
+
+    monkeypatch.setattr(manager, "create", create_then_drop_pending)
+    monkeypatch.setattr(rt, "config", config)
+    monkeypatch.setattr(rt, "bucket_mgr", manager)
+    monkeypatch.setattr(rt, "embedding_engine", engine)
+    monkeypatch.setattr(rt, "logger", MagicMock())
+
+    try:
+        bucket_id, merged, warning = await common.merge_or_create(
+            content="repair an accidentally lost embedding task",
+            tags=[],
+            importance=5,
+            domain=["test"],
+            valence=0.5,
+            arousal=0.3,
+            raw_merge=True,
+            source_tool="hold",
+        )
+    finally:
+        outbox._running = False
+
+    assert merged is False
+    assert warning == ""
+    assert outbox.is_pending(bucket_id) is True
+
+
+@pytest.mark.asyncio
+async def test_hold_create_with_meaning_is_visible_before_embedding_worker_runs(
+    tmp_path,
+    monkeypatch,
+):
+    config = _config(tmp_path)
+    config["merge_threshold"] = 75
+    engine = ObservableEngine()
+    manager = BucketManager(config, embedding_engine=engine)
+    engine.manager = manager
+    outbox = EmbeddingOutbox(config, manager, engine)
+    manager.attach_embedding_outbox(outbox)
+
+    async def no_matches(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(manager, "search", no_matches)
+    monkeypatch.setattr(rt, "config", config)
+    monkeypatch.setattr(rt, "bucket_mgr", manager)
+    monkeypatch.setattr(rt, "embedding_engine", engine)
+    monkeypatch.setattr(rt, "logger", MagicMock())
+
+    await outbox.start(reconcile=False)
+    task = asyncio.create_task(common.merge_or_create(
+        content="hold body with a separate meaning vector",
+        tags=[],
+        importance=5,
+        domain=["test"],
+        valence=0.5,
+        arousal=0.3,
+        raw_merge=True,
+        source_tool="hold",
+        meaning="why this memory matters",
+    ))
+    try:
+        await asyncio.wait_for(engine.meaning_started.wait(), timeout=1)
+        await asyncio.sleep(0.05)
+        engine.release_meaning.set()
+        bucket_id, merged, warning = await asyncio.wait_for(task, timeout=1)
+        assert await outbox.wait_until_idle(timeout=1)
+    finally:
+        engine.release_meaning.set()
+        if not task.done():
+            task.cancel()
+        await outbox.stop()
+
+    assert merged is False
+    assert warning == ""
+    assert engine.visible_during_meaning is True
+    assert engine.calls == [
+        (bucket_id, "hold body with a separate meaning vector")
+    ]
+    assert await engine.get_embedding(bucket_id) is not None
+    assert outbox.status()["pending"] == 0
+    assert outbox.status()["retrying"] == 0
 
 
 @pytest.mark.asyncio
@@ -307,10 +686,75 @@ def test_embedding_schema_migrates_and_records_content_hash(tmp_path):
         columns = {row[1] for row in conn.execute("PRAGMA table_info(embeddings)")}
     assert "content_hash" in columns
     assert engine.get_content_hash("legacy") == ""
+    assert engine.list_content_ids() == ["legacy"]
 
     digest = hashlib.sha256(b"current content").hexdigest()
     engine._store_embedding("legacy", [0.2, 0.3], digest)
     assert engine.get_content_hash("legacy") == digest
+
+
+@pytest.mark.asyncio
+async def test_reconcile_distinguishes_legacy_vector_from_meaning_only_row(
+    tmp_path,
+):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    db_path = vault / "embeddings.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """CREATE TABLE embeddings (
+                bucket_id TEXT PRIMARY KEY,
+                embedding TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO embeddings VALUES (?, ?, ?)",
+            ("legacy-content", "[0.1]", "2026-01-01T00:00:00Z"),
+        )
+
+    config = {
+        "buckets_dir": str(vault),
+        "embedding": {"enabled": False, "background_indexing": True},
+    }
+    engine = EmbeddingEngine(config)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """INSERT INTO embeddings
+               (bucket_id, embedding, updated_at, content_hash, meaning_embedding)
+               VALUES (?, '', ?, '', ?)""",
+            ("meaning-only", "2026-01-01T00:00:00Z", "[0.2]"),
+        )
+    manager = BucketManager(config, embedding_engine=engine)
+    outbox = EmbeddingOutbox(config, manager, engine)
+
+    async def get_bucket(bucket_id):
+        return {
+            "id": bucket_id,
+            "content": f"current content for {bucket_id}",
+            "metadata": {},
+        }
+
+    manager.get = get_bucket
+    queued = await outbox.reconcile(
+        buckets=[
+            {
+                "id": "legacy-content",
+                "content": "current content for legacy-content",
+                "metadata": {},
+            },
+            {
+                "id": "meaning-only",
+                "content": "current content for meaning-only",
+                "metadata": {"meaning": ["separate meaning"]},
+            },
+        ],
+        include_archive=False,
+    )
+
+    assert engine.list_content_ids() == ["legacy-content"]
+    assert queued == 1
+    assert outbox.pending_ids() == {"meaning-only"}
 
 
 @pytest.mark.asyncio
@@ -321,6 +765,10 @@ async def test_dashboard_backfill_delegates_to_running_outbox(monkeypatch):
         async def list_all(self, include_archive=False):
             assert include_archive is True
             return buckets
+
+        async def get(self, bucket_id):
+            assert bucket_id == "orphan"
+            return None
 
     class Outbox:
         running = True
@@ -379,6 +827,75 @@ async def test_dashboard_backfill_delegates_to_running_outbox(monkeypatch):
     assert state["running"] is False
 
 
+@pytest.mark.asyncio
+async def test_dashboard_backfill_does_not_delete_new_bucket_from_stale_snapshot(
+    monkeypatch,
+):
+    bucket_id = "created-after-backfill-snapshot"
+
+    class Manager:
+        async def list_all(self, include_archive=False):
+            assert include_archive is True
+            return []
+
+        async def get(self, requested_id):
+            assert requested_id == bucket_id
+            return {
+                "id": bucket_id,
+                "content": "newly published memory",
+                "metadata": {},
+            }
+
+    class Engine:
+        enabled = True
+
+        def __init__(self):
+            self.deleted = []
+
+        def list_all_ids(self):
+            return [bucket_id]
+
+        def delete_embedding(self, requested_id):
+            self.deleted.append(requested_id)
+
+    class Outbox:
+        running = True
+
+        async def reconcile(self, **kwargs):
+            assert kwargs["buckets"] == []
+            return 0
+
+        def retry_now(self):
+            return 0
+
+        def status(self):
+            return {"pending": 0, "retrying": 0}
+
+    engine = Engine()
+    state = {
+        "running": True,
+        "scanned": 0,
+        "missing": 0,
+        "done": 0,
+        "failed": 0,
+        "queued": 0,
+        "status": "scanning",
+        "error": "",
+    }
+    monkeypatch.setattr(embedding_web.sh, "bucket_mgr", Manager())
+    monkeypatch.setattr(embedding_web.sh, "embedding_outbox", Outbox())
+    monkeypatch.setattr(embedding_web.sh, "embedding_engine", engine)
+    monkeypatch.setattr(embedding_web, "_backfill_state", state)
+
+    await embedding_web._backfill_run()
+
+    assert engine.deleted == []
+    assert state["orphaned"] == 0
+    assert state["cleaned"] == 0
+    assert state["cleanup_failed"] == 0
+    assert state["status"] == "queued"
+
+
 def test_embedding_info_exposes_outbox_status(monkeypatch):
     class MCP:
         def __init__(self):
@@ -396,6 +913,7 @@ def test_embedding_info_exposes_outbox_status(monkeypatch):
     engine = SimpleNamespace(
         enabled=True,
         backend="api",
+        api_format="ollama",
         _backend=backend,
         db_path="",
     )
@@ -409,4 +927,5 @@ def test_embedding_info_exposes_outbox_status(monkeypatch):
     response = asyncio.run(mcp.routes[("GET", "/api/embedding/info")](object()))
     payload = json.loads(response.body.decode("utf-8"))
 
+    assert payload["api_format"] == "ollama"
     assert payload["outbox"] == {"pending": 2, "retrying": 1}

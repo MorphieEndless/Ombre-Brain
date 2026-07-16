@@ -920,18 +920,17 @@ class BucketManager:
                         bucket_id,
                         exc,
                     )
-            for bucket_id in sorted(removed_ids):
-                try:
-                    outbox.discard(bucket_id)
-                except Exception:
-                    pass
-
         for bucket_id in sorted(removed_ids):
             # Moving a file to archive is not physical deletion; keep its
             # derived vector. Only remove the index when the ID vanished from
             # every managed directory.
             if self._find_bucket_file(bucket_id) is not None:
                 continue
+            if outbox is not None:
+                try:
+                    outbox.discard(bucket_id)
+                except Exception:
+                    pass
             if self.embedding_engine is not None:
                 try:
                     self.embedding_engine.delete_embedding(bucket_id)
@@ -1239,7 +1238,17 @@ class BucketManager:
                     **metadata,
                 )
                 try:
-                    _atomic_create_text(candidate_path, frontmatter.dumps(post))
+                    # Publish the file and its ID lookup entry under the same
+                    # path-index guard.  The collision check above can leave a
+                    # complete, ready index that does not yet contain this new
+                    # ID; without this hand-off an outbox worker can observe
+                    # the committed Markdown as "missing" and discard its
+                    # embedding task while create() awaits meaning indexing.
+                    with self._bucket_path_index_guard:
+                        _atomic_create_text(
+                            candidate_path, frontmatter.dumps(post)
+                        )
+                        self._bucket_path_index[bucket_id] = candidate_path
                 except FileExistsError:
                     # An unmanaged writer may not honor the bucket turn.  The
                     # no-overwrite publish still protects its file; choose a
@@ -1263,6 +1272,11 @@ class BucketManager:
                 bucket_id,
             )
 
+        # Markdown becomes the visible source of truth before any network or
+        # derived-index await.  This also changes the path index from the
+        # precise hand-off above to a normal lazy rebuild for later lookups.
+        self._invalidate_bm25()
+
         logger.info(
             f"Created bucket / 创建记忆桶: {bucket_id} ({bucket_name}) → {primary_domain}/"
             + (" [PINNED]" if pinned else "") + (" [PROTECTED]" if protected else "")
@@ -1276,7 +1290,6 @@ class BucketManager:
         # 检索时取两者相似度的较高值，一句感受也能被单独检索命中。
         # 最佳努力：失败只记警告，不影响桶已经落盘的事实。
         await self._sync_meaning_embedding(bucket_id, metadata.get("meaning") or [])
-        self._invalidate_bm25()
         self._record_v3_bucket_event(
             "create",
             bucket_id,

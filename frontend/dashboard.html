@@ -2592,7 +2592,7 @@
         <div class="config-row" style="align-items:center;">
           <label>API Key</label>
           <input type="password" id="cfg-emb-api-key" placeholder="当前: 加载中…" style="flex:1;" />
-          <button type="button" onclick="saveEmbedKey()" title="保存 Key / Save key" style="margin-left:8px;padding:0 10px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="key"></i> 保存 Save</button>
+          <button type="button" onclick="saveEmbedKey()" title="保存完整向量配置 / Save embedding provider" style="margin-left:8px;padding:0 10px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="key"></i> 保存 Save</button>
           <button type="button" onclick="testEmbeddingKey()" title="测试向量化连接 / Test embedding connection" style="margin-left:4px;padding:0 10px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="zap"></i> 测试</button>
           <span id="emb-key-msg" style="margin-left:8px;font-size:11px;"></span>
         </div>
@@ -4647,7 +4647,9 @@ async function searchBuckets(query) {
   renderBuckets(merged);
 }
 
+let detailLoadGeneration = 0;
 async function showDetail(id) {
+  const generation = ++detailLoadGeneration;
   var panel = document.getElementById('detail-panel');
   var content = document.getElementById('detail-content');
   content.innerHTML = '<div class="loading">加载中… / Loading…</div>';
@@ -4655,7 +4657,10 @@ async function showDetail(id) {
 
   try {
     var res = await fetch(BASE + '/api/bucket/' + encodeURIComponent(id));
-    var b = await res.json();
+    var b = await readJsonSafe(res);
+    if (generation !== detailLoadGeneration) return false;
+    if (!res.ok) throw new Error((b && b.error) || ('HTTP ' + res.status));
+    if (!b || typeof b !== 'object' || Array.isArray(b)) throw new Error('记忆详情响应无效 / Invalid bucket detail response');
     var meta = b.metadata || {};
     // content 是可无损写回的原始 Markdown；display_content 仅供详情展示。
     var displayContent = typeof b.display_content === 'string' ? b.display_content : (b.content || '');
@@ -4720,8 +4725,11 @@ async function showDetail(id) {
       '</div>' +
       '<div class="detail-content">' + esc(displayContent) + '</div>' +
       renderEditForm(id, Object.assign({}, meta, {_content_for_edit: b.content}));
+    return true;
   } catch (e) {
+    if (generation !== detailLoadGeneration) return false;
     content.innerHTML = '<div class="loading">加载失败: ' + esc(e.message) + '</div>';
+    return false;
   }
 }
 
@@ -4842,6 +4850,7 @@ async function bucketDelete(id) {
 }
 
 function closeDetail() {
+  detailLoadGeneration++;
   document.getElementById('detail-panel').classList.remove('open', 'letter-mode', 'anchor-mode');
 }
 
@@ -6142,7 +6151,7 @@ async function refreshEmbInfo() {
     var r = await fetch(BASE + '/api/embedding/info');
     var d = await r.json();
     if (!d || !d.ok) return;
-    document.getElementById('emb-info-backend').textContent = d.backend || '—';
+    document.getElementById('emb-info-backend').textContent = d.api_format || d.backend || '—';
     document.getElementById('emb-info-model').textContent = d.model || '—';
     document.getElementById('emb-info-dim').textContent = d.vector_dim || '—';
     document.getElementById('emb-info-count').textContent = (d.db_count != null ? d.db_count : '—');
@@ -6314,10 +6323,16 @@ document.addEventListener('click', function(e) {
     var btn = e.target;
     btn.disabled = true;
     btn.textContent = '启动中… / Starting…';
+    var migrationPayload = {
+      target_backend: targetBackend,
+      api_format: (document.getElementById('cfg-emb-format') || {value:'openai_compat'}).value || 'openai_compat',
+      base_url: (document.getElementById('cfg-emb-base-url') || {value:''}).value.trim(),
+      model: (document.getElementById('cfg-emb-model') || {value:''}).value.trim()
+    };
     fetch(BASE + '/api/embedding/migrate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ target_backend: targetBackend })
+      body: JSON.stringify(migrationPayload)
     }).then(function(r) {
       // 经 readJsonSafe 解析：响应体为空 / 网关 502 HTML（隧道重连、Safari）时
       // 给人话错误，而不是 iOS Safari 那句 "The string did not match the expected pattern."
@@ -6489,7 +6504,7 @@ async function switchEmbedding(mode, skipConfirm) {
     payload = { target_backend: 'ollama', api_format: 'ollama', model: 'bge-m3', base_url: '' };
     label = '本地 bge-m3';
   } else {
-    payload = { target_backend: 'gemini', api_format: 'gemini', model: 'gemini-embedding-001' };
+    payload = { target_backend: 'gemini', api_format: 'gemini', model: 'gemini-embedding-001', base_url: '' };
     label = '云端 Gemini';
   }
   if (!skipConfirm && !confirm('即将切换到「' + label + '」并重算全库向量。\n\n· 后台运行，期间可正常使用（检索暂用旧库）\n· Gemini 3072 维 ↔ bge-m3 1024 维不通用，必须重算\n· 切到本地前请确认 bge-m3 已下载\n\n继续？')) return;
@@ -6513,7 +6528,7 @@ async function switchEmbedding(mode, skipConfirm) {
 
 // ===== 服务商预设：选一下自动填好 base_url + 正确的 model 名 =====
 // 参考酒馆：先选「用哪个」，字段自动长出来；从根上消灭「填错 model 名 400」那类坑。
-// 只填现有字段、不改保存逻辑（保存仍读这些 input 的值）。
+// 只填现有字段；保存时会把 format/base_url/model 作为一个完整 provider 配置提交。
 var EMBED_PRESETS = {
   gemini:      { format: 'openai_compat', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai/', model: 'gemini-embedding-001' },
   siliconflow: { format: 'openai_compat', base_url: 'https://api.siliconflow.cn/v1', model: 'BAAI/bge-m3' },
@@ -7115,10 +7130,18 @@ async function saveCompressKey() {
 async function saveEmbedKey() {
   var key = (document.getElementById('cfg-emb-api-key').value || '').trim();
   var base = (document.getElementById('cfg-emb-base-url').value || '').trim();
-  if (!key && !base) { var m = document.getElementById('emb-key-msg'); if (m) m.textContent = '请输入 Key'; return; }
-  var updates = {};
+  var model = (document.getElementById('cfg-emb-model').value || '').trim();
+  var format = (document.getElementById('cfg-emb-format') || {value:'openai_compat'}).value || 'openai_compat';
+  if (!key && !base && !model) { var m = document.getElementById('emb-key-msg'); if (m) m.textContent = '请先选择或填写向量服务配置'; return; }
+  // Provider identity is one tuple. Saving only key/base or only model/format
+  // publishes a mixed runtime immediately and can send a local model ID to a
+  // cloud endpoint (or the reverse), so submit all non-secret fields at once.
+  var updates = {
+    'OMBRE_EMBED_BASE_URL': base,
+    'OMBRE_EMBED_MODEL': model,
+    'OMBRE_EMBED_FORMAT': format
+  };
   if (key) { updates['OMBRE_EMBED_API_KEY'] = key; document.getElementById('cfg-emb-api-key').value = ''; }
-  if (base !== undefined) updates['OMBRE_EMBED_BASE_URL'] = base;
   await _saveEnvKeys(updates, 'emb-key-msg');
 }
 
@@ -7134,6 +7157,7 @@ async function saveConfig(persist) {
     embedding: {
       enabled: document.getElementById('cfg-emb-enabled').value === 'true',
       model: document.getElementById('cfg-emb-model').value,
+      base_url: document.getElementById('cfg-emb-base-url').value,
       backend: document.getElementById('cfg-emb-backend').value,
       api_format: (document.getElementById('cfg-emb-format') || {value:'openai_compat'}).value || 'openai_compat',
     },
@@ -7817,15 +7841,30 @@ async function pauseImport() {
   try { await fetch(BASE + '/api/import/pause', { method: 'POST' }); } catch(e) { alert('暂停失败: ' + (e.message || e)); }
 }
 
-async function loadImportResults() {
+let importResultsLoadGeneration = 0;
+async function loadImportResults(options) {
   const container = document.getElementById('import-results-list');
-  container.innerHTML = '<div class="loading">加载中… / Loading…</div>';
+  const opts = options && typeof options === 'object' ? options : {};
+  const generation = ++importResultsLoadGeneration;
+  const preserveScroll = opts.preserveScroll === true;
+  const requestedScrollTop = Number(opts.scrollTop);
+  const previousScrollTop = preserveScroll
+    ? (Number.isFinite(requestedScrollTop) ? Math.max(0, requestedScrollTop) : container.scrollTop)
+    : 0;
+  container.setAttribute('aria-busy', 'true');
+  if (!preserveScroll) container.innerHTML = '<div class="loading">加载中… / Loading…</div>';
   try {
     const res = await fetch(BASE + '/api/import/results?limit=30');
-    const data = await res.json();
+    const data = await readJsonSafe(res);
+    if (generation !== importResultsLoadGeneration) return false;
+    if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+    if (!data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.buckets)) {
+      throw new Error('导入结果响应无效 / Invalid import results response');
+    }
     if (!data.buckets || !data.buckets.length) {
       container.innerHTML = '<p style="color:var(--text-dim)">暂无记忆桶</p>';
-      return;
+      if (preserveScroll) container.scrollTop = previousScrollTop;
+      return true;
     }
     container.innerHTML = data.buckets.map(b => `
       <div data-review-bucket-id="${escAttr(b.id)}" style="background:var(--surface);border-radius:12px;padding:14px;margin:8px 0;">
@@ -7835,7 +7874,8 @@ async function loadImportResults() {
         </div>
         <p style="font-size:13px;margin:6px 0;white-space:pre-wrap;">${esc(b.content)}</p>
         <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;">${esc((b.tags||[]).map(t=>'#'+t).join(' '))}</div>
-        <div style="display:flex;gap:8px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button data-bucket-id="${escAttr(b.id)}" onclick="openImportedBucketEditor(this.dataset.bucketId)" class="icon-btn" title="编辑完整记忆 / Edit full memory"><svg class="icon" aria-hidden="true"><use href="#i-edit"></use></svg> 编辑</button>
           <button data-bucket-id="${escAttr(b.id)}" onclick="reviewAction(this.dataset.bucketId,'pin')" class="icon-btn" title="固定为永久记忆"><i data-lucide="pin"></i> 固定</button>
           <button data-bucket-id="${escAttr(b.id)}" onclick="reviewAction(this.dataset.bucketId,'important')" class="icon-btn" title="标为重要"><i data-lucide="star"></i> 重要</button>
           <button data-bucket-id="${escAttr(b.id)}" onclick="reviewAction(this.dataset.bucketId,'noise')" class="icon-btn" title="标为噪声并resolve"><i data-lucide="trash-2"></i> 噪声</button>
@@ -7843,7 +7883,27 @@ async function loadImportResults() {
         </div>
       </div>
     `).join('');
-  } catch(e) { container.innerHTML = '<p style="color:var(--negative)">加载失败: ' + esc(e.message) + '</p>'; }
+    if (preserveScroll) container.scrollTop = previousScrollTop;
+    return true;
+  } catch(e) {
+    if (generation !== importResultsLoadGeneration) return false;
+    container.innerHTML = '<p style="color:var(--negative)">加载失败: ' + esc(e.message) + '</p>';
+    return false;
+  } finally {
+    if (generation === importResultsLoadGeneration) container.removeAttribute('aria-busy');
+  }
+}
+
+async function openImportedBucketEditor(bid) {
+  // Import results intentionally contain only a short preview. Always enter
+  // through showDetail so the editor receives the complete Markdown body.
+  if (!await showDetail(bid)) return;
+  const editor = document.getElementById('bucket-edit-form');
+  if (!editor) return;
+  editor.open = true;
+  const contentInput = document.getElementById('edit-content');
+  if (contentInput) contentInput.focus();
+  else editor.scrollIntoView({block:'start'});
 }
 
 async function detectPatterns() {
@@ -8620,7 +8680,7 @@ function renderEditForm(bid, meta) {
     ? ['permanent', 'dynamic']
     : (typeIsEditable ? editableTypes : [currentType].concat(editableTypes));
   return `
-    <details style="margin-top:14px;border:1px solid var(--border);border-radius:2px;padding:12px 14px;background:var(--surface-solid);">
+    <details id="bucket-edit-form" style="margin-top:14px;border:1px solid var(--border);border-radius:2px;padding:12px 14px;background:var(--surface-solid);">
       <summary style="cursor:pointer;font-weight:600;color:var(--accent);display:flex;align-items:center;gap:5px;"><svg class="icon" aria-hidden="true"><use href="#i-edit"></use></svg> 编辑这条记忆</summary>
       <div style="display:grid;grid-template-columns:90px 1fr;gap:10px 12px;align-items:center;margin-top:14px;font-size:13px;">
         <label>名称</label>
@@ -8655,8 +8715,8 @@ function renderEditForm(bid, meta) {
           <span id="edit-weight-val" style="margin-left:8px;">${Math.round((meta.weight||0)*100)}% · ${weightAnchorLabel((meta.weight||0))}</span>
           <small style="color:var(--text-dim);display:block;margin-top:4px;">轻 25% · 中 50% · 重 75% · 必须 100%（0–100%，仅用于排序展示）</small>
         </span>` : ''}
-        <label style="align-self:start;padding-top:8px;">正文</label>
-        <textarea id="edit-content" placeholder="留空不改" style="min-height:120px;font-family:inherit;line-height:1.7;resize:vertical;">${curContent}</textarea>
+        <label for="edit-content" style="align-self:start;padding-top:8px;">正文</label>
+        <textarea id="edit-content" aria-label="正文 / Content" placeholder="留空不改" style="min-height:120px;font-family:inherit;line-height:1.7;resize:vertical;">${curContent}</textarea>
       </div>
       <div style="margin-top:12px;display:flex;gap:10px;align-items:center;">
         <button class="btn-primary" data-bucket-id="${escAttr(bid)}" onclick="bucketSaveEdit(this.dataset.bucketId)" title="保存修改" style="padding:0 14px;height:36px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="check"></i> 保存修改</button>
@@ -8721,6 +8781,11 @@ async function bucketSaveEdit(bid) {
   // 内容只在非空时带上，避免误清空
   if (newContent && newContent.trim()) body.content = newContent;
   const msg = document.getElementById('edit-msg');
+  const importView = document.getElementById('import-view');
+  const refreshImportResults = importView && importView.style.display !== 'none';
+  const importList = document.getElementById('import-results-list');
+  const importScrollTop = importList ? importList.scrollTop : 0;
+  const detailGenerationAtSave = detailLoadGeneration;
   msg.textContent = '保存中… / Saving…';
   msg.style.color = 'var(--text-dim)';
   try {
@@ -8732,8 +8797,15 @@ async function bucketSaveEdit(bid) {
     if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
     msg.innerHTML = _SV.ok + ' 已保存：' + esc((d.updated || []).join(', '));
     msg.style.color = 'var(--accent)';
-    await showDetail(bid);
+    // If the user opened/closed another detail while PATCH was in flight, do
+    // not pull the panel back to the bucket that just finished saving.
+    if (detailLoadGeneration === detailGenerationAtSave) {
+      await showDetail(bid);
+    }
     await loadBuckets();
+    if (refreshImportResults) {
+      await loadImportResults({preserveScroll:true, scrollTop:importScrollTop});
+    }
   } catch (e) {
     msg.innerHTML = _SV.err + ' ' + esc(e.message);
     msg.style.color = 'var(--negative)';

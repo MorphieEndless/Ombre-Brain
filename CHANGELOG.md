@@ -2,6 +2,29 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.7.5
+
+### 新增 / Added
+
+- “已导入记忆”卡片新增直接编辑入口：点击后读取完整桶正文并自动展开现有编辑器，保存后刷新卡片且保持列表滚动位置。
+
+### 修复 / Fixed
+
+- 修复云端与本地 embedding 配置串台：服务商预设现在会把 format、Base URL、model 与可选 Key 作为完整配置一次保存，迁移接口能正确持久化显式空 Base URL；本地 Ollama 会忽略残留的 Gemini/SiliconFlow 云端地址并使用独立本地地址，SiliconFlow 的 `bge-m3` 会安全规范为官方模型名 `BAAI/bge-m3`，错误面板及当前后端状态也会正确区分 `ollama` 与云 API。
+- 修复普通 `hold` 偶发误报“向量化失败”的竞态：新 Markdown 发布后会在任何 meaning/网络等待前立即对 ID 查询可见，后台 worker 不再把刚创建的桶误判为已删除并丢弃正文向量任务。
+- embedding outbox 对账改为单调补任务：衰减自愈或手动补齐拿到的旧快照不能再删除新任务、覆盖新 content hash 或重复入队；meaning-only 行会补建正文向量，而已有正文向量但旧版 hash 为空的历史行不会触发全库重算；记忆只移动到归档时保留待处理任务和已有向量，只有真正物理删除才清理。
+- Dashboard 向量补齐在清理孤儿索引前会回查 Markdown 真源，不再因扫描快照过时而误删并发 `hold` 刚生成的向量。
+- 若写入后的 outbox 任务异常缺失但向量仍未生成，`hold/grow` 会从 Markdown 真源自动重新入队；只有无法入队时才提示当前降级，不再把限流、超时或内部竞态一律误导为 API Key 错误。
+- Dashboard 详情与“已导入记忆”列表只接受最后一次请求结果，快速切换记忆或并发刷新时旧响应不再覆盖当前编辑对象和新卡片。
+
+### 安全 / Security
+
+- 本地 Ollama 运行时固定使用无秘密占位 token，保留在配置中供切回云端的 Gemini/SiliconFlow API Key 不再作为 Bearer 发往本地或自定义 Ollama 地址。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与热更新优先读取的 `src/VERSION` 同步更新为 `2.7.5`，Dashboard、运行时和热更新检查显示一致。
+
 ## 2.7.4
 
 ### 修复 / Fixed

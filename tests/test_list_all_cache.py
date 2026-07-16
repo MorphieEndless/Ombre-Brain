@@ -175,6 +175,27 @@ async def test_external_physical_delete_cleans_derived_index(bucket_mgr):
 
 
 @pytest.mark.asyncio
+async def test_external_archive_move_keeps_pending_and_existing_vector(bucket_mgr):
+    bucket_mgr.external_change_poll_seconds = 0
+    bucket_id = await bucket_mgr.create(content="moved to archive outside OB")
+    outbox = _OutboxProbe()
+    bucket_mgr.attach_embedding_outbox(outbox)
+    await bucket_mgr.list_all()
+    assert bucket_id in bucket_mgr.embedding_engine._store
+
+    source = Path(bucket_mgr._find_bucket_file(bucket_id))
+    destination = Path(bucket_mgr.archive_dir) / source.name
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    source.replace(destination)
+
+    refreshed = await bucket_mgr.list_all()
+
+    assert refreshed == []
+    assert bucket_id not in outbox.discarded
+    assert bucket_id in bucket_mgr.embedding_engine._store
+
+
+@pytest.mark.asyncio
 async def test_internal_touch_updates_file_fingerprint_without_false_external_event(bucket_mgr):
     bucket_mgr.external_change_poll_seconds = 0
     bucket_id = await bucket_mgr.create(content="touch fingerprint")

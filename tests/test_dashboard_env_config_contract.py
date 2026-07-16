@@ -67,3 +67,37 @@ def test_main_env_save_flow_is_left_intact():
     assert "var r = await authFetch('/api/env-config'" in source
     assert "refreshEnvConfig();" in source
     assert "已保存：" in source
+
+
+def test_embedding_quick_save_submits_one_complete_provider_tuple():
+    html = DASHBOARD.read_text(encoding="utf-8")
+    start = html.index("async function saveEmbedKey()")
+    end = html.index("async function saveConfig(", start)
+    source = html[start:end]
+
+    assert "'OMBRE_EMBED_BASE_URL': base" in source
+    assert "'OMBRE_EMBED_MODEL': model" in source
+    assert "'OMBRE_EMBED_FORMAT': format" in source
+    assert "if (key) { updates['OMBRE_EMBED_API_KEY'] = key" in source
+    assert source.count("await _saveEnvKeys(") == 1
+
+
+def test_embedding_migration_submits_current_provider_tuple():
+    html = DASHBOARD.read_text(encoding="utf-8")
+    start = html.index("var migrationPayload = {")
+    end = html.index("fetch(BASE + '/api/embedding/migrate'", start)
+    source = html[start:end]
+
+    assert "target_backend: targetBackend" in source
+    assert "cfg-emb-format" in source
+    assert "cfg-emb-base-url" in source
+    assert "cfg-emb-model" in source
+
+
+def test_main_config_save_also_keeps_embedding_base_url_with_model():
+    html = DASHBOARD.read_text(encoding="utf-8")
+    start = html.index("async function saveConfig(")
+    end = html.index("checkAuth().then", start)
+    source = html[start:end]
+
+    assert "base_url: document.getElementById('cfg-emb-base-url').value" in source

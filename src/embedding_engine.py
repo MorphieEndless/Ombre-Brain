@@ -55,11 +55,13 @@ except ImportError:  # pragma: no cover
 
 try:
     from provider_detect import (
+        is_known_cloud_embedding_endpoint,
         normalize_model_for_endpoint,
         strip_native_resource_prefix,
     )
 except ImportError:  # pragma: no cover
     from .provider_detect import (  # type: ignore
+        is_known_cloud_embedding_endpoint,
         normalize_model_for_endpoint,
         strip_native_resource_prefix,
     )
@@ -104,7 +106,12 @@ def _norm_model(name: str) -> str:
     return strip_native_resource_prefix(name).lower().removesuffix(":latest")
 
 
-def _humanize_api_error(e: Exception) -> str:
+def _humanize_api_error(
+    e: Exception,
+    *,
+    api_format: str = "openai_compat",
+    base_url: str = "",
+) -> str:
     """把 OpenAI 兼容后端的常见异常翻成可读中文提示，附在 OB-E001 detail 末尾。
 
     目的：让错误面板直接看懂 401/400/404/超时该怎么办，尤其跨境 provider 选错的
@@ -114,6 +121,15 @@ def _humanize_api_error(e: Exception) -> str:
     name = type(e).__name__
     code = getattr(e, "status_code", None)
     s = str(e).lower()
+    is_local = (api_format or "").strip().lower() in ("ollama", "local")
+    if is_local:
+        if code in (400, 404) or "badrequest" in name.lower() or "notfound" in name.lower():
+            return "→ 本地 Ollama 未找到或不支持该模型：确认 Ollama 已运行并已拉取 bge-m3。"
+        if "timeout" in name.lower() or "connect" in name.lower() or "timeout" in s:
+            return "→ 本地 Ollama 连接失败：确认服务已启动，且 Base URL 指向 Ollama 而不是云端 API。"
+        if code == 401 or "authentication" in name.lower() or "401" in s:
+            return "→ 本地 Ollama 返回 401：当前地址可能是需要鉴权的代理，而不是标准 Ollama 服务。"
+        return ""
     if code == 401 or "authentication" in name.lower() or "401" in s:
         return "→ 401：API key 无效或无权限，确认 key 正确且属于当前 base_url 的 provider。"
     if code == 404 or "notfound" in name.lower() or "404" in s:
@@ -179,14 +195,19 @@ class APIEmbeddingEngine(BaseEmbeddingEngine):
         model: str,
         dim: int = _GEMINI_DEFAULT_DIM,
         timeout_seconds: float = _API_TIMEOUT_SECONDS,
+        api_format: str = "openai_compat",
     ):
         self.api_key = api_key
         self.base_url = base_url
+        self.api_format = (api_format or "openai_compat").strip().lower()
+        self.backend_name = (
+            "ollama" if self.api_format in ("ollama", "local") else "api"
+        )
         self.timeout_seconds = positive_float(timeout_seconds, _API_TIMEOUT_SECONDS)
         # Google's OpenAI-compatible endpoint wants OpenAI-style bare model IDs.
         # Native REST uses the "models/" resource prefix, so normalize pasted
         # native IDs here before calling embeddings.create().
-        self.model = normalize_model_for_endpoint(model, base_url)
+        self.model = normalize_model_for_endpoint(model, base_url, self.api_format)
         self._dim = dim
         # 本地/容器 ollama 必须绕过系统代理。httpx 默认 trust_env=True 会读
         # 环境变量「以及 Windows 注册表/WinINET 系统代理」，于是 Clash/V2Ray 等
@@ -234,14 +255,18 @@ class APIEmbeddingEngine(BaseEmbeddingEngine):
             # 拿到了 2xx 响应但没有可用向量 —— 不能静默返回 []，否则向量化「成功
             # 调用却没结果」会无声无息（#3）。记 OB-E001 让错误面板可见。
             self._record_e001(
-                f"backend=api model={self.model} 返回空向量"
+                f"backend={self.backend_name} model={self.model} 返回空向量"
                 f"（base_url={self.base_url}，检查 model 名 / base_url / key 是否匹配该 provider）"
             )
             return []
         except Exception as e:
-            _hint = _humanize_api_error(e)
+            _hint = _humanize_api_error(
+                e,
+                api_format=self.api_format,
+                base_url=self.base_url,
+            )
             self._record_e001(
-                f"backend=api model={self.model} base_url={self.base_url} "
+                f"backend={self.backend_name} model={self.model} base_url={self.base_url} "
                 f"err={type(e).__name__}: {e}" + (f" {_hint}" if _hint else "")
             )
             return []
@@ -375,7 +400,10 @@ class EmbeddingEngine:
 
         # 解析 api_format（提前到 key 检查之前）。本地 ollama/local 后端无需真实 key，
         # 不能因为「key 为空」就被打到待机模式。
-        api_format = (embed_cfg.get("api_format") or "").strip() or os.environ.get("OMBRE_EMBED_FORMAT", "openai_compat")
+        api_format = (
+            (embed_cfg.get("api_format") or "").strip()
+            or os.environ.get("OMBRE_EMBED_FORMAT", "openai_compat")
+        ).lower()
         self.api_format = api_format
         is_local = api_format in ("ollama", "local")
 
@@ -384,7 +412,10 @@ class EmbeddingEngine:
             api_key = os.environ.get("OMBRE_EMBED_API_KEY", "").strip()
         # 本地模型没有 key 概念，但 OpenAI 客户端库要求 api_key 非空 → 补占位符。
         # 占位符会作为 Bearer 发给 ollama，ollama 不校验、照单全收。
-        if is_local and not api_key:
+        if is_local:
+            # Never forward a retained Gemini/SiliconFlow secret to a local or
+            # user-supplied Ollama URL. The real cloud key stays in config for
+            # switching back, but the local runtime uses a non-secret token.
             api_key = "ollama"
 
         if not api_key:
@@ -402,9 +433,16 @@ class EmbeddingEngine:
                 if os.path.exists("/.dockerenv")
                 else "http://127.0.0.1:11434/v1"
             )
+            configured_base = (embed_cfg.get("base_url") or "").strip()
+            if configured_base and is_known_cloud_embedding_endpoint(configured_base):
+                logger.warning(
+                    "[embedding] local mode ignored stale cloud base_url=%s",
+                    configured_base,
+                )
+                configured_base = ""
             base_url = (
-                (embed_cfg.get("base_url") or "").strip()
-                or os.environ.get("OMBRE_OLLAMA_URL", "").strip()
+                os.environ.get("OMBRE_OLLAMA_URL", "").strip()
+                or configured_base
                 or _local_default
             )
             model = embed_cfg.get("model") or "bge-m3"
@@ -419,6 +457,7 @@ class EmbeddingEngine:
                 model=model,
                 dim=dim,
                 timeout_seconds=timeout_seconds,
+                api_format=api_format,
             )
         elif api_format == "gemini":
             model = embed_cfg.get("model") or "gemini-embedding-001"
@@ -448,6 +487,7 @@ class EmbeddingEngine:
                 model=model,
                 dim=dim,
                 timeout_seconds=timeout_seconds,
+                api_format=api_format,
             )
 
         self.model = self._backend.model_name()
@@ -696,6 +736,24 @@ class EmbeddingEngine:
         try:
             rows = conn.execute("SELECT bucket_id FROM embeddings").fetchall()
             return [r[0] for r in rows]
+        finally:
+            conn.close()
+
+    def list_content_ids(self) -> list[str]:
+        """Return IDs that have a real content vector, not only meaning data.
+
+        Rows created by ``generate_and_store_meaning`` deliberately contain an
+        empty ``embedding`` value until the durable content outbox catches up.
+        Legacy content rows, on the other hand, may have an empty
+        ``content_hash`` after the schema migration while still holding a valid
+        vector. Inspecting the vector column keeps those two states distinct.
+        """
+        conn = sqlite3.connect(self.db_path)
+        try:
+            rows = conn.execute(
+                "SELECT bucket_id FROM embeddings WHERE TRIM(embedding) <> ''"
+            ).fetchall()
+            return [str(row[0]) for row in rows]
         finally:
             conn.close()
 

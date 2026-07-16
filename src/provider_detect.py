@@ -17,6 +17,43 @@ models/ 前缀混淆）的根源之一。这里把判断逻辑收敛成一份，
 
 from __future__ import annotations
 
+from urllib.parse import SplitResult, urlsplit
+
+
+_SILICONFLOW_HOSTS = frozenset({"api.siliconflow.cn", "api.siliconflow.com"})
+_KNOWN_CLOUD_EMBEDDING_HOSTS = _SILICONFLOW_HOSTS | frozenset(
+    {"generativelanguage.googleapis.com"}
+)
+
+
+def _split_endpoint(base_url: str) -> SplitResult:
+    """Parse an endpoint even when a user omitted the URL scheme."""
+    value = (base_url or "").strip()
+    if value and "://" not in value:
+        value = f"//{value}"
+    try:
+        return urlsplit(value)
+    except ValueError:
+        return urlsplit("")
+
+
+def endpoint_hostname(base_url: str) -> str:
+    """Return a normalized exact hostname for provider classification."""
+    try:
+        return (_split_endpoint(base_url).hostname or "").rstrip(".").lower()
+    except ValueError:
+        return ""
+
+
+def is_siliconflow_endpoint(base_url: str) -> bool:
+    """Whether an endpoint is an official SiliconFlow API hostname."""
+    return endpoint_hostname(base_url) in _SILICONFLOW_HOSTS
+
+
+def is_known_cloud_embedding_endpoint(base_url: str) -> bool:
+    """Detect cloud presets that must never be reused by local Ollama mode."""
+    return endpoint_hostname(base_url) in _KNOWN_CLOUD_EMBEDDING_HOSTS
+
 
 def is_gemini_native_host(base_url: str) -> bool:
     """base_url 是否指向 Google 的 generativelanguage.googleapis.com 域名。
@@ -25,7 +62,7 @@ def is_gemini_native_host(base_url: str) -> bool:
     「这把 key/这个 base_url 是不是在跟 Google 打交道」这一级别的判断
     （如 dehydrator.py 的 AQ.* key 自动切换检测）。
     """
-    return "generativelanguage.googleapis.com" in (base_url or "")
+    return endpoint_hostname(base_url) == "generativelanguage.googleapis.com"
 
 
 def is_gemini_openai_compat_endpoint(base_url: str) -> bool:
@@ -36,11 +73,15 @@ def is_gemini_openai_compat_endpoint(base_url: str) -> bool:
     要求带 "models/" 资源前缀（"models/gemini-embedding-001"）。混淆两者
     是 OB-E001（"unexpected model name format"）的根因。
     """
-    base_url_norm = (base_url or "").rstrip("/")
-    return is_gemini_native_host(base_url_norm) and "/openai" in base_url_norm
+    parsed = _split_endpoint(base_url)
+    return is_gemini_native_host(base_url) and "/openai" in parsed.path.rstrip("/")
 
 
-def normalize_model_for_endpoint(model: str, base_url: str) -> str:
+def normalize_model_for_endpoint(
+    model: str,
+    base_url: str,
+    api_format: str = "",
+) -> str:
     """根据端点类型决定模型名要不要带 "models/" 前缀。
 
     - Gemini OpenAI-compat 端点：剥掉 "models/" 前缀（裸名）
@@ -49,6 +90,24 @@ def normalize_model_for_endpoint(model: str, base_url: str) -> str:
       格式要求与 OpenAI-compat 不同，不能在这里统一处理）
     """
     model = (model or "").strip()
+    api_format = (api_format or "").strip().lower()
+    model_key = model.lower()
+
+    # Local Ollama and SiliconFlow use different public IDs for the same BGE
+    # family. Normalize only the known aliases; arbitrary custom model names
+    # must remain untouched.
+    if api_format in ("ollama", "local"):
+        if model_key in ("baai/bge-m3", "baai/bge-m3:latest"):
+            return "bge-m3" if not model_key.endswith(":latest") else "bge-m3:latest"
+        return model
+
+    if is_siliconflow_endpoint(base_url) and model_key in (
+        "bge-m3",
+        "bge-m3:latest",
+        "baai/bge-m3",
+        "baai/bge-m3:latest",
+    ):
+        return "BAAI/bge-m3"
     if is_gemini_openai_compat_endpoint(base_url):
         return model.removeprefix("models/").strip()
     return model

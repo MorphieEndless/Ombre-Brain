@@ -139,6 +139,37 @@ class EmbeddingOutbox:
         self._wake()
         return True
 
+    def ensure_pending(self, bucket_id: str, content: str) -> bool:
+        """Atomically add a task only when the ID has no pending version.
+
+        Repair callers may hold a stale copy of content.  A normal ``enqueue``
+        would overwrite a newer task that arrived between their status check
+        and repair attempt; keeping the existing item is safe because the
+        worker always re-reads Markdown and corrects stale hashes itself.
+        """
+        bucket_id = str(bucket_id or "").strip()
+        if not bucket_id:
+            return False
+        if not (content or "").strip():
+            return False
+
+        now = now_iso()
+        with self._lock:
+            if bucket_id in self._items:
+                return True
+            self._items[bucket_id] = {
+                "content_hash": content_hash(content),
+                "queued_at": now,
+                "updated_at": now,
+                "attempts": 0,
+                "next_attempt_at": 0.0,
+                "last_attempt_at": "",
+                "last_error": "",
+            }
+            self._persist_locked()
+        self._wake()
+        return True
+
     def discard(self, bucket_id: str) -> bool:
         with self._lock:
             if bucket_id not in self._items:
@@ -248,7 +279,15 @@ class EmbeddingOutbox:
         include_archive: bool = True,
         buckets: list[dict] | None = None,
     ) -> int:
-        """Queue missing or hash-stale vectors and remove stale queue entries."""
+        """Monotonically queue missing or hash-stale vectors.
+
+        ``buckets`` is often a caller-owned snapshot captured well before this
+        method runs (decay and Dashboard backfill both do substantial work in
+        between).  It is therefore never authoritative enough to delete or
+        replace an existing pending item.  Only ``_process`` may acknowledge a
+        task after checking the current Markdown truth; managed delete paths
+        explicitly call ``discard``.
+        """
         if buckets is None:
             buckets = await self.bucket_mgr.list_all(include_archive=include_archive)
 
@@ -262,42 +301,101 @@ class EmbeddingOutbox:
             current[bucket_id] = (content, content_hash(content))
 
         engine = self.embedding_engine
-        try:
-            indexed_ids = set(engine.list_all_ids()) if engine else set()
-        except Exception as exc:
-            logger.warning("Embedding outbox could not list index IDs: %s", exc)
-            indexed_ids = set()
-        try:
-            indexed_hashes = (
-                dict(engine.list_content_hashes())
-                if engine and hasattr(engine, "list_content_hashes")
-                else {}
+
+        def read_index_state():
+            # ``list_all_ids`` includes meaning-only rows. New engines expose a
+            # content-specific reader; the fallback keeps adapters compatible.
+            content_id_reader = getattr(engine, "list_content_ids", None)
+            if not callable(content_id_reader):
+                content_id_reader = getattr(engine, "list_all_ids", None)
+            try:
+                content_ids = (
+                    set(content_id_reader())
+                    if callable(content_id_reader)
+                    else set()
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Embedding outbox could not list content index IDs: %s", exc
+                )
+                # Unknown is not the same as empty. Queueing the whole vault on
+                # a transient SQLite read failure creates an API storm.
+                return None
+
+            hash_reader = getattr(engine, "list_content_hashes", None)
+            hashes_supported = callable(hash_reader)
+            try:
+                indexed_hashes = (
+                    dict(hash_reader()) if hashes_supported else {}
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Embedding outbox could not read index hashes: %s", exc
+                )
+                indexed_hashes = {}
+                hashes_supported = False
+            return content_ids, indexed_hashes, hashes_supported
+
+        initial_state = read_index_state()
+        if initial_state is None:
+            return 0
+        content_ids, indexed_hashes, hashes_supported = initial_state
+
+        # Caller-owned bucket lists can be stale. Use them only to identify
+        # likely candidates, then re-read Markdown before queueing.
+        candidate_ids: list[str] = []
+        for bucket_id, (_content, digest) in current.items():
+            stored_hash = str(indexed_hashes.get(bucket_id) or "")
+            needs_index = bucket_id not in content_ids or (
+                hashes_supported and bool(stored_hash) and stored_hash != digest
             )
-        except Exception as exc:
-            logger.warning("Embedding outbox could not read index hashes: %s", exc)
-            indexed_hashes = {}
+            if needs_index:
+                candidate_ids.append(bucket_id)
+
+        latest_current: dict[str, tuple[str, str]] = {}
+        for bucket_id in candidate_ids:
+            try:
+                bucket = await self.bucket_mgr.get(bucket_id)
+            except Exception as exc:
+                logger.warning(
+                    "Embedding outbox could not re-read bucket %s: %s",
+                    bucket_id,
+                    exc,
+                )
+                continue
+            if not bucket:
+                continue
+            metadata = bucket.get("metadata") or {}
+            content = str(bucket.get("content") or "")
+            if not content.strip() or metadata.get("deleted_at"):
+                continue
+            latest_current[bucket_id] = (content, content_hash(content))
 
         queued = 0
         changed = False
         now = now_iso()
         with self._lock:
-            for bucket_id in list(self._items):
-                if bucket_id not in current:
-                    self._items.pop(bucket_id, None)
-                    changed = True
-
-            for bucket_id, (_content, digest) in current.items():
+            # Linearize the final index read with enqueue/complete. If a worker
+            # finished after the first snapshot, either its task still exists
+            # or this fresh read sees its vector, so it cannot be queued twice.
+            final_state = read_index_state()
+            if final_state is None:
+                return 0
+            content_ids, indexed_hashes, hashes_supported = final_state
+            for bucket_id, (_content, digest) in latest_current.items():
                 stored_hash = str(indexed_hashes.get(bucket_id) or "")
-                needs_index = bucket_id not in indexed_ids or (
-                    bool(stored_hash) and stored_hash != digest
+                needs_index = bucket_id not in content_ids or (
+                    hashes_supported
+                    and bool(stored_hash)
+                    and stored_hash != digest
                 )
                 existing = self._items.get(bucket_id)
                 if not needs_index:
-                    if existing is not None:
-                        self._items.pop(bucket_id, None)
-                        changed = True
                     continue
-                if existing and existing.get("content_hash") == digest:
+                # A pending task may represent a bucket/content version newer
+                # than this snapshot.  Keep it untouched; the worker re-reads
+                # current Markdown and self-corrects stale hashes before write.
+                if existing is not None:
                     continue
                 self._items[bucket_id] = {
                     "content_hash": digest,

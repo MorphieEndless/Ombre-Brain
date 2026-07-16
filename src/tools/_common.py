@@ -45,7 +45,8 @@ from utils import parse_bool
 from . import _runtime as rt
 
 _EMBED_WARN = (
-    "向量化失败，该桶不参与语义检索，仅支持关键词匹配。请检查 OMBRE_EMBED_API_KEY。"
+    "向量暂未完成，该桶当前仅支持关键词匹配；正文已保存。"
+    "请检查向量队列与 embedding 提供商配置后重试补齐。"
 )
 
 # ============================================================
@@ -949,11 +950,91 @@ async def _merge_or_create_inner(
     embed_warn = ""
     embedding_state = "disabled"
     outbox = getattr(rt.bucket_mgr, "embedding_outbox", None)
-    if outbox is not None and outbox.is_pending(bucket_id):
-        embedding_state = "queued"
-    elif rt.embedding_engine and getattr(rt.embedding_engine, "enabled", False):
+    engine = rt.embedding_engine
+    if outbox is not None:
         try:
-            existing = await rt.embedding_engine.get_embedding(bucket_id)
+            pending = bool(outbox.is_pending(bucket_id))
+        except Exception as pending_exc:
+            pending = False
+            rt.logger.warning(
+                "embedding outbox pending check failed for %s: %s",
+                bucket_id,
+                pending_exc,
+            )
+        if pending:
+            embedding_state = "queued"
+        else:
+            existing = None
+            lookup_error = None
+            if engine and getattr(engine, "enabled", False):
+                try:
+                    existing = await engine.get_embedding(bucket_id)
+                except Exception as exc:
+                    lookup_error = exc
+            if existing is not None:
+                embedding_state = "indexed"
+            else:
+                # Defensive repair: a stale reconcile/path-index race must not
+                # turn a transiently lost task into a permanent unindexed row
+                # or tell the user to delete and recreate valid Markdown.
+                repair_content = content
+                try:
+                    stored_bucket = await rt.bucket_mgr.get(bucket_id)
+                    if stored_bucket is not None:
+                        repair_content = str(
+                            stored_bucket.get("content") or repair_content
+                        )
+                except Exception as read_exc:
+                    rt.logger.warning(
+                        "embedding repair could not reload bucket %s: %s",
+                        bucket_id,
+                        read_exc,
+                    )
+                try:
+                    ensure_pending = getattr(outbox, "ensure_pending", None)
+                    if callable(ensure_pending):
+                        repaired = bool(ensure_pending(
+                            bucket_id,
+                            repair_content,
+                        ))
+                    else:
+                        repaired = bool(outbox.enqueue(
+                            bucket_id,
+                            repair_content,
+                            reset_retry=False,
+                        ))
+                except Exception as enqueue_exc:
+                    try:
+                        repaired = bool(outbox.is_pending(bucket_id))
+                    except Exception:
+                        repaired = False
+                    rt.logger.warning(
+                        "embedding outbox repair enqueue failed for %s: %s",
+                        bucket_id,
+                        enqueue_exc,
+                    )
+                if repaired:
+                    embedding_state = "queued_repair"
+                    rt.logger.warning(
+                        "Requeued missing embedding task after create: %s%s",
+                        bucket_id,
+                        (
+                            f" lookup_error={type(lookup_error).__name__}"
+                            if lookup_error is not None else ""
+                        ),
+                    )
+                else:
+                    embedding_state = "missing"
+                    embed_warn = _EMBED_WARN
+                    rt.logger.info(
+                        "op=merge_or_create phase=branch "
+                        "branch=embed_degrade bucket_id=%s "
+                        "reason=outbox_requeue_failed",
+                        bucket_id,
+                    )
+    elif engine and getattr(engine, "enabled", False):
+        try:
+            existing = await engine.get_embedding(bucket_id)
             if existing is None:
                 embedding_state = "missing"
                 embed_warn = _EMBED_WARN

@@ -296,7 +296,23 @@ async def _backfill_run() -> None:
         except Exception as exc:
             logger.warning("[backfill] could not list indexed ids: %s", exc)
             indexed_ids = set()
-        orphan_ids = sorted(indexed_ids - known_ids)
+        orphan_candidates = sorted(indexed_ids - known_ids)
+        orphan_ids: list[str] = []
+        for bucket_id in orphan_candidates:
+            try:
+                # ``all_buckets`` is only a snapshot. A concurrent hold may
+                # publish and index a new bucket after that scan; never delete
+                # its vector without confirming the Markdown is still absent.
+                if await sh.bucket_mgr.get(bucket_id) is not None:
+                    continue
+                orphan_ids.append(bucket_id)
+            except Exception as exc:
+                _backfill_state["cleanup_failed"] += 1
+                logger.warning(
+                    "[backfill] orphan confirmation failed for %s: %s",
+                    bucket_id,
+                    exc,
+                )
         _backfill_state["orphaned"] = len(orphan_ids)
         for bucket_id in orphan_ids:
             try:
@@ -375,6 +391,7 @@ def register(mcp) -> None:
         info: dict[str, object] = {
             "ok": True,
             "backend": getattr(sh.embedding_engine, "backend", ""),
+            "api_format": getattr(sh.embedding_engine, "api_format", ""),
             "enabled": bool(getattr(sh.embedding_engine, "enabled", False)),
             "model": backend_obj.model_name() if backend_obj else "",
             "vector_dim": backend_obj.vector_dim() if backend_obj else 0,
@@ -474,7 +491,10 @@ def register(mcp) -> None:
             target_emb_cfg["api_format"] = req_api_format
         if body.get("api_key"):
             target_emb_cfg["api_key"] = str(body["api_key"]).strip()
-        if body.get("base_url"):
+        # Field presence and truthiness are different here: switching from a
+        # cloud provider to Ollama deliberately sends an empty base_url so the
+        # old cloud endpoint is cleared and the local default can take over.
+        if "base_url" in body:
             target_emb_cfg["base_url"] = str(body["base_url"]).strip()
         if body.get("model"):
             target_emb_cfg["model"] = str(body["model"]).strip()
@@ -603,7 +623,7 @@ def register(mcp) -> None:
                 if body.get("api_key"):
                     cfg_emb["api_key"] = str(body["api_key"]).strip()
                     _yaml_updates["api_key"] = str(body["api_key"]).strip()
-                if body.get("base_url"):
+                if "base_url" in body:
                     cfg_emb["base_url"] = str(body["base_url"]).strip()
                     _yaml_updates["base_url"] = str(body["base_url"]).strip()
                 if body.get("model"):

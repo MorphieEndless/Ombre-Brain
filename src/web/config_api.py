@@ -447,6 +447,10 @@ def register(mcp) -> None:
                 emb["model"] = e["model"]
                 updated.append("embedding.model")
                 rebuild_embedding = True
+            if "base_url" in e:
+                emb["base_url"] = str(e["base_url"]).strip()
+                updated.append("embedding.base_url")
+                rebuild_embedding = True
             if "timeout_seconds" in e:
                 emb["timeout_seconds"] = e["timeout_seconds"]
                 updated.append("embedding.timeout_seconds")
@@ -532,7 +536,7 @@ def register(mcp) -> None:
                     if not isinstance(sc_emb, dict):
                         sc_emb = {}
                         save_config["embedding"] = sc_emb
-                    for key in ("model", "api_format", "timeout_seconds"):
+                    for key in ("model", "base_url", "api_format", "timeout_seconds"):
                         if key in body["embedding"]:
                             sc_emb[key] = body["embedding"][key]
                     if embedding_enabled is not None:

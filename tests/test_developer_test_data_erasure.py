@@ -134,7 +134,7 @@ async def test_test_data_cleanup_requires_reason_and_rejects_conflicting_modes(
 
 def test_dashboard_separates_normal_batch_actions_from_developer_erasure():
     text = Path("frontend/dashboard.html").read_text(encoding="utf-8")
-    assert "全选当前筛选" in text
+    assert "全选当前页" in text
     assert "/api/buckets/batch" in text
     assert "body.developer-mode .developer-only" in text
     assert "/api/developer/buckets/hard-delete" in text

@@ -225,7 +225,7 @@
   .bucket-list { display: flex; flex-direction: column; gap: 8px; }
   .bucket-viewbar { display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0;color:var(--text-dim);font-size:12px; }
   .bucket-sort-control { display:inline-flex;align-items:center;gap:7px; }
-  .bucket-sort-control select { height:32px;padding:0 28px 0 10px;border:1px solid var(--border-strong);border-radius:10px;background:var(--surface-solid);color:var(--text);font:inherit;cursor:pointer; }
+  .bucket-sort-control select { min-height:32px;height:auto;padding:5px 28px 5px 10px !important;border:1px solid var(--border-strong);border-radius:10px;background:var(--surface-solid);color:var(--text);font:inherit;line-height:1.4;cursor:pointer; }
   .bucket-sort-note { color:var(--text-light);font-size:11px; }
   .bucket-bulkbar { display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0;padding:10px 14px;border:none;border-radius:14px;background:var(--surface-solid);box-shadow:4px 4px 11px var(--shadow-dark-subtle), -3px -3px 8px var(--shadow-light); }
   .bucket-bulkbar-actions { display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto; }
@@ -1954,7 +1954,7 @@
     <span class="bucket-sort-note" id="bucket-sort-note">按综合衰减分排列</span>
   </div>
   <div class="bucket-bulkbar">
-    <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);height:32px;"><input id="bucket-select-all" type="checkbox" onchange="selectAllFiltered(this.checked)" style="accent-color:var(--accent);cursor:pointer;"> 全选当前筛选</label>
+    <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);height:32px;"><input id="bucket-select-all" type="checkbox" onchange="selectAllCurrentPage(this.checked)" style="accent-color:var(--accent);cursor:pointer;"> 全选当前页</label>
     <span id="bucket-selected-count" style="color:var(--text-dim);font-size:12px;">已选 0</span>
     <div class="bucket-bulkbar-actions">
       <button onclick="runBucketBatch('forget')" style="height:32px;padding:0 12px;font-size:12px;display:inline-flex;align-items:center;gap:5px;"><i data-lucide="eye-off"></i> 主动遗忘</button>
@@ -4246,17 +4246,31 @@ document.addEventListener('DOMContentLoaded', function() {
   setDeveloperMode(developerMode);
 });
 
+function _currentBucketPageItems() {
+  var visible = (_curBuckets || []).filter(function(b) { return !b.dont_surface; });
+  if (!visible.length) return [];
+  var totalPages = Math.ceil(visible.length / BUCKETS_PER_PAGE);
+  var page = _normalizeBucketPage(bucketPage, totalPages, 1);
+  var startIdx = (page - 1) * BUCKETS_PER_PAGE;
+  return visible.slice(startIdx, startIdx + BUCKETS_PER_PAGE);
+}
+
+function _currentBucketPageIds() {
+  return _currentBucketPageItems().map(function(b) { return b.id; });
+}
+
 function syncBucketSelectionUi() {
   var count = document.getElementById('bucket-selected-count');
   if (count) count.textContent = '已选 ' + selectedBucketIds.size;
   document.querySelectorAll('.bucket-select').forEach(function(box) {
     box.checked = selectedBucketIds.has(box.dataset.id);
   });
-  var visibleIds = (_curBuckets || []).filter(function(b) { return !b.dont_surface; }).map(function(b) { return b.id; });
+  var pageIds = _currentBucketPageIds();
   var all = document.getElementById('bucket-select-all');
   if (all) {
-    all.checked = !!visibleIds.length && visibleIds.every(function(id) { return selectedBucketIds.has(id); });
-    all.indeterminate = visibleIds.some(function(id) { return selectedBucketIds.has(id); }) && !all.checked;
+    all.checked = !!pageIds.length && pageIds.every(function(id) { return selectedBucketIds.has(id); });
+    all.indeterminate = pageIds.some(function(id) { return selectedBucketIds.has(id); }) && !all.checked;
+    all.disabled = !pageIds.length;
   }
 }
 
@@ -4265,9 +4279,9 @@ function toggleBucketSelection(id, checked) {
   syncBucketSelectionUi();
 }
 
-function selectAllFiltered(checked) {
-  (_curBuckets || []).filter(function(b) { return !b.dont_surface; }).forEach(function(b) {
-    if (checked) selectedBucketIds.add(b.id); else selectedBucketIds.delete(b.id);
+function selectAllCurrentPage(checked) {
+  _currentBucketPageIds().forEach(function(id) {
+    if (checked) selectedBucketIds.add(id); else selectedBucketIds.delete(id);
   });
   syncBucketSelectionUi();
 }
@@ -4553,8 +4567,7 @@ function _paintBuckets() {
   // 分页：每页 BUCKETS_PER_PAGE 个，底部翻页
   var totalPages = Math.ceil(visible.length / BUCKETS_PER_PAGE);
   bucketPage = _normalizeBucketPage(bucketPage, totalPages, 1);
-  var startIdx = (bucketPage - 1) * BUCKETS_PER_PAGE;
-  var pageItems = visible.slice(startIdx, startIdx + BUCKETS_PER_PAGE);
+  var pageItems = _currentBucketPageItems();
   list.innerHTML = pageItems.map(function(b) {
     // iter 1.8: dont_surface = 主动遗忘（仍在磁盘） / first_of_kind = 首次出现的标签组合
     // 图标：feel→计算表情、letter→信封、pinned→可发光的钉、其余沿用原逻辑

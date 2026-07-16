@@ -1081,7 +1081,6 @@ class ImportEngine:
         importance = item.get("importance", _DEFAULT_IMPORTANCE)
         valence = item.get("valence", _DEFAULT_VALENCE)
         arousal = item.get("arousal", _DEFAULT_AROUSAL)
-        name = item.get("name", "")
 
         try:
             existing = await self.bucket_mgr.search(content, limit=1, domain_filter=domain or None)

@@ -80,12 +80,138 @@ def test_bucket_pager_has_first_last_and_direct_page_navigation():
     assert 'role="status" aria-live="polite"' in source
 
 
+def test_bucket_sort_control_keeps_enough_vertical_space_for_text():
+    html = DASHBOARD.read_text(encoding="utf-8")
+    start = html.index(".bucket-sort-control select {")
+    end = html.index("}", start)
+    rule = html[start:end]
+
+    # The later global form-control rule uses 10px vertical padding with
+    # !important. This local override must win without combining that padding
+    # with a fixed 32px box, which clipped the lower half of Chinese glyphs.
+    assert "min-height:32px" in rule
+    assert "height:auto" in rule
+    assert "padding:5px 28px 5px 10px !important" in rule
+    assert "line-height:1.4" in rule
+    assert ";height:32px" not in rule
+
+
 def test_empty_bucket_view_resets_page_and_selection_state():
     source = _dashboard_section("function _paintBuckets()", "function _localBucketMatches(")
     empty_branch = source[source.index("if (!visible.length)") : source.index("// 分页：")]
 
     assert "bucketPage = 1;" in empty_branch
     assert "syncBucketSelectionUi();" in empty_branch
+
+
+def test_select_all_control_is_scoped_to_the_current_page():
+    html = DASHBOARD.read_text(encoding="utf-8")
+    source = _dashboard_section(
+        "function _currentBucketPageItems(", "async function runBucketBatch("
+    )
+
+    assert "全选当前页" in html
+    assert "selectAllCurrentPage(this.checked)" in html
+    assert "selectAllFiltered" not in html
+    assert "return visible.slice(startIdx, startIdx + BUCKETS_PER_PAGE);" in source
+    assert "return _currentBucketPageItems().map(function(b)" in source
+    assert "var pageIds = _currentBucketPageIds();" in source
+    assert "function selectAllCurrentPage(checked)" in source
+    assert "_currentBucketPageIds().forEach(function(id)" in source
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is unavailable")
+def test_current_page_selection_runtime_boundaries():
+    selection_source = _dashboard_section(
+        "function _currentBucketPageItems(", "async function runBucketBatch("
+    )
+    normalizer_source = _dashboard_section(
+        "function _normalizeBucketPage(", "function _visibleBucketTotalPages("
+    )
+    script = """
+var _curBuckets = [{id:'hidden', dont_surface:true}].concat(
+  Array.from({length:25}, (_, i) => ({id:'b' + (i + 1), dont_surface:false}))
+);
+var bucketPage = 2;
+var BUCKETS_PER_PAGE = 10;
+var selectedBucketIds = new Set(['b1']);
+var selectAllBox = {checked:false, indeterminate:false, disabled:false};
+var selectedCount = {textContent:''};
+var document = {
+  getElementById(id) {
+    if (id === 'bucket-select-all') return selectAllBox;
+    if (id === 'bucket-selected-count') return selectedCount;
+    return null;
+  },
+  querySelectorAll(selector) {
+    if (selector !== '.bucket-select') return [];
+    return _currentBucketPageIds().map(id => ({dataset:{id}, checked:false}));
+  },
+};
+""" + normalizer_source + selection_source + """
+selectAllCurrentPage(true);
+var secondPageSelected = Array.from(selectedBucketIds).sort();
+var secondPageState = [selectAllBox.checked, selectAllBox.indeterminate, selectedCount.textContent];
+
+selectAllCurrentPage(false);
+var afterSecondPageClear = Array.from(selectedBucketIds).sort();
+var otherPageOnlyState = [selectAllBox.checked, selectAllBox.indeterminate];
+
+selectedBucketIds.add('b11');
+syncBucketSelectionUi();
+var partialState = [selectAllBox.checked, selectAllBox.indeterminate];
+
+selectedBucketIds.delete('b11');
+bucketPage = 3;
+selectAllCurrentPage(true);
+var lastPageSelected = Array.from(selectedBucketIds).sort();
+var lastPageState = [selectAllBox.checked, selectAllBox.indeterminate];
+
+process.stdout.write(JSON.stringify({
+  secondPageSelected,
+  secondPageState,
+  afterSecondPageClear,
+  otherPageOnlyState,
+  partialState,
+  lastPageSelected,
+  lastPageState,
+}));
+"""
+    completed = subprocess.run(
+        [shutil.which("node"), "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    result = json.loads(completed.stdout)
+
+    assert result["secondPageSelected"] == [
+        "b1",
+        "b11",
+        "b12",
+        "b13",
+        "b14",
+        "b15",
+        "b16",
+        "b17",
+        "b18",
+        "b19",
+        "b20",
+    ]
+    assert result["secondPageState"] == [True, False, "已选 11"]
+    assert result["afterSecondPageClear"] == ["b1"]
+    assert result["otherPageOnlyState"] == [False, False]
+    assert result["partialState"] == [False, True]
+    assert result["lastPageSelected"] == [
+        "b1",
+        "b21",
+        "b22",
+        "b23",
+        "b24",
+        "b25",
+    ]
+    assert result["lastPageState"] == [True, False]
 
 
 def test_bucket_sort_is_persisted_sent_to_api_and_resets_page():

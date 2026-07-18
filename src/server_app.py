@@ -18,7 +18,10 @@ from typing import Any, Awaitable, Callable, Mapping
 import httpx
 from starlette.middleware.cors import CORSMiddleware
 
-from public_origin import configured_public_origin, normalize_public_origin
+from ombrebrain.security.public_origin import (
+    configured_public_origin,
+    normalize_public_origin,
+)
 from utils import parse_bool
 from web.request_limits import (
     MCPRequestBodyLimitMiddleware,

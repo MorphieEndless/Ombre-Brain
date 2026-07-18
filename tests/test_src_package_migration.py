@@ -51,3 +51,23 @@ def test_provider_detect_legacy_imports_are_canonical_functions():
         "models/gemini-embedding-001",
         "https://generativelanguage.googleapis.com/v1beta/openai/",
     ) == "gemini-embedding-001"
+
+
+def test_public_origin_legacy_imports_are_canonical_functions():
+    import public_origin as legacy
+    from ombrebrain.security import public_origin
+
+    for name in (
+        "configured_public_origin",
+        "normalize_http_resource",
+        "normalize_public_origin",
+    ):
+        assert getattr(legacy, name) is getattr(public_origin, name)
+
+    assert legacy.MAX_PUBLIC_URI_CHARS == public_origin.MAX_PUBLIC_URI_CHARS
+    assert public_origin.normalize_public_origin(
+        "HTTPS://Example.COM:443/mcp/"
+    ) == "https://example.com"
+    assert public_origin.normalize_public_origin(
+        "https://user:secret@example.com/mcp"
+    ) == ""

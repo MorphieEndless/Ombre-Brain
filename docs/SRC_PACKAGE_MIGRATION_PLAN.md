@@ -80,5 +80,5 @@
 - [x] 阶段 A.1：迁移 `memory_messages.py`。
 - [x] 阶段 A.2：迁移 `plan_history.py`。
 - [x] 阶段 A.3：迁移 `provider_detect.py`。
-- [ ] 阶段 A.4：迁移 `public_origin.py`。
+- [x] 阶段 A.4：迁移 `public_origin.py`。
 - [ ] 阶段 A.5：迁移 `bucket_scoring.py`。

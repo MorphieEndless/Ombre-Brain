@@ -17,7 +17,10 @@ from __future__ import annotations
 import os
 from typing import Any, Mapping
 
-from public_origin import configured_public_origin, normalize_public_origin
+from ombrebrain.security.public_origin import (
+    configured_public_origin,
+    normalize_public_origin,
+)
 
 
 PROFILE_LOCAL = "local"

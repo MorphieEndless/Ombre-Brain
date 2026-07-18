@@ -1908,6 +1908,7 @@
   <div class="tab" data-tab="letters"><span>信</span><span class="tab-en">Letters</span></div>
   <div class="tab" data-tab="anchors"><span>锚点</span><span class="tab-en">Anchors</span></div>
   <div class="tab" data-tab="import"><span>导入</span><span class="tab-en">Import</span></div>
+  <div class="tab" data-tab="faq"><span>帮助</span><span class="tab-en">FAQ</span></div>
   <div class="tab" data-tab="logs"><span>日志</span><span class="tab-en">Logs</span></div>
   <div class="tab" data-tab="settings"><span>设置</span><span class="tab-en">Settings</span></div>
   <!-- v3-debug tab 暂时隐藏：后端 /api/v3/debug/* 路由已就位（只读、不写数据），
@@ -2105,14 +2106,14 @@
   <div id="detail-content"></div>
 </div>
 
-<!-- Logs Tab View (iter 1.6 §3) -->
-<div class="content" id="logs-view" style="display:none">
+<!-- FAQ Tab View -->
+<div class="content" id="faq-view" style="display:none">
   <div style="max-width:920px;margin:0 auto;">
     <div class="config-section" id="faq-section">
       <h3>使用须知与常见问题 <span class="en">FAQ &amp; Usage Guide</span></h3>
-      <div style="font-size:12px;color:var(--text-dim);line-height:1.7;margin-bottom:12px;">
+      <p style="font-size:12px;color:var(--text-dim);line-height:1.7;margin:4px 0 12px;">
         部署、持久盘、GitHub 备份、MCP/OAuth、API 与向量化常见问题集中整理在 FAQ。遇到连接失败、401、更新后记忆为空或向量化异常时，请先查看这里。
-      </div>
+      </p>
       <a
         class="btn-secondary"
         href="https://docs.qq.com/doc/DRHp6UW9oYmd3QW5Z"
@@ -2121,7 +2122,12 @@
         style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;font-size:12px;text-decoration:none;"
       ><i data-lucide="book-open"></i> 打开 Ombre Brain 使用须知与 FAQ</a>
     </div>
+  </div>
+</div>
 
+<!-- Logs Tab View (iter 1.6 §3) -->
+<div class="content" id="logs-view" style="display:none">
+  <div style="max-width:920px;margin:0 auto;">
     <div class="config-section">
       <h3>服务日志 <span class="en">Service Logs</span></h3>
       <div class="config-row">
@@ -4345,6 +4351,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.getElementById('network-view').style.display = target === 'network' ? '' : 'none';
     document.getElementById('plan-view').style.display = target === 'plan' ? '' : 'none';
     document.getElementById('import-view').style.display = target === 'import' ? '' : 'none';
+    document.getElementById('faq-view').style.display = target === 'faq' ? '' : 'none';
     document.getElementById('logs-view').style.display = target === 'logs' ? '' : 'none';
     document.getElementById('v3-debug-view').style.display = target === 'v3-debug' ? '' : 'none';
     document.getElementById('settings-view').style.display = target === 'settings' ? '' : 'none';

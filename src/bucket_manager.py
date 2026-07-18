@@ -236,7 +236,7 @@ from ombrebrain.retrieval.bucket_scoring import (
     calc_touch_score,
 )
 from ledger_mirror import LedgerMirror
-from ledger_replay import LedgerReplayValidator
+from ombrebrain.eventsourcing.ledger_replay import LedgerReplayValidator
 from projection_mirror import TraceCatalogProjection
 from projection_sqlite import TraceSQLiteProjection
 from projection_vector import TraceVectorProjectionManifest

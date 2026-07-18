@@ -131,3 +131,10 @@ def test_ledger_property_legacy_import_is_the_canonical_class():
     from ombrebrain.eventsourcing.ledger_property import LedgerReplayPropertyRunner
 
     assert legacy_runner is LedgerReplayPropertyRunner
+
+
+def test_ledger_replay_legacy_import_is_the_canonical_class():
+    from ledger_replay import LedgerReplayValidator as legacy_validator
+    from ombrebrain.eventsourcing.ledger_replay import LedgerReplayValidator
+
+    assert legacy_validator is LedgerReplayValidator

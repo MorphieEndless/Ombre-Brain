@@ -7,7 +7,7 @@ import hashlib
 import random
 from typing import Any
 
-from ledger_replay import LedgerReplayValidator
+from ombrebrain.eventsourcing.ledger_replay import LedgerReplayValidator
 
 
 _EVENT_TYPES = (

@@ -2,6 +2,16 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.7.7
+
+### 修复 / Fixed
+
+- `trace` 正式支持 `old_str/new_str` 原文片段局部替换：在单桶跨进程锁内读取完整正文并仅替换唯一的逐字命中，长 pinned 桶尾部同样有效；零命中、重叠或普通多命中、替换后正文为空都会明确拒绝且不写盘，`new_str=""` 可删除不会清空整桶的局部片段。替换后的正文继续受 50KB 上限约束并正常重建 embedding，plan 并发编辑也会在锁内追加 change log。`content` 与局部替换互斥，未知或拼错的 trace 参数也不再被 FastMCP 静默吞掉后误报“没有任何字段需要修改”。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与热更新优先读取的 `src/VERSION` 同步更新为 `2.7.7`，Dashboard、运行时和热更新检查显示一致。
+
 ## 2.7.6
 
 ### 修复 / Fixed

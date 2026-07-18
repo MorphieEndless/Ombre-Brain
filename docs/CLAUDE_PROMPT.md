@@ -44,7 +44,7 @@
 - **`breath()`** — 无参 → 让权重最高的未解决事自然浮上来。**对话开始第一件事，没有例外**。
 - **`breath_search(query, domain="", max_results=0)`** — 按关键词/语义主动找：
   - `breath_search(query="她最近的工作状态")` → 混合检索。语义可用时与关键词/BM25 融合；不可用时会明确提示并继续关键词检索。
-  - `breath_search(query="完整 bucket_id")` → 按 ID 直读单个桶的完整原始 content，跳过向量、摘要和改写；在 `trace(content=...)` 前先这样读取，避免拿摘要覆盖原文。
+  - `breath_search(query="完整 bucket_id")` → 普通记忆按 ID 直读原始 content，跳过向量、摘要和改写；若长桶提示预算不足，改用 `breath_advanced(query="完整 bucket_id", max_results=1, max_tokens=20000)`。plan / feel / letter 请用对应读取入口或 Dashboard。在 `trace(content=...)` 前先核对原文，避免拿摘要覆盖原文。
   - `breath_search(query="她最近的工作状态", domain="work,relationship")` → 带主题域过滤，逗号分隔。
 - **`breath_advanced(query="", max_tokens=0, domain="", valence=-1, arousal=-1, max_results=0, importance_min=-1, tags="", catalog=False)`** — 需要更细控制时用：
   - `breath_advanced(domain="feel")` → 读我留下的所有第一人称感受（普通 breath 不会浮 feel）。
@@ -87,13 +87,16 @@
 | 取消钉选 | `trace(id, pinned=0)` |
 | 我想让它彻底安静下去 | `trace(id, dont_surface=1)` — 不再出现在无参 breath，关键词搜还能找到 |
 | 我对当时的判断改主意了 | `trace(id, valence=0.7, arousal=0.4)` — 改情感坐标 |
-| 内容写错了 | `trace(id, content="新版本")` — 替换正文并重建 embedding |
+| 局部内容写错了 | `trace(id, old_str="逐字且唯一的原文片段", new_str="修正片段")` — 原子局部替换并重建 embedding；`new_str=""` 可删除片段 |
+| 整段正文都要重写 | `trace(id, content="完整新版本")` — 完整替换正文并重建 embedding，不能与 `old_str/new_str` 同传 |
 | 放入删除档案 | `trace(id, delete=True)` — 从日常召回中隐藏并清理 embedding；Markdown 仍保留在 `archive/` |
 | 创建可清理的虚假测试桶 | `hold(content="...", test_data=True)` — 创建时写入不可后补的测试来源标记，且不会合并进真实记忆 |
 | 永久删除虚假测试桶 | `trace(id, hard_delete=True, delete_reason="...")` — 仅限创建时已标记 `test_data=True` 的桶；真实记忆一律拒绝 |
 | 改 plan 状态 | `trace(plan_id, status="resolved")` — 仅对 plan 桶 |
 | 调 plan 重量 | `trace(plan_id, weight=0.8)` |
 | 改/补「为什么记得」 | `trace(id, why_remembered="...")` |
+
+局部替换前先读取当前原文（普通桶可按完整 ID 使用 `breath_search`；预算不足时用 `breath_advanced(..., max_tokens=20000)`；其他类型可用对应入口或 Dashboard），再复制连续片段作为 `old_str`。匹配是逐字且按起始位置计数的，只有正文中恰好出现一次才会写入；零次命中、包含重叠在内的多次命中、或替换后正文为空都会拒绝且不改桶。替换本身始终针对存储中的完整正文，长桶和 pinned 桶也不会绕过同桶并发锁。
 
 **`anchor` 字段不在 trace 里**——切换 anchor 必须走专门的 `anchor()` / `release()`，受 24 上限保护。
 
@@ -216,7 +219,7 @@
 
 6. **没有 LLM key 时 `hold` / `grow` 直接报错并不创建桶**，不会静默兜底。报错信息会告诉你检查 `OMBRE_COMPRESS_API_KEY`。
 
-7. **没有 embedding key** 时桶仍能正常写入并留在耐久索引队列。`breath_search(query=...)` 会明确显示「检索降级」，继续使用关键词/BM25；桶一旦命中，正文始终逐字返回当前存储的完整 content，不调用摘要服务。
+7. **没有 embedding key** 时桶仍能正常写入并留在耐久索引队列。`breath_search(query=...)` 会明确显示「检索降级」，继续使用关键词/BM25；命中的正文不调用摘要服务，在 token 预算装得下时逐字返回，装不下则整桶拒绝并提示提高 `max_tokens`，不会截断正文。
 
 8. **错误码 `OB-E004`** 出现时表示工具内部异常被兜住了，返回串里会附最近 15 条结构化日志。把它们读完再决定下一步，不要忽略。
 

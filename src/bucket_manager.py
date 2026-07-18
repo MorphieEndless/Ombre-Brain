@@ -40,6 +40,8 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 
+from plan_history import append_plan_change_log
+
 # 统一错误体系：越界 clamp 时上报 OB-W001/OB-W002（rule.md §11）
 try:
     from errors import push_warning as _ob_push_warning  # type: ignore
@@ -1568,6 +1570,106 @@ class BucketManager:
                     total += replacements
 
         return {"buckets_changed": changed, "replacements": total}
+
+    async def update_content_fragment(
+        self,
+        bucket_id: str,
+        *,
+        old_str: str,
+        new_str: str,
+        append_plan_history: bool = False,
+        **kwargs,
+    ) -> dict[str, Any]:
+        """Atomically replace one unique literal fragment in a bucket body.
+
+        The match and the write deliberately happen under the same per-bucket
+        cross-process lock.  Computing the replacement from an earlier
+        ``get()`` result would let a concurrent trace/update be overwritten by
+        a stale full-body snapshot.
+
+        ``new_str`` may be empty (delete the matched fragment).  Zero matches
+        and multiple matches are both non-mutating results so callers never
+        have to guess which occurrence was intended.
+        """
+        old_text = str(old_str)
+        replacement = str(new_str)
+        if not old_text:
+            return {"ok": False, "error": "empty_old_str", "matches": 0}
+        if "content" in kwargs:
+            return {"ok": False, "error": "content_conflict", "matches": 0}
+
+        async with self._bucket_turn(bucket_id):
+            file_path = self._find_bucket_file(bucket_id)
+            if not file_path:
+                return {"ok": False, "error": "not_found", "matches": 0}
+            try:
+                post = frontmatter.load(file_path)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to load bucket for content patch %s: %s",
+                    bucket_id,
+                    exc,
+                )
+                return {"ok": False, "error": "read_failed", "matches": 0}
+
+            current_content = str(post.content or "")
+            # ``str.count`` ignores overlapping occurrences ("aa" in "aaa"),
+            # which could silently patch the first of two valid match starts.
+            # Only 0/1/many matters, so stop at the second start rather than
+            # scanning every pathological overlapping match.
+            first_match = current_content.find(old_text)
+            if first_match < 0:
+                return {
+                    "ok": False,
+                    "error": "old_str_not_found",
+                    "matches": 0,
+                }
+            second_match = current_content.find(old_text, first_match + 1)
+            if second_match >= 0:
+                return {
+                    "ok": False,
+                    "error": "old_str_ambiguous",
+                    "matches": 2,
+                }
+
+            updated_content = self._sanitize_text(
+                current_content.replace(old_text, replacement, 1)
+            )
+            if updated_content == current_content:
+                return {"ok": False, "error": "unchanged", "matches": 1}
+            if not updated_content.strip():
+                return {
+                    "ok": False,
+                    "error": "invalid_content",
+                    "matches": 1,
+                    "message": "替换后正文不能为空；如需移除整个桶，请使用归档。",
+                }
+
+            updates = dict(kwargs)
+            if append_plan_history and str(post.get("type") or "") == "plan":
+                history = list(post.get("change_log") or [])
+                if "status" in updates and updates["status"] != post.get("status"):
+                    history = append_plan_change_log(
+                        history,
+                        "status",
+                        **{"from": post.get("status"), "to": updates["status"]},
+                    )
+                updates["change_log"] = append_plan_change_log(history, "edit")
+            updates["content"] = updated_content
+            try:
+                committed = await self._update_locked(bucket_id, **updates)
+            except ValueError as exc:
+                return {
+                    "ok": False,
+                    "error": "invalid_content",
+                    "matches": 1,
+                    "message": str(exc),
+                }
+            return {
+                "ok": bool(committed),
+                "error": "" if committed else "update_failed",
+                "matches": 1,
+            }
 
     # ---------------------------------------------------------
     # Update bucket

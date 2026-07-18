@@ -317,7 +317,7 @@ feel 桶自身：
 
 ### 3.4 `trace` — 修改/删除
 
-签名：`trace(bucket_id, name="", domain="", valence=-1, arousal=-1, importance=-1, tags="", resolved=-1, pinned=-1, digested=-1, content="", delete=False, status="", weight=-1, dont_surface=-1, why_remembered="", meaning_append="", meaning_replace=None, media_append=None, media_replace=None, hard_delete=False, delete_reason="")`
+签名：`trace(bucket_id, name="", domain="", valence=-1, arousal=-1, importance=-1, tags="", resolved=-1, pinned=-1, digested=-1, content="", delete=False, status="", weight=-1, dont_surface=-1, why_remembered="", meaning_append="", meaning_replace=None, media_append=None, media_replace=None, hard_delete=False, delete_reason="", old_str="", new_str=None)`
 
 - `delete=True` → `bucket_mgr.delete()`：写入 `deleted_at` 并将 Markdown 移入 `archive/`；只清理可重建的 embedding 索引，不抹除记忆文件。
 - `hard_delete=True` → 仅当桶在创建时带有 `provenance.kind=test` 与 `erasable=true` 才物理删除；真实记忆、后补字段及普通 Dashboard 路径均不得越过此边界。Dashboard 普通模式支持多选/当前筛选全选的沉底、主动遗忘和归档，开发者模式才显示测试桶永久删除入口。
@@ -326,6 +326,8 @@ feel 桶自身：
 - `resolved=1` **不**自动归档（B-01 修复）；只更新 frontmatter，由 decay 引擎自然衰减。
 - `status` 仅接受 `active`/`resolved`/`abandoned`，主要用于 plan 桶。
 - `content="..."` 替换正文并重新生成 embedding。
+- `old_str/new_str` 对完整原文做逐字局部替换：必须成对提供、与 `content` 互斥，`new_str=""` 表示删除命中片段，但最终正文不得为空。匹配按所有起始位置计数（包含重叠命中），并与写入在同一把 `_bucket_turn` 跨进程锁内完成；仅唯一命中会提交，零命中或多命中均明确拒绝且不写盘，避免长桶并发编辑覆盖和歧义误改。最终正文仍执行 UTF-8 字节上限校验，并沿正常 content 更新路径重建 embedding；plan 桶在锁内基于最新 history 追加 edit change log，避免并发编辑丢日志。
+- trace 的 FastMCP 参数模型使用 `extra=forbid`；拼错或未知参数会直接返回 schema 错误，不再静默退化成 bucket-id-only no-op。
 - `weight` 仅对 plan 桶有意义；`dont_surface` 切换主动遗忘标记；`why_remembered` 写「为什么留着这条」自由文本。
 - `meaning_append` 日常追加一条 meaning；`meaning_replace` 仅在纠错时整体替换。`media_append` / `media_replace` 同理管理持久媒体引用。
 - `hard_delete=True` 必须同时提供非空且不超过 500 字符的 `delete_reason`，不能与 `delete=True` 同时使用，且只接受创建时已标记为可擦除测试数据的桶；普通记忆与 plan 始终拒绝物理删除，拒绝时不会顺带归档。

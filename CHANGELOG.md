@@ -2,6 +2,20 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.7.9
+
+### 修复 / Fixed
+
+- 修复 `grow` 长内容拆分所用的 digest prompt 未注入第一人称视角铁律：现在与 dehydrate/merge 共用同一规则，AI 自身保持“我”，人类一方保持配置名称，并禁止动作或情绪主语翻转（#62）。
+
+### 文档 / Documentation
+
+- 补清 Zeabur/Render 反代后的 OAuth 公网来源配置：标准 `X-Forwarded-Proto` / `X-Forwarded-Host` 已受支持，但只采信可信最后一跳；托管平台应在安全部署向导填写 HTTPS 公网地址，避免 OAuth 元数据回落为容器内部 `http://`，同时禁止用 `0.0.0.0/0` 放宽代理信任（#63）。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与热更新优先读取的 `src/VERSION` 同步更新为 `2.7.9`。
+
 ## 2.7.8
 
 ### 维护 / Maintenance

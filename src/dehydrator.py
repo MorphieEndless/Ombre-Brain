@@ -968,7 +968,7 @@ class Dehydrator:
         调用 LLM API 执行日记整理。
         """
         raw = await self._chat(
-            DIGEST_PROMPT,
+            DIGEST_PROMPT + _perspective_rule(self.human),
             content[:_DIGEST_INPUT_LIMIT],
             max_tokens=_DIGEST_MAX_TOKENS,
             temperature=_DIGEST_TEMPERATURE,

@@ -575,10 +575,12 @@ Render 自带 HTTPS，可直接在 Claude.ai 添加，无需额外 Tunnel。
 1. Fork 本仓库 → Zeabur **New Project** → **Deploy from GitHub**；根目录 Dockerfile 会被自动识别。
 2. Variables 只填模型所需的 Key（至少 `OMBRE_COMPRESS_API_KEY`）；不要额外设置 `OMBRE_MCP_REQUIRE_AUTH`，避免它覆盖 Dashboard。
 3. Volumes 新建 `data`，挂载路径必须是 `/app/buckets`。这是记忆、OAuth 客户端注册和 `config.yaml` 的共同持久目录。
-4. 绑定 HTTPS 域名后打开 Dashboard，进入 `/onboarding`，选择“公网安全模式”、填入域名并保存，然后在平台重启一次服务。
+4. Networking → Port `8000` → **Generate Domain**，绑定 HTTPS 域名。
+5. 打开 Dashboard，进入 `/onboarding`，选择“公网安全模式”，把刚才的 HTTPS 域名填入“公网连接地址”并保存，然后在平台重启一次服务。这个地址是 OAuth 元数据、授权端点和 `/mcp` resource 的权威外部来源；若不填写，容器可能只能看到 Zeabur 内部的 `http://` 地址，Claude.ai 会拒绝连接。
+
+OB 已支持标准 `X-Forwarded-Proto` / `X-Forwarded-Host`，但为防止客户端伪造 OAuth 地址，只采信来自 `OMBRE_TRUSTED_PROXY_CIDRS` 的最后一跳代理。Zeabur、Render 等托管平台的代理网段可能变化，因此推荐使用上面的“公网连接地址”，不要把 `0.0.0.0/0` 加入可信代理。
 
 如果“页面里明明开启 OAuth，重启后却仍显示未开启”，去 **系统体检 → 实际生效配置**：它会同时列出已保存值、当前进程值和覆盖来源。优先删除 Zeabur 中遗留的 `OMBRE_MCP_REQUIRE_AUTH=false`；环境变量优先级高于 `config.yaml`。
-4. Networking → Port `8000` → **Generate Domain**
 
 ### 自有 VPS
 
@@ -766,6 +768,7 @@ docker compose -f deploy/docker-compose.yml up -d
 | 首次进 Dashboard 设置密码页一闪而过变成登录页 | 已修复（v2.0.4+） | 更新到最新版本 |
 | 所有记忆 domain 显示「未分类」 | ① `max_tokens` 太小，JSON 被截断；② **打标模型太弱**（如 7B 级小模型），吐不出可解析的分类 JSON，OB 兜底为「未分类」 | ① 将 `dehydration.max_tokens` 设为 `4096`；② 换一个够强的打标模型（`gemini-2.0-flash`、`deepseek-ai/DeepSeek-V3`、`Qwen/Qwen2.5-72B-Instruct` 等；7B 级免费小模型不足以稳定产出结构化打标）。OB 的 JSON 提取已容忍模型前后的寒暄，但模型返回空/彻底损坏时只能兜底 |
 | Claude.ai 添加 MCP 报「Couldn't register」 | OAuth 端点无法访问（通常是 Tunnel 未启动/域名错误） | 先确认 Dashboard 能正常访问，再添加 MCP |
+| Zeabur / Render 上 OAuth 元数据或授权链接生成 `http://`，Claude.ai 拒绝连接 | 反代在容器内使用 HTTP；转发头来自未配置的代理地址时会被安全策略忽略，且“公网连接地址”尚未保存 | Dashboard → `/onboarding` →“公网安全模式”，填入平台分配的 HTTPS 域名并保存，重启后重新添加连接器；不要用 `0.0.0.0/0` 放宽可信代理 |
 | OAuth 授权页正常弹出但密码输入后报错 | Dashboard 密码错误 | 使用 Dashboard 设置时的密码（不是 Cloudflare 密码） |
 | 连接成功但「no tools available」 | URL 末尾路径不是 `/mcp` | 确认连接 URL 末尾是 `/mcp` |
 | 每开新对话工具加载不全 / 偶尔搜不到某个工具 | **不是服务器问题**：同时启用的连接器太多时，Anthropic 客户端会改用 tool_search「延迟加载」，按描述去搜工具，命中带随机性 | 关掉该会话里用不到的其它连接器，把工具总数压到阈值以下即可一次性全部加载；或在 Claude.ai 自定义指令里列出全部工具名引导模型搜索 |

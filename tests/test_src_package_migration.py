@@ -107,3 +107,12 @@ def test_vault_health_legacy_import_is_the_canonical_function():
     from ombrebrain.storage.vault_health import inspect_vault
 
     assert legacy_inspect_vault is inspect_vault
+
+
+def test_backup_archive_legacy_import_is_the_canonical_module():
+    import backup_archive as legacy
+    from ombrebrain.storage import backup_archive
+
+    assert legacy is backup_archive
+    assert legacy.BackupArchiveError is backup_archive.BackupArchiveError
+    assert legacy.build_export_archive is backup_archive.build_export_archive

@@ -52,7 +52,7 @@
 
 - [x] `media_store.py` → `ombrebrain/storage/media_store.py`
 - [x] `vault_health.py` → `ombrebrain/storage/vault_health.py`
-- [ ] `backup_archive.py`
+- [x] `backup_archive.py` → `ombrebrain/storage/backup_archive.py`（旧路径使用模块别名以保留 monkeypatch 语义）
 - [ ] `embedding_outbox.py`
 - [ ] `projection_*` 与 `ledger_*`（每个文件仍单独迁移）
 

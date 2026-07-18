@@ -81,4 +81,4 @@
 - [x] 阶段 A.2：迁移 `plan_history.py`。
 - [x] 阶段 A.3：迁移 `provider_detect.py`。
 - [x] 阶段 A.4：迁移 `public_origin.py`。
-- [ ] 阶段 A.5：迁移 `bucket_scoring.py`。
+- [x] 阶段 A.5：迁移 `bucket_scoring.py`。

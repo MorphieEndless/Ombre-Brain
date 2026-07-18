@@ -71,3 +71,24 @@ def test_public_origin_legacy_imports_are_canonical_functions():
     assert public_origin.normalize_public_origin(
         "https://user:secret@example.com/mcp"
     ) == ""
+
+
+def test_bucket_scoring_legacy_imports_are_canonical_functions():
+    import bucket_scoring as legacy
+    from ombrebrain.retrieval import bucket_scoring
+
+    for name in (
+        "calc_emotion_score",
+        "calc_time_score",
+        "calc_topic_score",
+        "calc_touch_score",
+    ):
+        assert getattr(legacy, name) is getattr(bucket_scoring, name)
+
+    assert legacy.TIME_DECAY_LAMBDA == bucket_scoring.TIME_DECAY_LAMBDA
+    assert bucket_scoring.calc_touch_score({"activation_count": 5}) == 0.5
+    assert bucket_scoring.calc_emotion_score(None, None, {}) == 0.5
+    assert 0.0 <= bucket_scoring.calc_topic_score(
+        "memory",
+        {"metadata": {"name": "memory"}, "content": "body"},
+    ) <= 1.0

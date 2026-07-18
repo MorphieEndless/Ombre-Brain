@@ -51,7 +51,7 @@
 当前逐文件顺序：
 
 - [x] `media_store.py` → `ombrebrain/storage/media_store.py`
-- [ ] `vault_health.py`
+- [x] `vault_health.py` → `ombrebrain/storage/vault_health.py`
 - [ ] `backup_archive.py`
 - [ ] `embedding_outbox.py`
 - [ ] `projection_*` 与 `ledger_*`（每个文件仍单独迁移）

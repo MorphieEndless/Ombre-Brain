@@ -100,3 +100,10 @@ def test_media_store_legacy_imports_are_canonical_classes():
 
     assert legacy.MediaStore is media_store.MediaStore
     assert legacy.MediaPersistenceError is media_store.MediaPersistenceError
+
+
+def test_vault_health_legacy_import_is_the_canonical_function():
+    from vault_health import inspect_vault as legacy_inspect_vault
+    from ombrebrain.storage.vault_health import inspect_vault
+
+    assert legacy_inspect_vault is inspect_vault

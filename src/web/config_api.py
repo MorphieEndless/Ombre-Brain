@@ -26,7 +26,7 @@ import httpx
 from starlette.requests import Request
 from starlette.responses import Response
 
-from deployment_profile import normalize_public_https_origin
+from ombrebrain.security.deployment_profile import normalize_public_https_origin
 from ombrebrain.security.public_origin import configured_public_origin
 
 from . import _shared as sh

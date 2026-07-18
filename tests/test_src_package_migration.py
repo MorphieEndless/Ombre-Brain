@@ -73,6 +73,25 @@ def test_public_origin_legacy_imports_are_canonical_functions():
     ) == ""
 
 
+def test_deployment_profile_legacy_imports_are_canonical_objects():
+    import deployment_profile as legacy
+    from ombrebrain.security import deployment_profile
+
+    for name in (
+        "build_profile_patch",
+        "effective_configuration_report",
+        "normalize_profile",
+        "normalize_public_https_origin",
+        "profile_catalog",
+        "validate_profile_patch",
+    ):
+        assert getattr(legacy, name) is getattr(deployment_profile, name)
+
+    assert legacy.PROFILE_LOCAL == deployment_profile.PROFILE_LOCAL
+    assert legacy.PROFILE_PUBLIC == deployment_profile.PROFILE_PUBLIC
+    assert legacy.PROFILE_ADVANCED == deployment_profile.PROFILE_ADVANCED
+
+
 def test_bucket_scoring_legacy_imports_are_canonical_functions():
     import bucket_scoring as legacy
     from ombrebrain.retrieval import bucket_scoring

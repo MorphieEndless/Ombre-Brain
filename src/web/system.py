@@ -46,7 +46,7 @@ from ombrebrain.policy import RedLineContract, RedLineFeatureSpec, SurfaceDecisi
 from ombrebrain.protocol import PublicToolDesignContract, PublicToolSpec
 from ombrebrain.resilience import CrashRecoveryContract, CrashRecoveryPlan, PathStep
 from ombrebrain.retrieval import SurfaceContextCompiler
-from deployment_profile import effective_configuration_report
+from ombrebrain.security.deployment_profile import effective_configuration_report
 from utils import config_file_path
 
 try:

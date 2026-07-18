@@ -47,7 +47,7 @@ from ledger_mirror import LedgerMirror
 from ombrebrain.eventsourcing.ledger_property import LedgerReplayPropertyRunner
 from ombrebrain.eventsourcing.ledger_replay import LedgerReplayValidator
 from ombrebrain.projection.projection_mirror import TraceCatalogProjection
-from projection_sqlite import TraceSQLiteProjection
+from ombrebrain.projection.projection_sqlite import TraceSQLiteProjection
 from projection_vector import TraceVectorProjectionManifest
 
 

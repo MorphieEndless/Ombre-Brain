@@ -145,3 +145,10 @@ def test_projection_mirror_legacy_import_is_the_canonical_class():
     from ombrebrain.projection.projection_mirror import TraceCatalogProjection
 
     assert legacy_projection is TraceCatalogProjection
+
+
+def test_projection_sqlite_legacy_import_is_the_canonical_class():
+    from projection_sqlite import TraceSQLiteProjection as legacy_projection
+    from ombrebrain.projection.projection_sqlite import TraceSQLiteProjection
+
+    assert legacy_projection is TraceSQLiteProjection

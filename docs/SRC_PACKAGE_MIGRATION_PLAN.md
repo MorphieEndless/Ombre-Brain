@@ -58,6 +58,7 @@
   - [x] `ledger_property.py` → `ombrebrain/eventsourcing/ledger_property.py`
   - [x] `ledger_replay.py` → `ombrebrain/eventsourcing/ledger_replay.py`
   - [x] `projection_mirror.py` → `ombrebrain/projection/projection_mirror.py`
+  - [x] `projection_sqlite.py` → `ombrebrain/projection/projection_sqlite.py`
 
 ### 阶段 C：引擎与大型有状态模块
 

@@ -41,7 +41,7 @@ import time
 import uuid
 
 from utils import parse_bool
-from plan_history import append_plan_change_log as append_plan_change_log
+from ombrebrain.domain.plan_history import append_plan_change_log as append_plan_change_log
 
 from . import _runtime as rt
 

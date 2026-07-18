@@ -40,7 +40,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 
-from plan_history import append_plan_change_log
+from ombrebrain.domain.plan_history import append_plan_change_log
 
 # 统一错误体系：越界 clamp 时上报 OB-W001/OB-W002（rule.md §11）
 try:

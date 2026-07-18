@@ -26,3 +26,28 @@ def test_plan_history_legacy_import_is_the_canonical_function():
     assert updated[-1]["to"] == "done"
     assert "ignored" not in updated[-1]
     assert updated[-1]["ts"]
+
+
+def test_provider_detect_legacy_imports_are_canonical_functions():
+    import provider_detect as legacy
+    from ombrebrain.integrations import provider_detect
+
+    public_names = (
+        "endpoint_hostname",
+        "is_gemini_native_host",
+        "is_gemini_openai_compat_endpoint",
+        "is_known_cloud_embedding_endpoint",
+        "is_siliconflow_endpoint",
+        "normalize_model_for_endpoint",
+        "strip_native_resource_prefix",
+    )
+    for name in public_names:
+        assert getattr(legacy, name) is getattr(provider_detect, name)
+
+    assert provider_detect.endpoint_hostname("HTTPS://API.SILICONFLOW.CN./v1") == (
+        "api.siliconflow.cn"
+    )
+    assert provider_detect.normalize_model_for_endpoint(
+        "models/gemini-embedding-001",
+        "https://generativelanguage.googleapis.com/v1beta/openai/",
+    ) == "gemini-embedding-001"

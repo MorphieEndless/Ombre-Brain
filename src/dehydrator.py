@@ -38,13 +38,10 @@ from openai import AsyncOpenAI
 
 from utils import clean_llm_json, count_tokens_approx, parse_bool, positive_float
 
-try:
-    from provider_detect import is_gemini_native_host, strip_native_resource_prefix
-except ImportError:  # pragma: no cover
-    from .provider_detect import (  # type: ignore
-        is_gemini_native_host,
-        strip_native_resource_prefix,
-    )
+from ombrebrain.integrations.provider_detect import (
+    is_gemini_native_host,
+    strip_native_resource_prefix,
+)
 
 logger = logging.getLogger("ombre_brain.dehydrator")
 

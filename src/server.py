@@ -709,6 +709,7 @@ async def trace(
     media_replace: Optional[list | str] = None,
     hard_delete: Optional[bool] = False,
     delete_reason: Optional[str] = "",
+    restore: Optional[bool] = False,
     old_str: Optional[str] = "",
     new_str: Optional[str] = None,
 ) -> str:
@@ -723,7 +724,8 @@ async def trace(
     删除边界：delete=True 只会把 Markdown 移入 archive 并标记 deleted_at，不会
     物理抹除。hard_delete=True 仅用于清理创建时明确标记 test_data=True 的测试桶，
     必须单独提供非空 delete_reason；普通记忆和 plan 一律拒绝且不会顺带归档。
-    delete 与 hard_delete 不能同时使用。只传需要修改的字段，-1 或空串表示不改。
+    delete 与 hard_delete 不能同时使用。归档记忆只有在反思后决定值得再次回忆时，才单独调用
+    trace(bucket_id="...", restore=True) 恢复；检索命中不会自动恢复。只传需要修改的字段，-1 或空串表示不改。
     """
     return await _with_notice(
         _t_trace.dispatch(
@@ -735,6 +737,7 @@ async def trace(
             meaning_append=meaning_append, meaning_replace=meaning_replace,
             media_append=media_append, media_replace=media_replace,
             hard_delete=hard_delete, delete_reason=delete_reason,
+            restore=restore,
             old_str=old_str, new_str=new_str,
         ),
         op="trace",
@@ -744,6 +747,7 @@ async def trace(
             "tags": tags, "resolved": resolved, "pinned": pinned, "digested": digested,
             "content_len": len(content or ""), "delete": delete, "status": status,
             "hard_delete": hard_delete,
+            "restore": restore,
             "delete_reason_len": len(str(delete_reason or "")),
             "old_str_len": len(str(old_str or "")),
             "new_str_len": len(str(new_str or "")) if new_str is not None else 0,

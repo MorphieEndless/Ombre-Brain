@@ -68,6 +68,18 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
         return "记忆系统暂时无法访问。"
 
     surfacing_cfg = rt.config.get("surfacing", {}) or {}
+    try:
+        footprint_snapshot = rt.bucket_mgr.footprint_snapshot()
+    except Exception as exc:
+        rt.logger.warning(f"Footprint snapshot unavailable / 足迹读取失败: {exc}")
+        footprint_snapshot = None
+
+    def _footprint(bucket: dict) -> str:
+        if footprint_snapshot is None:
+            return "👣 Footprint：暂时无法读取"
+        return footprint_snapshot.summary(
+            str(bucket.get("id") or ""), bucket.get("metadata", {})
+        )
 
     # --- pinned/protected 桶置顶（排除 letter 桶：letter 的 importance=10 不代表核心准则）---
     # 注意：pinned 提取在 anchor 过滤 *之前*，保证 anchor+pinned 桶也能出现在核心准则段。
@@ -95,6 +107,7 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
             rendered, entry_tokens = render_stored_bucket(
                 b,
                 f"📌 [核心准则] [bucket_id:{b['id']}]",
+                _footprint(b),
             )
             if entry_tokens > token_budget:
                 primary_omitted += 1
@@ -226,6 +239,7 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
             rendered, entry_tokens = render_stored_bucket(
                 b,
                 f"[权重:{score:.2f}] [bucket_id:{b['id']}]",
+                _footprint(b),
             )
             if entry_tokens > token_budget:
                 primary_omitted += 1
@@ -291,6 +305,7 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
                     rendered, entry_tokens = render_stored_bucket(
                         b,
                         f"💤 [久未浮现] [bucket_id:{b['id']}]",
+                        _footprint(b),
                     )
                     if entry_tokens > token_budget:
                         continue
@@ -323,6 +338,7 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
                         rendered, entry_tokens = render_stored_bucket(
                             b,
                             f"✨ [偶遇] [bucket_id:{b['id']}]",
+                            _footprint(b),
                         )
                         if entry_tokens > token_budget:
                             continue

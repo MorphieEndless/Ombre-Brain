@@ -54,6 +54,30 @@ def _can_surface_search(bucket: dict) -> bool:
     return _SURFACE_POLICY.evaluate_bucket(bucket, mode="search").allowed
 
 
+def _is_archived(bucket: dict) -> bool:
+    meta = bucket.get("metadata", {}) or {}
+    return (
+        str(meta.get("type") or "").strip().lower() == "archived"
+        or bool(meta.get("deleted_at"))
+        or bool(meta.get("tombstone"))
+    )
+
+
+def _render_archived_hit(bucket: dict, footprint: str) -> tuple[str, int]:
+    bucket_id = str(bucket.get("id") or "")
+    header = (
+        f"[query 命中·已删除到档案] [bucket_id:{bucket_id}] "
+        "[状态:已退出日常记忆，原文仍保留]"
+    )
+    rendered, _ = render_stored_bucket(bucket, header, footprint)
+    rendered += (
+        "\n[反思：这条记忆对当下的我有帮助吗？它值得被再次回忆吗？]"
+        f'\n[若决定恢复：trace(bucket_id="{bucket_id}", restore=True)]'
+    )
+    from utils import count_tokens_approx
+    return rendered, count_tokens_approx(rendered)
+
+
 def _parse_date_bound(value: str, *, upper: bool) -> datetime | None:
     """解析创建时间边界；YYYY-MM-DD 的上界包含当天全日。"""
     raw = value.strip()
@@ -187,6 +211,19 @@ async def surface_search(
     if created_from and created_to and created_from > created_to:
         return "date_from 不能晚于 date_to。"
 
+    try:
+        footprint_snapshot = rt.bucket_mgr.footprint_snapshot()
+    except Exception as exc:
+        rt.logger.warning(f"Footprint snapshot unavailable / 足迹读取失败: {exc}")
+        footprint_snapshot = None
+
+    def _footprint(bucket: dict) -> str:
+        if footprint_snapshot is None:
+            return "👣 Footprint：暂时无法读取"
+        return footprint_snapshot.summary(
+            str(bucket.get("id") or ""), bucket.get("metadata", {})
+        )
+
     # A full bucket id is an address, not a semantic query.  Resolve it before
     # embedding/BM25 work so callers can reliably read the on-disk source text
     # immediately before trace(content=...) without an LLM or derived index in
@@ -194,7 +231,12 @@ async def surface_search(
     # visibility boundary as ordinary search.
     exact_id = query.strip()
     try:
-        exact_bucket = await rt.bucket_mgr.get(exact_id)
+        exact_reader = getattr(rt.bucket_mgr, "get_including_archive", None)
+        exact_bucket = (
+            await exact_reader(exact_id)
+            if callable(exact_reader)
+            else await rt.bucket_mgr.get(exact_id)
+        )
     except Exception as exc:
         rt.logger.warning(
             f"breath exact bucket lookup failed; continuing with search: "
@@ -203,7 +245,22 @@ async def surface_search(
         exact_bucket = None
     if exact_bucket:
         meta = exact_bucket.get("metadata", {}) or {}
-        is_archived = meta.get("type") == "archived" or bool(meta.get("deleted_at"))
+        is_archived = _is_archived(exact_bucket)
+        archived_original_kind = (
+            footprint_snapshot.original_kind(exact_id, meta)
+            if is_archived and footprint_snapshot is not None
+            else "dynamic"
+        )
+        if (
+            is_archived
+            and archived_original_kind not in ("feel", "plan", "letter")
+            and _bucket_has_tags(meta, tag_filter)
+            and _bucket_in_created_range(exact_bucket, created_from, created_to)
+        ):
+            rendered, entry_tokens = _render_archived_hit(
+                exact_bucket, _footprint(exact_bucket)
+            )
+            return rendered if entry_tokens <= max_tokens else _BUDGET_NOTICE
         if (
             not is_archived
             and meta.get("type") not in ("feel", "plan", "letter")
@@ -214,6 +271,7 @@ async def surface_search(
             rendered, entry_tokens = render_stored_bucket(
                 exact_bucket,
                 f"[exact_bucket_id:true] [bucket_id:{exact_bucket['id']}]",
+                _footprint(exact_bucket),
             )
             if entry_tokens > max_tokens:
                 return _BUDGET_NOTICE
@@ -233,24 +291,43 @@ async def surface_search(
     semantic_diag = _semantic_diagnostics(query, vector_scores, semantic_notice)
     rt.logger.info("op=breath_search phase=semantic diagnostics=%s", semantic_diag)
 
+    search_kwargs = {
+        "limit": max(max_results, 20),
+        "domain_filter": domain_filter,
+        "query_valence": q_valence,
+        "query_arousal": q_arousal,
+        "vector_scores": vector_scores,
+    }
     try:
-        matches = await rt.bucket_mgr.search(
-            query,
-            limit=max(max_results, 20),
-            domain_filter=domain_filter,
-            query_valence=q_valence,
-            query_arousal=q_arousal,
-            vector_scores=vector_scores,
-        )
+        try:
+            matches = await rt.bucket_mgr.search(
+                query, include_archive=True, **search_kwargs
+            )
+        except TypeError as exc:
+            # Lightweight third-party/test managers may predate the archive
+            # option.  Preserve active search there; production supports it.
+            if "include_archive" not in str(exc):
+                raise
+            matches = await rt.bucket_mgr.search(query, **search_kwargs)
     except Exception as e:
         rt.logger.error(f"Search failed / 检索失败: {e}")
         return "检索过程出错，请稍后重试。"
 
-    matches = [
-        b for b in matches
-        if _can_surface_search(b)
-        and b["metadata"].get("type") not in ("feel", "plan", "letter")
-    ]
+    eligible_matches = []
+    for bucket in matches:
+        meta = bucket.get("metadata", {}) or {}
+        if _is_archived(bucket):
+            original_kind = (
+                footprint_snapshot.original_kind(str(bucket.get("id") or ""), meta)
+                if footprint_snapshot is not None
+                else "dynamic"
+            )
+            if original_kind in ("feel", "plan", "letter"):
+                continue
+        elif not _can_surface_search(bucket) or meta.get("type") in ("feel", "plan", "letter"):
+            continue
+        eligible_matches.append(bucket)
+    matches = eligible_matches
     matches = [b for b in matches if _bucket_has_tags(b["metadata"], tag_filter)]
     matches = [
         b for b in matches
@@ -271,20 +348,30 @@ async def surface_search(
     for bucket in matches:
         meta = bucket["metadata"]
         bucket_id = bucket["id"]
-        is_core = meta.get("pinned") or meta.get("protected") or meta.get("type") == "permanent"
-        if is_core:
+        if _is_archived(bucket):
+            rendered, entry_tokens = _render_archived_hit(bucket, _footprint(bucket))
+        elif meta.get("pinned") or meta.get("protected") or meta.get("type") == "permanent":
             header = f"📌 [核心准则] [bucket_id:{bucket_id}]"
+            rendered, entry_tokens = render_stored_bucket(
+                bucket, header, _footprint(bucket)
+            )
         elif bucket.get("vector_match"):
             header = f"[语义关联] [bucket_id:{bucket_id}]"
+            rendered, entry_tokens = render_stored_bucket(
+                bucket, header, _footprint(bucket)
+            )
         else:
             header = f"[bucket_id:{bucket_id}]"
-        rendered, entry_tokens = render_stored_bucket(bucket, header)
+            rendered, entry_tokens = render_stored_bucket(
+                bucket, header, _footprint(bucket)
+            )
         if token_used + entry_tokens > max_tokens:
             budget_blocked = True
             break
         results.append(rendered)
         token_used += entry_tokens
-        touched_ids.append(bucket_id)
+        if not _is_archived(bucket):
+            touched_ids.append(bucket_id)
 
     # 性能 P2：把 touch 移出响应路径 —— 浮现完的桶在后台一次性更新激活，
     # ripple=False 跳过读全库的时间涟漪。响应不再等这些写盘/涟漪。
@@ -315,6 +402,7 @@ async def surface_search(
                     rendered, entry_tokens = render_stored_bucket(
                         b,
                         f"[联想浮现·非检索命中] [bucket_id:{b['id']}]",
+                        _footprint(b),
                     )
                     if token_used + entry_tokens > max_tokens:
                         budget_blocked = True

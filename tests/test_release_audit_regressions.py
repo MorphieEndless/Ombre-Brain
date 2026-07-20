@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from bucket_manager import BucketManager
-from bucket_scoring import calc_time_score
+from ombrebrain.retrieval.bucket_scoring import calc_time_score
 from decay_engine import _days_since_active
 from dehydrator import Dehydrator
 from embedding_engine import EmbeddingEngine

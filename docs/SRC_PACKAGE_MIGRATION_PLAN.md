@@ -14,7 +14,7 @@
 ## 不变量
 
 1. `src/server.py` 在最后阶段之前保持原路径。
-2. 每个旧模块先变为兼容层，再经过至少一个发布周期后才考虑删除。
+2. 每个旧模块先变为兼容层，再经过至少一个发布周期后才考虑删除；首批兼容层已在 2.7.8—2.7.10 完成三个正式版本的观察期，并于 2.8.2 审计后退役。
 3. 新代码只导入新的 canonical package 路径；旧路径只服务外部兼容。
 4. 兼容层必须显式转发公开符号，避免产生第二份模块状态。
 5. 含可变模块状态、单例、锁、缓存或 monkeypatch 契约的模块，迁移前必须单独设计状态同一性方案。
@@ -55,7 +55,7 @@
 - [x] `backup_archive.py` → `ombrebrain/storage/backup_archive.py`（旧路径使用模块别名以保留 monkeypatch 语义）
 - [x] `embedding_outbox.py` → `ombrebrain/storage/embedding_outbox.py`
 - [x] `deployment_profile.py` → `ombrebrain/security/deployment_profile.py`
-- [ ] `projection_*` 与 `ledger_*`（每个文件仍单独迁移）
+- [x] `projection_*` 与 `ledger_*`（每个文件仍单独迁移）
   - [x] `ledger_property.py` → `ombrebrain/eventsourcing/ledger_property.py`
   - [x] `ledger_replay.py` → `ombrebrain/eventsourcing/ledger_replay.py`
   - [x] `ledger_mirror.py` → `ombrebrain/eventsourcing/ledger_mirror.py`
@@ -77,7 +77,7 @@
 ### 阶段 E：CLI 与旧兼容层退役
 
 将 `write_memory.py`、`reclassify_api.py` 等 CLI 的实现迁入 `ombrebrain/cli/`，旧脚本保留入口壳。
-只有在仓库内无旧路径引用、文档已更新、完整回归通过并经过兼容观察期后，才逐个删除旧兼容层。
+只有在仓库内无旧路径引用、文档已更新、完整回归通过并经过兼容观察期后，才逐个删除旧兼容层。首批 16 个兼容层已在 2.8.2 完成该流程；仓库测试也改用 canonical package 路径，防止旧路径被内部引用重新引入。
 
 ## 每批停止条件
 
@@ -97,3 +97,7 @@
 - [x] 阶段 A.3：迁移 `provider_detect.py`。
 - [x] 阶段 A.4：迁移 `public_origin.py`。
 - [x] 阶段 A.5：迁移 `bucket_scoring.py`。
+- [x] 阶段 B：完成 storage、deployment、ledger 与 projection 模块迁移。
+- [x] 兼容观察期：`2.7.8`、`2.7.9`、`2.7.10` 三个正式版本均保留旧路径。
+- [x] 退役前引用审计：生产代码、测试、活动文档与部署入口均不再导入旧路径。
+- [x] 退役首批 16 个顶层兼容壳，测试统一改用 `ombrebrain.*` canonical package。

@@ -368,7 +368,7 @@ _RESOLVED_RANK_PENALTY = 0.3   # resolved 桶仅在排序时降权
 _LITERAL_MATCH_BONUS = 25.0    # 查询串原样命中 name/tags/domain/正文时的召回加分（修短查询召回）
 
 # topic/emotion/time/touch 四个评分维度的纯函数 + 权重常量已拆到
-# bucket_scoring.py（search() 和 _calc_*_score 兼容 wrapper 都从那边导入）。
+# ombrebrain.retrieval.bucket_scoring（search() 和 _calc_*_score wrapper 都从那里导入）。
 
 
 def _clamp01(value, default: float) -> float:
@@ -2631,7 +2631,7 @@ class BucketManager:
         return scored[:limit]
 
     # ---------------------------------------------------------
-    # 四个评分维度的纯函数实现已拆到 bucket_scoring.py；这里保留同名
+    # 四个评分维度的纯函数实现已拆到 ombrebrain.retrieval.bucket_scoring；这里保留同名
     # wrapper 方法 —— 测试和历史调用方一直用 bucket_mgr._calc_xxx_score(...)
     # 这种实例方法写法，wrapper 保持该接口不变，同时让实现本身可独立单测/复用。
     # ---------------------------------------------------------

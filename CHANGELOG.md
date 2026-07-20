@@ -2,6 +2,25 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.8.2
+
+### 修复 / Fixed
+
+- 修复 Zeabur 等跨域部署在 Streamable HTTP + 静态 Token 鉴权下无法连接 `/mcp`：浏览器的 `OPTIONS /mcp` 预检现在显式跳过 MCP 鉴权，CORS 中间件调整到鉴权外层，预检不再返回无 CORS 响应头的 401；鉴权失败响应也会携带正确的 CORS 响应头，Polaris 网页版和桌面版可正常发起后续带 Token 请求。
+
+### 维护 / Maintenance
+
+- 完成 2.7.8 启动、跨越 2.7.8—2.7.10 三个正式版本的首批 `src/` 扁平模块兼容观察期：经生产引用、测试、活动文档与部署入口审计后，移除 memory/plan/provider/public-origin/scoring、storage/deployment、ledger/projection 共 16 个顶层兼容壳；仓库测试全部切换到 `ombrebrain.*` canonical package，避免内部代码继续延长旧路径生命周期。
+- 修正内部资料忽略边界：`docs/superpowers/`、代码健康审计、内部 TODO 与旧版发布草稿不再受 Git 跟踪，并补入 `.gitignore`；运行时覆盖矩阵不再发布内部计划文件路径。
+
+### 测试 / Tests
+
+- 新增鉴权中间件预检放行与完整 Streamable HTTP 中间件栈回归，覆盖静态 Token 模式下 `OPTIONS /mcp` 返回 200、允许 `POST` 及 `Authorization`/`Content-Type` 请求头。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与热更新优先读取的 `src/VERSION` 同步更新为 `2.8.2`。
+
 ## 2.8.0
 
 ### 修复 / Fixed

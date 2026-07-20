@@ -212,6 +212,7 @@ class MCPAuthMiddleware:
         path = str(scope.get("path", ""))
         if (
             scope.get("type") == "http"
+            and str(scope.get("method", "")).upper() != "OPTIONS"
             and self.auth_required
             and self.path_matcher(path)
         ):
@@ -661,13 +662,6 @@ def build_http_app(
 
     install_runtime_lifespan(app, lifecycle)
     app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-        expose_headers=["*"],
-    )
-    app.add_middleware(
         OriginCSRFGuardMiddleware,
         mcp_path_matcher=mcp_path_matcher,
         public_origin=settings.public_origin,
@@ -691,6 +685,16 @@ def build_http_app(
         path_matcher=mcp_path_matcher,
         resource_path="/mcp",
         public_origin=settings.public_origin,
+    )
+    # Starlette wraps middleware in reverse registration order.  CORS must be
+    # outside MCP auth so browser preflights never receive a bare 401 and auth
+    # challenges/errors still carry the appropriate CORS response headers.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["*"],
     )
     # Outermost: must still fire on auth-rejected/error responses, not just
     # successful tool calls, so add it last (see NgrokHeaderMiddleware).

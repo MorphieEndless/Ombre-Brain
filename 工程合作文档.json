@@ -103,6 +103,11 @@
       }
     },
     "git_workflow": {
+      "pull_before_work": {
+        "rule": "改任何代码之前，先从 main 分支拉取远端最新代码",
+        "command": "git pull origin main --ff-only（本地有未提交改动时先处理/暂存，不能用 --ff-only 失败就改成强制覆盖）",
+        "why": "在过期的本地代码基础上改动，容易改到已经被别人修过的地方，push 时冲突或悄悄覆盖别人的修复"
+      },
       "push_requires_explicit_request": {
         "rule": "任何时候用户没有明确说「push」，就不 push",
         "scope": "包括 git push、创建/更新远程分支、触发部署流水线等一切会影响远程仓库的操作"

@@ -732,6 +732,23 @@ class EmbeddingEngine:
         finally:
             conn.close()
 
+    def delete_meaning_embedding(self, bucket_id: str) -> None:
+        """清空 meaning 派生列，保留同桶的 content 向量。"""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "UPDATE embeddings SET meaning_embedding = NULL WHERE bucket_id = ?",
+                (bucket_id,),
+            )
+            conn.execute(
+                "DELETE FROM embeddings WHERE bucket_id = ? "
+                "AND TRIM(embedding) = '' AND meaning_embedding IS NULL",
+                (bucket_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def list_content_ids(self) -> list[str]:
         """Return IDs that have a real content vector, not only meaning data.
 

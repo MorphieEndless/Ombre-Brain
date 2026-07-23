@@ -77,5 +77,13 @@ async def store_pinned(
             allow_embedding_fallback=True,
             meaning=meaning,
             media=media,
+            defer_derived_index=True,
+        )
+    post_index = getattr(rt.bucket_mgr, "_index_after_update", None)
+    if callable(post_index):
+        await post_index(
+            bucket_id,
+            content_changed=True,
+            meaning_changed=bool(meaning),
         )
     return f"📌钉选→{bucket_id} {','.join(str(d) for d in domain if d is not None)}"

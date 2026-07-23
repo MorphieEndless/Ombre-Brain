@@ -894,7 +894,11 @@ class ImportEngine:
             "importance", _DEFAULT_IMPORTANCE
         )
 
-        async def create(final_importance: int) -> str:
+        async def create(
+            final_importance: int,
+            *,
+            defer_derived_index: bool = False,
+        ) -> str:
             return await self.bucket_mgr.create(
                 content=item["content"],
                 tags=item.get("tags", []),
@@ -903,6 +907,7 @@ class ImportEngine:
                 valence=item.get("valence", _DEFAULT_VALENCE),
                 arousal=item.get("arousal", _DEFAULT_AROUSAL),
                 name=item.get("name") or None,
+                defer_derived_index=defer_derived_index,
             )
 
         if requested_importance >= _HIGH_IMP_THRESHOLD:
@@ -911,7 +916,16 @@ class ImportEngine:
                     requested_importance,
                     bucket_mgr=self.bucket_mgr,
                 )
-                return await create(final_importance)
+                bucket_id = await create(
+                    final_importance,
+                    defer_derived_index=True,
+                )
+            post_index = getattr(
+                self.bucket_mgr, "_index_after_update", None
+            )
+            if callable(post_index):
+                await post_index(bucket_id, content_changed=True)
+            return bucket_id
         return await create(requested_importance)
 
     async def _process_single_chunk(self, chunk: dict, preserve_raw: bool):
@@ -1115,6 +1129,7 @@ class ImportEngine:
                     finally:
                         self.state.data["api_calls"] += 1
 
+                    derived_state = {}
                     async with AsyncExitStack() as commit_stack:
                         # An incoming 9/10 can promote an ordinary low bucket.
                         # Hold the same global quota turn as MCP/Web writers
@@ -1223,9 +1238,29 @@ class ImportEngine:
                             ),
                             valence=round((old_v + valence) / 2, 2),
                             arousal=round((old_a + arousal) / 2, 2),
+                            **(
+                                {"_derived_state_out": derived_state}
+                                if use_locked_update
+                                else {}
+                            ),
                         )
-                        if committed:
-                            return True
+                    if committed:
+                        queue_captured = getattr(
+                            self.bucket_mgr,
+                            "_queue_captured_derived_state",
+                            None,
+                        )
+                        if use_locked_update and callable(queue_captured):
+                            queue_captured(derived_state)
+                        post_index = getattr(
+                            self.bucket_mgr, "_index_after_update", None
+                        )
+                        if use_locked_update and callable(post_index):
+                            await post_index(
+                                candidate_id,
+                                content_changed=True,
+                            )
+                        return True
                 except Exception as e:
                     logger.warning(f"Merge failed during import: {e}")
 

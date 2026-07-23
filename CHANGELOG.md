@@ -2,6 +2,21 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.8.7
+
+### 修复 / Fixed
+
+- 修复 `hold` 新建桶时，文件系统不支持锁、资源耗尽或 I/O 异常被一律误判为“锁正在占用”，最终等待 30 秒后才抛 `TimeoutError` 的问题；现在只重试真正的共享/锁冲突，其他系统错误立即保留原始 `errno` 报出，并附带逻辑 key、锁路径与持有者摘要用于诊断。
+- 缩短 `hold/grow/trace/历史导入` 合并与编辑路径的租约：Markdown 原子提交后先释放桶锁，再登记 content/meaning 派生状态；同步兼容模式调用外部 embedding 前也已释放 identical-content、merge-target 与 importance/pinned 配额锁，慢 provider 不再阻塞后续写入。
+- 同桶派生索引按跨进程顺序执行，并在 provider 返回后回读最新 Markdown；并发更新或较新请求被取消时，会继续把 content/meaning 收敛到最新值，避免迟到的旧向量覆盖新状态及重复生成同一最终向量。软删除并发发生时会在独立派生租约内复核是否已恢复，再清理迟到记录。
+- embedding outbox 升级为 content/meaning 分组件调度、退避与哈希 CAS；单个 meaning 长期失败不再饿死正文向量。多个实例共享同一 vault 时，整份队列更新会在稳定 sidecar OS lease 内执行 `reload → merge/CAS → fsync → replace`，避免互相覆盖或旧 worker 复活已完成任务。
+- 补齐历史导入合并、`trace(old_str/new_str)` 同时更新 meaning、恢复归档和全库人名替换等私有更新路径的锁外索引刷新，避免正文已更新但向量仍停留在旧内容。
+- 文件租约初始化、上下文异常、任务取消及显式解锁失败路径统一保证关闭 descriptor；锁文件残留本身不会再被误诊为仍有活动内核租约。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与热更新优先读取的 `src/VERSION` 同步更新为 `2.8.7`，Dashboard、运行时与热更新检查显示一致。
+
 ## 2.8.6
 
 ### 修复 / Fixed

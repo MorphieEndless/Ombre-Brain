@@ -692,13 +692,25 @@ async def merge_or_create(
     同内容并发调用时后到的协程会阻塞，等前者写完后直接走合并分支，不产生重复桶。
     """
     async with _content_turn(content):
-        return await _merge_or_create_inner(
+        result = await _merge_or_create_inner(
             content=content, tags=tags, importance=importance, domain=domain,
             valence=valence, arousal=arousal, name=name, raw_merge=raw_merge,
             why_remembered=why_remembered, source_tool=source_tool,
             grow_batch_id=grow_batch_id, meaning=meaning, media=media,
             test_data=test_data,
+            _defer_derived_index=True,
         )
+
+    # identical-content、merge-target 与 quota turns 都已释放。独立/兼容
+    # 运行时即使需要同步调用 provider，也不能继续占用这些写入协调锁。
+    post_index = getattr(rt.bucket_mgr, "_index_after_update", None)
+    if callable(post_index) and result[0]:
+        await post_index(
+            result[0],
+            content_changed=True,
+            meaning_changed=bool(meaning),
+        )
+    return result
 
 
 async def _merge_or_create_inner(
@@ -716,6 +728,7 @@ async def _merge_or_create_inner(
     meaning: str = "",
     media: list | str | None = None,
     test_data: bool = False,
+    _defer_derived_index: bool = False,
 ) -> Tuple[str, bool, str]:
     """实际的 search→merge/create 逻辑，由 merge_or_create 在 Lock 保护下调用。"""
     exact_storage_match = False
@@ -846,6 +859,7 @@ async def _merge_or_create_inner(
                     if media:
                         update_kwargs["media_append"] = media
 
+                    derived_state = {}
                     async with AsyncExitStack() as commit_stack:
                         if importance >= _HIGH_IMP_THRESHOLD:
                             await commit_stack.enter_async_context(
@@ -897,6 +911,8 @@ async def _merge_or_create_inner(
                             if use_locked_update
                             else rt.bucket_mgr.update
                         )
+                        if use_locked_update:
+                            update_kwargs["_derived_state_out"] = derived_state
                         committed = await update_method(
                             candidate_id,
                             allow_embedding_fallback=(
@@ -907,6 +923,27 @@ async def _merge_or_create_inner(
                         )
                         if not committed:
                             break
+
+                    queue_captured = getattr(
+                        rt.bucket_mgr, "_queue_captured_derived_state", None
+                    )
+                    if use_locked_update and callable(queue_captured):
+                        queue_captured(derived_state)
+
+                    # _update_locked() 持有桶租约时只提交 Markdown。content/meaning
+                    # 的 provider 索引必须等 AsyncExitStack 释放租约后执行，否则一次
+                    # 慢 embedding 请求会让所有并发写入者等满 30 秒文件系统超时。
+                    post_index = getattr(rt.bucket_mgr, "_index_after_update", None)
+                    if (
+                        not _defer_derived_index
+                        and use_locked_update
+                        and callable(post_index)
+                    ):
+                        await post_index(
+                            candidate_id,
+                            content_changed=True,
+                            meaning_changed=bool(meaning),
+                        )
 
                     try:
                         rt.dehydrator.invalidate_cache(snapshot_content)
@@ -943,6 +980,7 @@ async def _merge_or_create_inner(
             meaning=meaning,
             media=media,
             test_data=test_data,
+            defer_derived_index=_defer_derived_index,
             # hold 的铁律：正文优先落盘。打标/embedding 可降级，但绝不压缩或撤销记忆。
             allow_embedding_fallback=(raw_merge and source_tool == "hold"),
         )

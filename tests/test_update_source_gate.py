@@ -4,7 +4,9 @@ do-update 会把远端 zip 覆盖到 src/ 并（旧行为）自动 pip install�
 config.update」放大成 RCE。默认只信官方仓、自动 pip 默认关闭。
 """
 import hashlib
+import re
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -73,6 +75,35 @@ def test_hot_update_downgrade_guard(current, target, expected):
 def test_hot_update_defaults_to_same_main_branch_as_version_check():
     source = open(meta.__file__, encoding="utf-8").read()
     assert '_ucfg.get("channel") or "branch"' in source
+
+
+def test_ci_lock_verification_freezes_package_index_snapshot():
+    repo_root = Path(meta.__file__).resolve().parents[2]
+    workflow = (repo_root / ".github" / "workflows" / "tests.yml").read_text(
+        encoding="utf-8"
+    )
+    _, remainder = workflow.split("      - name: Verify dependency lockfiles", 1)
+    step = remainder.split("\n      - name:", 1)[0]
+
+    match = re.search(
+        r"(?m)^\s+UV_EXCLUDE_NEWER:\s*['\"]([^'\"]+)['\"]\s*$",
+        step,
+    )
+    assert match, "lock 校验必须固定包索引时间，避免无输入变更时发生解析漂移"
+    cutoff_text = match.group(1)
+    assert cutoff_text.endswith("Z"), "lock 索引时间必须使用明确的 UTC 时间"
+    cutoff = datetime.fromisoformat(cutoff_text[:-1] + "+00:00")
+    assert cutoff.tzinfo == timezone.utc
+    assert cutoff <= datetime.now(timezone.utc)
+
+    assert step.count("uv pip compile ") == 2
+    assert "--upgrade" not in step
+    assert "--exclude-newer" not in step, (
+        "cutoff 必须通过环境变量传入，避免 uv 把参数写进 lock 头部造成纯文本漂移"
+    )
+    reset_command = "rm -f requirements.lock.txt requirements-dev.lock.txt"
+    assert reset_command in step, "lock 校验必须从空输出重建，不能依赖已有 pin 偏好"
+    assert step.index(reset_command) < step.index("uv pip compile ")
 
 
 def test_release_archive_omits_loose_requirements_but_keeps_lock():

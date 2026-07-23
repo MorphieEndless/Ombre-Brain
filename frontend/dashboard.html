@@ -390,6 +390,34 @@
     overflow-y: auto;
     box-shadow: inset 3px 3px 6px var(--shadow-dark-subtle), inset -3px -3px 6px var(--shadow-light);
   }
+  .meaning-block {
+    margin: 8px 0 16px;
+    padding: 10px 14px;
+    border-left: 3px solid var(--accent);
+    background: var(--surface-solid);
+    color: var(--accent);
+    font-family: 'Cormorant Garamond', 'Noto Serif SC', serif;
+    line-height: 1.7;
+  }
+  .meaning-block-label {
+    margin-bottom: 5px;
+    color: var(--text-dim);
+    font-family: 'Share Tech Mono', 'Noto Sans SC', sans-serif;
+    font-size: 10px;
+    font-style: normal;
+    letter-spacing: 0.4px;
+  }
+  .meaning-quote {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-style: italic;
+  }
+  .meaning-quote + .meaning-quote {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
 
   .config-section {
     margin-bottom: 28px;
@@ -4743,6 +4771,26 @@ function _localBucketMatches(query) {
   return name.concat(other);                          // 桶名匹配排最前
 }
 
+function normalizeMeaningItems(value) {
+  var values = Array.isArray(value)
+    ? value
+    : (typeof value === 'string' ? [value] : []);
+  return values.map(function(item) {
+    return typeof item === 'string' ? item.trim() : '';
+  }).filter(function(item) { return item.length > 0; });
+}
+
+function renderMeaningHtml(value) {
+  var items = normalizeMeaningItems(value);
+  if (!items.length) return '';
+  return '<section class="meaning-block" data-field="meaning" aria-label="Meaning / 为什么值得被想起">' +
+    '<div class="meaning-block-label">MEANING · 为什么值得被想起</div>' +
+    items.map(function(item) {
+      return '<blockquote class="meaning-quote">❝ ' + esc(item) + ' ❞</blockquote>';
+    }).join('') +
+  '</section>';
+}
+
 async function searchBuckets(query) {
   var seen = {}, merged = [];
   _localBucketMatches(query).forEach(function(b) { if (!seen[b.id]) { seen[b.id] = 1; merged.push(b); } });
@@ -4786,6 +4834,8 @@ async function showDetail(id) {
     panel.classList.toggle('anchor-mode', !!meta.anchor);
     // iter 1.8: why_remembered = 这条为什么被记得（展示不计分）
     var whyHtml = meta.why_remembered ? ('<div style="margin:8px 0 16px;padding:10px 14px;border-left:3px solid var(--accent);background:var(--surface-solid);font-style:italic;color:var(--accent);font-family:\'Cormorant Garamond\',\'Noto Serif SC\',serif;line-height:1.7;">❝ ' + esc(meta.why_remembered) + ' ❞</div>') : '';
+    // meaning 是可累积的体验锚点；兼容早期手写桶中的单字符串格式。
+    var meaningHtml = renderMeaningHtml(meta.meaning);
     var firstBadge = meta.first_of_kind ? '<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--accent);margin-left:8px;"><i data-lucide="sparkles" style="width:12px;height:12px;"></i>首次出现</span>' : '';
     var weightHtml = (meta.type === 'plan' && meta.weight != null) ? ('<div class="field"><label>承诺重量</label><span style="display:inline-block;width:80px;height:6px;background:var(--border);border-radius:3px;vertical-align:middle;overflow:hidden;"><span style="display:block;width:' + Math.round(meta.weight*100) + '%;height:100%;background:var(--accent);"></span></span> ' + (meta.weight*100).toFixed(0) + '% · ' + weightAnchorLabel(meta.weight) + '</div>') : '';
     // iter 1.9 D3: triggered_by 渲染成可跳转链接
@@ -4804,6 +4854,7 @@ async function showDetail(id) {
     content.innerHTML =
       '<h2>' + esc(meta.name || id) + firstBadge + '</h2>' +
       whyHtml +
+      meaningHtml +
       '<div class="detail-meta">' +
         '<div class="field"><label>ID</label>' + esc(id) + '</div>' +
         '<div class="field"><label>类型 / Type</label>' + esc(meta.type || 'dynamic') + '</div>' +

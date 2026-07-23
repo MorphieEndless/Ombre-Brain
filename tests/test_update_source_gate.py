@@ -3,6 +3,10 @@
 do-update 会把远端 zip 覆盖到 src/ 并（旧行为）自动 pip install，等于把「谁能改
 config.update」放大成 RCE。默认只信官方仓、自动 pip 默认关闭。
 """
+import hashlib
+import subprocess
+from pathlib import Path
+
 import pytest
 
 import web.meta as meta
@@ -69,3 +73,125 @@ def test_hot_update_downgrade_guard(current, target, expected):
 def test_hot_update_defaults_to_same_main_branch_as_version_check():
     source = open(meta.__file__, encoding="utf-8").read()
     assert '_ucfg.get("channel") or "branch"' in source
+
+
+def test_release_archive_omits_loose_requirements_but_keeps_lock():
+    repo_root = Path(meta.__file__).resolve().parents[2]
+    attributes = (repo_root / ".gitattributes").read_text(encoding="utf-8")
+    active_rules = {
+        line.strip()
+        for line in attributes.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+    assert "/requirements.txt export-ignore" in active_rules
+    assert "/requirements.lock.txt export-ignore" not in active_rules
+    assert "COPY requirements.lock.txt ./" in (repo_root / "Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_legacy_archive_compatibility_requires_284_release_lock():
+    repo_root = Path(meta.__file__).resolve().parents[2]
+    lock_bytes = (repo_root / "requirements.lock.txt").read_bytes()
+    normalized = lock_bytes.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+    assert hashlib.sha256(normalized).hexdigest() == (
+        "fdb24053349d8e18a55c3a5afbab8b92cc31d94b69e52359b350ab96b79001c9"
+    ), (
+        "requirements.lock.txt 已变化：发布前必须先移除 requirements.txt 的 "
+        "export-ignore 兼容规则，并为旧更新器设计显式依赖迁移"
+    )
+
+
+def test_dependency_check_uses_release_lock_and_normalizes_line_endings(tmp_path):
+    old_source = b"mcp>=1.0.0\r\n"
+    new_source = b"mcp>=1.27,<2\n"
+    old_lock = b"mcp==1.28.1 \\\r\n    --hash=sha256:abc\r\n"
+    new_lock = b"mcp==1.28.1 \\\n    --hash=sha256:abc\n"
+    (tmp_path / "requirements.txt").write_bytes(old_source)
+    (tmp_path / "requirements.lock.txt").write_bytes(old_lock)
+
+    assert meta._requirements_changed(
+        str(tmp_path), new_source, new_lock
+    ) is False
+    assert meta._requirements_changed(
+        str(tmp_path), old_source, b"mcp==1.28.2\n"
+    ) is True
+
+
+def test_dependency_check_falls_back_to_source_for_legacy_archive(tmp_path):
+    (tmp_path / "requirements.txt").write_bytes(b"mcp>=1.0.0\r\n")
+
+    assert meta._requirements_changed(
+        str(tmp_path), b"mcp>=1.0.0\n", None
+    ) is False
+    assert meta._requirements_changed(
+        str(tmp_path), b"mcp>=1.27,<2\n", None
+    ) is True
+
+
+def test_dependency_check_falls_back_to_configured_image_root(
+    monkeypatch, tmp_path
+):
+    runtime_root = tmp_path / "runtime"
+    image_root = tmp_path / "image"
+    runtime_root.mkdir()
+    image_root.mkdir()
+    (image_root / "requirements.lock.txt").write_bytes(b"mcp==1.28.1\r\n")
+    monkeypatch.setenv("OMBRE_IMAGE_ROOT", str(image_root))
+
+    assert meta._requirements_changed(
+        str(runtime_root),
+        b"mcp>=1.27,<2\n",
+        b"mcp==1.28.1\n",
+    ) is False
+
+
+def test_dependency_check_without_any_baseline_remains_fail_closed(
+    monkeypatch, tmp_path
+):
+    monkeypatch.delenv("OMBRE_IMAGE_ROOT", raising=False)
+    monkeypatch.setattr(sh, "in_docker", lambda: False)
+
+    assert meta._requirements_changed(
+        str(tmp_path), b"new-package==1\n", b"new-package==1 --hash=sha256:abc\n"
+    ) is True
+    assert meta._requirements_changed(
+        str(tmp_path), None, b"new-package==1 --hash=sha256:abc\n"
+    ) is True
+
+
+def test_new_lock_never_falls_back_to_matching_source_without_lock_baseline(
+    monkeypatch, tmp_path
+):
+    monkeypatch.delenv("OMBRE_IMAGE_ROOT", raising=False)
+    monkeypatch.setattr(sh, "in_docker", lambda: False)
+    source = b"package>=1\n"
+    (tmp_path / "requirements.txt").write_bytes(source)
+
+    assert meta._requirements_changed(
+        str(tmp_path), source, b"package==1 --hash=sha256:abc\n"
+    ) is True
+
+
+def test_lock_install_enforces_hashes(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    target = tmp_path / "requirements.lock.txt"
+    data = b"package==1 --hash=sha256:abc\n"
+
+    result = meta._install_update_requirements(
+        str(target), data, require_hashes=True
+    )
+
+    assert result.returncode == 0
+    assert target.read_bytes() == data
+    assert "--require-hashes" in captured["command"]
+    assert captured["command"][-2:] == ["-r", str(target)]

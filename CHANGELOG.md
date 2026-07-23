@@ -2,6 +2,20 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.8.8
+
+### 修复 / Fixed
+
+- 修复热更新器把 `requirements.txt` 文本变化误判成实际依赖变化的问题；2.8.8 起依赖门禁以正式 `requirements.lock.txt` 为准，仅兼容旧更新包时回退源清单。官方 GitHub 热更新归档不再携带宽松源清单，因此 2.8.4 存量实例可直接点击热更新进入新版逻辑，无需重建镜像或临时放行 pip。
+- Git 克隆、CI 与常规源码构建仍保留 `requirements.txt`；GitHub Download ZIP 与 Dashboard 热更新归档只携带带 hash 的发布锁。Dockerfile 同步兼容“归档中仅有 lock”的构建方式，避免一键直升修复影响 ZIP 部署用户。
+- 依赖清单比较会规范化 CRLF/LF；Docker 持久代码目录缺少根级清单时会回退镜像内置基线。更新成功、镜像重新播种与崩溃回滚均同步两份清单，失败时连同“原本不存在”的状态一起精确还原。
+- 发布锁真实变化时仍默认拒绝自动安装；明确开启 `OMBRE_UPDATE_ALLOW_PIP` 后改用 `--require-hashes` 安装锁文件。新代码先通过编译自检才会执行 pip，避免失败代码污染解释器环境，不降低原有供应链安全边界。
+- 一键直升兼容规则绑定 2.8.4 的发布锁摘要；兼容规则存续期间若依赖锁发生变化，回归测试会强制失败并要求先提供显式迁移方案。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与热更新优先读取的 `src/VERSION` 同步更新为 `2.8.8`，Dashboard、运行时与热更新检查显示一致。
+
 ## 2.8.7
 
 ### 修复 / Fixed

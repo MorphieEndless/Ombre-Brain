@@ -675,8 +675,8 @@ class BucketManager:
         except Exception as exc:
             logger.warning(f"ledger mirror record failed for {event_type}:{bucket_id}: {exc}")
 
-    def ledger_integrity_report(self) -> dict:
-        """Return a read-only integrity report for the Phase 1 ledger mirror."""
+    def ledger_integrity_report(self, *, rebuild_projections: bool = False) -> dict:
+        """默认返回只读报告；仅在显式要求时重建持久化投影。"""
         report = self.ledger_mirror.verify_integrity()
         events = list(self.ledger_mirror.iter_events())
         projection = TraceCatalogProjection()
@@ -689,7 +689,8 @@ class BucketManager:
         )
         try:
             sqlite_projection = TraceSQLiteProjection(sqlite_projection_path)
-            sqlite_projection.rebuild(events)
+            if rebuild_projections:
+                sqlite_projection.rebuild(events)
             report["sqlite_projection"] = sqlite_projection.to_report(
                 source_latest_seq=int(report.get("latest_seq", 0) or 0)
             )

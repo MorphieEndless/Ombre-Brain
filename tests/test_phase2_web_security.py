@@ -581,6 +581,158 @@ async def test_webhook_failure_log_does_not_expose_signed_url(monkeypatch):
     assert "secret-query" not in combined
 
 
+def test_mcp_operation_logs_never_copy_text_or_control_sequences():
+    import server as server_mod
+
+    secret = "private query\r\n\t\x1b[31mFAKE-ERROR"
+    rendered = server_mod._fmt_log_args(
+        {"query": secret, "author": "Alice", "max_results": 3}
+    )
+
+    assert "private" not in rendered
+    assert "Alice" not in rendered
+    assert "FAKE-ERROR" not in rendered
+    assert "\r" not in rendered
+    assert "\n" not in rendered
+    assert "\x1b" not in rendered
+    assert f"query=str_len:{len(secret)}" in rendered
+    assert "author=str_len:5" in rendered
+    assert "max_results=3" in rendered
+
+
+@pytest.mark.asyncio
+async def test_mcp_error_response_never_includes_another_calls_log_tail(monkeypatch):
+    import errors as errors_mod
+    import server as server_mod
+
+    monkeypatch.setattr(
+        errors_mod,
+        "get_recent_logs",
+        lambda _limit: ["prior-client-private-query"],
+    )
+
+    async def fail():
+        raise RuntimeError("current failure\r\n\x1b[31mforged")
+
+    result = await server_mod._with_notice(fail(), op="security_probe")
+
+    assert "prior-client-private-query" not in result
+    assert "--- 最近" not in result
+    assert "RuntimeError" in result
+    assert "异常正文已隐藏" in result
+    assert "current failure" not in result
+    assert "forged" not in result
+    assert "\\x0d" not in result
+    assert "\x1b" not in result
+
+
+@pytest.mark.asyncio
+async def test_mcp_error_fallback_still_sanitizes_exception_text(monkeypatch):
+    import server as server_mod
+
+    monkeypatch.setattr(
+        server_mod,
+        "format_error",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("formatter down")),
+    )
+
+    async def fail():
+        raise RuntimeError("https://provider.invalid/?key=secret\r\n\x1b[31mforged")
+
+    result = await server_mod._with_notice(fail(), op="security_probe")
+
+    assert "RuntimeError" in result
+    assert "异常正文已隐藏" in result
+    assert "https://" not in result
+    assert "provider.invalid" not in result
+    assert "secret" not in result
+    assert "forged" not in result
+    assert "\\x0d" not in result
+    assert "\r" not in result
+    assert "\n\x1b" not in result
+    assert "\x1b" not in result
+
+
+@pytest.mark.asyncio
+async def test_mcp_exception_secrets_never_reach_response_persistence_or_logs(
+    monkeypatch, tmp_path
+):
+    import errors as errors_mod
+    import server as server_mod
+
+    error_path = tmp_path / "errors.jsonl"
+    log_messages = []
+
+    class CapturingLogger:
+        @staticmethod
+        def _render(message, args):
+            return (message % args) if args else str(message)
+
+        def info(self, message, *args, **_kwargs):
+            log_messages.append(self._render(message, args))
+
+        def error(self, message, *args, **_kwargs):
+            log_messages.append(self._render(message, args))
+
+        def exception(self, *_args, **_kwargs):
+            raise AssertionError("异常路径不得记录 traceback")
+
+    logger = CapturingLogger()
+    monkeypatch.setattr(errors_mod, "_errors_path", str(error_path))
+    monkeypatch.setattr(errors_mod, "logger", logger)
+    monkeypatch.setattr(server_mod, "logger", logger)
+
+    async def fail():
+        raise RuntimeError(
+            "https://provider.invalid/private?api_key=super-secret-token "
+            "C:\\Users\\Alice\\.env /home/alice/.ssh/id_rsa\r\n"
+            "\x1b[31mFORGED-LOG"
+        )
+
+    response = await server_mod._with_notice(fail(), op="security_probe")
+    persisted = error_path.read_text(encoding="utf-8")
+    logs = "\n".join(log_messages)
+
+    assert "RuntimeError" in response
+    assert "异常正文已隐藏" in response
+    for rendered in (response, persisted, logs):
+        assert "https://" not in rendered
+        assert "provider.invalid" not in rendered
+        assert "super-secret-token" not in rendered
+        assert "C:\\Users\\Alice" not in rendered
+        assert "/home/alice/.ssh" not in rendered
+        assert "FORGED-LOG" not in rendered
+        assert "\x1b" not in rendered
+
+
+@pytest.mark.parametrize(
+    "tool_name",
+    (
+        "breath",
+        "breath_search",
+        "breath_advanced",
+        "hold",
+        "grow",
+        "trace",
+        "dream",
+        "anchor",
+        "release",
+        "pulse",
+        "plan",
+        "letter_write",
+        "letter_read",
+        "I",
+    ),
+)
+def test_all_public_mcp_argument_models_forbid_unknown_fields(tool_name):
+    import server as server_mod
+
+    public_tool = server_mod.mcp._tool_manager.get_tool(tool_name)
+
+    assert public_tool is not None
+    assert public_tool.fn_metadata.arg_model.model_config.get("extra") == "forbid"
+
+
 @pytest.mark.asyncio
 async def test_chunked_multipart_raw_stream_is_bounded_before_form_result():
     class ChunkedRequest:

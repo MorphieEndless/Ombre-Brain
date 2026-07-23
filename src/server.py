@@ -409,7 +409,7 @@ _wsh.init_runtime(
 # 所有可能含 PII 的字段（content / 信件正文等）只记 length，不记内容。
 # =============================================================
 def _fmt_log_val(v: object) -> str:
-    """日志 value 的安全格式化：bool/int/float 原样；str 截 40 字符并去换行；其它转 str。"""
+    """日志 value 的安全格式化：文本只记长度，绝不记录用户原文。"""
     if v is None:
         return "_"
     if isinstance(v, bool):
@@ -417,8 +417,10 @@ def _fmt_log_val(v: object) -> str:
     if isinstance(v, (int, float)):
         return str(v)
     if isinstance(v, str):
-        s = v.replace("\n", "\\n").replace(" ", "_")
-        return s if len(s) <= 40 else s[:37] + "..."
+        # query、署名、标题、domain/tag 乃至 bucket_id 都可能含私密内容或
+        # CR/ANSI 控制字符。结构化操作日志只需要知道字段是否存在和规模，
+        # 不应把文本复制到全局日志，再由另一次失败回传给别的 MCP 客户端。
+        return f"str_len:{len(v)}"
     return type(v).__name__
 
 
@@ -438,9 +440,33 @@ def _log_op_ok(op: str, result: object) -> None:
     logger.info(f"op={op} phase=ok bytes={size}")
 
 
+def _safe_exception_type(exc: BaseException) -> str:
+    """只保留可安全写入响应与日志的 ASCII 异常类型名。"""
+    raw_type = type(exc).__name__
+    safe_type = "".join(
+        char
+        for char in raw_type
+        if char.isascii() and (char.isalnum() or char == "_")
+    )[:80]
+    return safe_type or "Exception"
+
+
 def _log_op_err(op: str, exc: BaseException) -> None:
-    # 用 .exception 让 traceback 进 server.log，便于事后定位
-    logger.exception(f"op={op} phase=err err={type(exc).__name__}:{exc}")
+    # 异常正文和 traceback 可能含密钥 URL、本机路径及调用参数，服务日志
+    # 只记录安全化类型；详细排障使用同一时间点附近的独立结构化事件。
+    logger.error(
+        "op=%s phase=err err_type=%s detail=hidden",
+        op,
+        _safe_exception_type(exc),
+    )
+
+
+def _safe_exception_detail(exc: BaseException) -> str:
+    """异常对外或持久化前只保留类型与泛化说明。"""
+    return (
+        f"{_safe_exception_type(exc)}: 工具执行失败；"
+        "异常正文已隐藏，以保护密钥、本机路径与调用内容。"
+    )
 
 
 async def _with_notice(coro: Awaitable[str], op: str = "", args: dict | None = None) -> str:
@@ -449,8 +475,8 @@ async def _with_notice(coro: Awaitable[str], op: str = "", args: dict | None = N
     职责（统一错误规范）：
     1. 入口：begin_warnings() 初始化本调用的 W/I channel。
     2. 出口：拼接顺序 = [删除通知] + [工具正文] + [本调用产生的 W/I 提示].
-    3. 异常：捕获后 record OB-E004，返回标准格式（含最近 15 条 log），
-       不让 MCP 协议层看到裸异常字符串。
+    3. 异常：捕获后 record OB-E004，响应、持久错误与日志只保留异常类型和
+       泛化说明，不能复制异常正文或 traceback。
     4. 任务A：op 非空时，在 entry/ok/err 三处打结构化日志。
     """
     if op:
@@ -463,10 +489,21 @@ async def _with_notice(coro: Awaitable[str], op: str = "", args: dict | None = N
             _log_op_err(op, e)
         # OB-E004：MCP 工具执行异常 —— 不静默，给 LLM 一个能看懂的字符串
         try:
-            record_error("OB-E004", f"{type(e).__name__}: {e}")
-            err_str = format_error("OB-E004", f"{type(e).__name__}: {e}")
+            detail = _safe_exception_detail(e)
+            record_error("OB-E004", detail)
+            err_str = format_error(
+                "OB-E004",
+                detail,
+                include_logs=False,
+            )
         except Exception:
-            err_str = f"❌ [OB-E004] MCP 工具执行异常\n{type(e).__name__}: {e}"
+            # 错误格式化器本身失效时也不能退回未净化的异常原文。
+            # 例如 provider 异常可能含密钥 URL、CRLF 或 ANSI 控制序列。
+            try:
+                fallback_detail = _safe_exception_detail(e)
+            except Exception:
+                fallback_detail = "Exception: 工具执行失败；异常正文已隐藏。"
+            err_str = f"❌ [OB-E004] MCP 工具执行异常\n{fallback_detail}"
         # 仍把通道里已累计的提示拼上
         try:
             extras = format_warnings_suffix(pop_warnings())
@@ -908,8 +945,46 @@ async def I(
     )
 
 
+# Pydantic 默认的 ``extra=ignore`` 会让拼错的 MCP 参数看似调用成功；
+# 写工具甚至会在未应用客户端目标字段时仍创建记忆。breath 和 trace
+# 已有严格适配层，其余公开工具使用相同边界，并同步 FastMCP
+# 的发现 schema 缓存与运行时校验器。
+def _forbid_unknown_tool_arguments(tool_name: str) -> None:
+    public_tool = mcp._tool_manager.get_tool(tool_name)
+    if public_tool is None:
+        raise RuntimeError(f"registered {tool_name} tool is missing")
+    arg_model = public_tool.fn_metadata.arg_model
+    arg_model.model_config["extra"] = "forbid"
+    arg_model.model_rebuild(force=True)
+    public_tool.parameters = arg_model.model_json_schema()
+
+
+for _strict_tool_name in (
+    "breath_search",
+    "breath_advanced",
+    "hold",
+    "grow",
+    "dream",
+    "anchor",
+    "release",
+    "pulse",
+    "plan",
+    "letter_write",
+    "letter_read",
+    "I",
+):
+    try:
+        _forbid_unknown_tool_arguments(_strict_tool_name)
+    except (AttributeError, RuntimeError, TypeError, ValueError) as _schema_exc:
+        logger.warning(
+            "%s strict-argument adapter unavailable: %s",
+            _strict_tool_name,
+            _schema_exc,
+        )
+
+
 # =============================================================
-# Dashboard API endpoints (for lightweight Web UI)
+# Dashboard API 端点（供轻量 Web UI 使用）
 # 仪表板 API（轻量 Web UI 用）
 # =============================================================
 # =============================================================

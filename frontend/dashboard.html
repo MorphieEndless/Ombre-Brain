@@ -3440,7 +3440,7 @@ async function doLogin() {
     await finishDashboardAuthentication();
   } else {
     const d = await resp.json().catch(() => ({}));
-    showAuthError(d.detail || '密码错误');
+    showAuthError(d.error || '密码错误');
   }
 }
 

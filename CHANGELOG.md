@@ -2,6 +2,20 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.8.11
+
+### 修复 / Fixed
+
+- `/auth/status` 响应明确禁止缓存，Dashboard 请求该状态时也主动绕过 HTTP 缓存，避免浏览器或中间缓存复用过期的首次设置与登录状态。
+
+### 测试 / Tests
+
+- 补充服务端响应头与前端请求缓存策略的回归测试。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与热更新优先读取的 `src/VERSION` 同步更新为 `2.8.11`。
+
 ## 2.8.10
 
 ### 修复 / Fixed

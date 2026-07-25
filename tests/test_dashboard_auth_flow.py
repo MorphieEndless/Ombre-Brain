@@ -67,6 +67,12 @@ def test_all_auth_success_paths_share_the_dashboard_initializer():
     ) == 2
 
 
+def test_auth_status_check_bypasses_http_cache():
+    check_auth = _dashboard_section("async function checkAuth()", "function showAuthError")
+
+    assert "fetch('/auth/status', { cache: 'no-store' })" in check_auth
+
+
 def test_auth_only_initial_loads_do_not_run_before_authentication():
     html = DASHBOARD.read_text(encoding="utf-8")
     dom_ready = _dashboard_section(

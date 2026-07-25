@@ -243,10 +243,13 @@ def register(mcp) -> None:
     async def auth_status(request: Request) -> Response:
         """Return auth state (authenticated, setup_needed)."""
         from starlette.responses import JSONResponse
-        return JSONResponse({
-            "authenticated": sh._is_authenticated(request),
-            "setup_needed": sh._is_setup_needed(),
-        })
+        return JSONResponse(
+            {
+                "authenticated": sh._is_authenticated(request),
+                "setup_needed": sh._is_setup_needed(),
+            },
+            headers={"Cache-Control": "no-store"},
+        )
 
     @mcp.custom_route("/auth/setup", methods=["POST"])
     async def auth_setup_endpoint(request: Request) -> Response:

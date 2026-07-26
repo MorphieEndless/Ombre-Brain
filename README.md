@@ -33,7 +33,7 @@ Ombre Brain gives it persistent memory — not cold key-value storage, but a sys
 - **Obsidian 原生**：每个记忆桶 = 一个 Markdown 文件 + YAML frontmatter，可直接在 Obsidian 浏览编辑
 - **写入不被向量服务绑架**：Markdown 原文先落盘，embedding 在耐久后台队列中生成；网络、限流或重启都不会让已写记忆回滚
 - **可验证备份与恢复**：本地导出使用 SQLite 一致性快照，并为每个文件写入 SHA-256 清单；导入前先检查路径、体积、重复项和完整性，损坏包不会部分恢复
-- **历史对话导入**：批量导入 Claude / ChatGPT / DeepSeek 历史对话，分块处理带断点续传
+- **历史对话导入**：批量导入 Claude / ChatGPT / DeepSeek 历史对话，超长单轮无损分块并支持断点续传；导入桶独立新建、标注“被导入”，创建与衰减日期取导入日
 - **Dashboard**：内置 Web 管理面板，密码保护，桶列表 / 检索调试 / 记忆网络 / 配置管理
 - **Cloudflare Tunnel 一键管理**：Dashboard 内置 Tunnel 连接器，无需命令行即可开启公网访问
 - **OAuth 2.1 远程鉴权**：通过 HTTPS 连接时自动触发 OAuth 流程，Claude.ai 网页版和 Claude Code 均支持
@@ -355,23 +355,23 @@ docker compose -f docker-compose.user.yml up -d --force-recreate
 
 ---
 
-### 方式四：静态 Token 鉴权（第三方 MCP 客户端，不走 OAuth）
+### 方式四：OAuth + 静态 Token 共存（推荐）或仅静态 Token
 
-适合：MCP 客户端支持自定义请求头，但走不通浏览器 OAuth 授权流程——又不想像方式三那样完全关闭鉴权。
+适合：同一个 OB 实例既要连接 Claude.ai 网页版等 OAuth 客户端，又要连接 TypingMind、Kelivo 或自建前端等只会携带固定 Bearer 的客户端。
 
-这是与 OAuth **互斥**的第三种模式：选了 Token 就不再认 OAuth（OAuth 的发现/授权路由全部 404），选 OAuth 就不认 Token，不会同时生效。
+推荐使用 `hybrid`：OAuth 的发现、动态注册和授权流程保持不变；同一个 `/mcp` 的 `Authorization: Bearer` 还会接受预置静态 Token。纯 `oauth` 不会读取遗留静态密钥；纯 `token` 仍会关闭全部 OAuth 路由，旧配置行为不变。
 
 ```bash
-# 方式 A：环境变量（优先级最高）
-OMBRE_MCP_AUTH_MODE=token
+# 方式 A：环境变量（优先级最高；共存模式）
+OMBRE_MCP_AUTH_MODE=hybrid
 OMBRE_MCP_TOKEN=一串足够长的随机密钥
 
-# 方式 B：config.yaml
-mcp_auth_mode: "token"
+# 方式 B：config.yaml（只需要静态 Token 时可改成 "token"）
+mcp_auth_mode: "hybrid"
 mcp_token: "一串足够长的随机密钥"
 ```
 
-也可以在 Dashboard「MCP 鉴权」区选择「静态 Token 鉴权」，点「生成新 Token」自动生成并保存（生成后立即生效，无需重启；但切换鉴权模式本身仍需重启）。
+也可以在 Dashboard「MCP 鉴权」区选择「OAuth + 静态 Token 共存」，点「生成新 Token」自动生成并保存（生成后立即生效，无需重启；但切换鉴权模式本身仍需重启）。
 
 客户端调用时任选其一：
 
@@ -399,11 +399,11 @@ Ombre-MCP-Token: 你的Token
 }
 ```
 
-截至 Kelivo v1.1.17，常规远程 MCP 配置没有接入交互式 OAuth 授权流程，因此建议 OB 选“静态 Token 鉴权”（除非你自行获取并维护 OAuth access token）。连接后还要在 Kelivo 中把该 MCP 服务分配给当前助手/会话；否则服务可以显示已连接，但模型不会获得其工具。
+截至 Kelivo v1.1.17，常规远程 MCP 配置没有接入交互式 OAuth 授权流程；需要同时保留 Claude.ai 时选“OAuth + 静态 Token 共存”，只服务这类客户端时也可选“静态 Token 鉴权”。连接后还要在 Kelivo 中把该 MCP 服务分配给当前助手/会话；否则服务可以显示已连接，但模型不会获得其工具。
 
 （不支持把 Token 放进 URL 查询参数——`/mcp` 能读写全部记忆，查询参数更容易被隧道/反代/浏览器历史记录留痕。）
 
-> ⚠️ **安全提醒**：静态 Token 等同万能密钥，泄露后果和关闭鉴权一样。请勿把服务直接暴露公网，妥善保管并定期轮换该 Token。
+> ⚠️ **安全提醒**：共存并不会削弱 OAuth，但新增的静态 Token 仍等同万能密钥。公网必须使用 HTTPS，妥善保管并定期轮换 Token；不要把它提交到仓库、日志或截图中。
 
 ---
 
@@ -549,6 +549,8 @@ docker compose -f deploy/docker-compose.multi.yml up -d --build
 
 `deploy/docker-compose.multi.yml` 里每个人是一个 service（独立数据卷 + 独立端口 + 各自的
 `OMBRE_OWNER_NAME`）。敏感 key（API Key / 各自的 Dashboard 密码）走 `deploy/.env`。
+使用静态 Token 或 OAuth + 静态 Token 共存模式时，每个 service 必须使用独立密钥；示例分别读取
+`OMBRE_MING_MCP_TOKEN` 与 `OMBRE_HONG_MCP_TOKEN`，不要给多个 owner 复用同一 Token。
 
 ### 用法三：托管平台（Zeabur / Railway / Render 等）
 
@@ -812,7 +814,7 @@ docker compose -f deploy/docker-compose.yml up -d
 | 工具调用显示「执行报错」但记忆其实写进去了 | **不是服务器问题**：服务端已成功返回，是 Claude.ai 连接器/渲染层把一次成功往返显示成了报错 | 用 `letter_read` 或 Dashboard 确认数据已落盘；服务端日志 `phase=ok` 即表示成功 |
 | embedding API 暂时离线时 `breath(query=...)` 出现“检索降级” | OB 正在使用关键词/BM25 继续检索；命中桶仍逐字返回完整存储正文，不是记忆丢失 | 可继续使用；到系统诊断查看向量队列，恢复 API 后语义通道会自动回来 |
 | 向量化不生效 / 语义检索没结果（压缩却正常） | base_url 漏 `/v1`（→404）、model 漏 `BAAI/` 前缀（→Model does not exist），或后台队列因网络 / 配额持续重试 | 用 Dashboard 向量化区的「测试」和系统诊断查看待处理 / 重试数；按上面「用硅基流动…」一节填对 base_url 与 model；错误详情见设置页错误面板（OB-E001） |
-| 自有前端 / GPT / GLM 调用 MCP 工具被 401 卡住 | 默认强制 OAuth，自定义客户端不走该流程；或危险的非回环免鉴权配置已被安全门禁收紧 | 推荐改用“静态 Token”模式；仅同机连接可同时设 `OMBRE_BIND_HOST=127.0.0.1` 与 `OMBRE_MCP_REQUIRE_AUTH=false` 后重启；Docker 旧模板需更新 Compose 以声明 `OMBRE_BIND_ADDRESS` |
+| 自有前端 / GPT / GLM 调用 MCP 工具被 401 卡住 | 默认强制 OAuth，自定义客户端不走该流程；或危险的非回环免鉴权配置已被安全门禁收紧 | 还要保留 Claude.ai 时选“OAuth + 静态 Token 共存”，否则可选纯静态 Token；仅同机连接才考虑回环免鉴权 |
 | **Operit / 安卓 / Proot 本地桥接一直黄灯、连不上 `/mcp`** | 多为下面三点之一：① `transport` 没设成 `streamable-http`（默认 `stdio` **根本不开 HTTP 服务**）；② 默认强制 OAuth，Operit 这类本地桥不走该流程被 401 卡半通；③ 客户端填了 `localhost`，在 Proot/Termux 里常解析成 IPv6 `::1`，连不上 IPv4 监听 | 见下方「**Operit / 安卓 / Proot 本地桥接**」一节，三步逐个对齐 |
 | Token 过期后无法自动重连 | 旧版本不支持 `refresh_token` grant，headless 环境只能重新打开授权页 | 更新到 v2.4.11+ 后重新授权一次，之后客户端可用 refresh token 自动续期 |
 | Dashboard 401 | 未登录 / 密码错 | 浏览器重新登录 |
@@ -843,7 +845,7 @@ docker compose -f deploy/docker-compose.yml up -d
 - **🛟 记忆只有一份很危险，强烈建议开异地备份**：本地/单卷就是「一份」，磁盘坏了或误删就找不回。到 Dashboard → GitHub 同步 配一下（几分钟），记忆就多一份云端存档，换机/灾难也能拉回来（embeddings.db 不上传，靠「重算所有向量」恢复）。
 - **切换向量化后端会全库重算**：云端 3072 维和本地 bge-m3 1024 维不通用，每次切换都会重算，别频繁来回切。
 - **热更新按钮看部署方式**：Docker（有 restart 策略）点完自动恢复；裸机/纯 Python 需要 systemd/pm2 等守护，否则更新后要手动重启。点之前先「导出记忆备份」。
-- **自有前端 / GPT / GLM 接入**：默认强制 OAuth；优先改用静态 Token。免鉴权只允许已确认的同机回环边界，局域网/NAS 不属于回环。
+- **自有前端 / GPT / GLM 接入**：还要保留 Claude.ai 时优先使用 OAuth + 静态 Token 共存；免鉴权只允许已确认的同机回环边界，局域网/NAS 不属于回环。
 - **首次访问先设密码**：设完之后所有 `/api/*` 都要登录；忘了密码可用设置里的安全问题急救。
 
 ---

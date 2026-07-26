@@ -74,6 +74,7 @@ async def test_bucket_detail_preserves_raw_content_and_separates_display_text(
             "name": "Linked memory",
             "type": "dynamic",
             "meaning": ["first meaning", "second meaning"],
+            "imported": True,
         },
         "content": raw_content,
     }
@@ -102,6 +103,7 @@ async def test_bucket_detail_preserves_raw_content_and_separates_display_text(
         "first meaning",
         "second meaning",
     ]
+    assert listed["imported"] is True
 
 
 def test_dashboard_uses_display_text_for_preview_and_raw_content_for_editor():
@@ -174,6 +176,22 @@ def test_dashboard_detail_does_not_render_an_editor_for_failed_bucket_fetch():
     assert "const generation = ++detailLoadGeneration;" in source
     assert "if (generation !== detailLoadGeneration) return false;" in source
     assert source.index("if (!res.ok)") < source.index("renderEditForm(")
+
+
+def test_status_banner_tracks_responsive_sticky_header_height():
+    html = DASHBOARD.read_text(encoding="utf-8")
+    source = _dashboard_function(
+        "syncStatusBannerOffset", "watchStatusBannerOffset"
+    )
+    watcher = _dashboard_function(
+        "watchStatusBannerOffset", "renderStatusBannerCard"
+    )
+
+    assert "top: var(--ob-header-height, 96px)" in html
+    assert "getBoundingClientRect().height" in source
+    assert "--ob-header-height" in source
+    assert "new ResizeObserver(syncStatusBannerOffset)" in watcher
+    assert "window.addEventListener('resize', syncStatusBannerOffset)" in watcher
 
 
 def test_editor_preserves_special_and_future_bucket_types():
@@ -258,6 +276,27 @@ def test_imported_memory_cards_open_the_full_editor_and_refresh_after_save():
     assert save_source.index("if (!r.ok)") < save_source.index(
         "await loadImportResults({preserveScroll:true, scrollTop:importScrollTop});"
     ) < save_source.index("} catch (e) {")
+
+
+def test_import_ui_marks_provenance_refreshes_list_and_supports_pagination():
+    html = DASHBOARD.read_text(encoding="utf-8")
+    activate_source = _dashboard_function("activateDashboardTab", "doSearch")
+    paint_source = _dashboard_function("_paintBuckets", "_localBucketMatches")
+    detail_source = _dashboard_function("showDetail", "bucketPin")
+    update_source = _dashboard_function("updateImportUI", "pauseImport")
+    import_source = _dashboard_function(
+        "loadImportResults", "openImportedBucketEditor"
+    )
+
+    assert "if (target === 'list') pending.push(loadBuckets());" in activate_source
+    assert "b.imported ?" in paint_source
+    assert "被导入" in paint_source
+    assert "导入来源 / Imported" in detail_source
+    assert "loadBuckets();" in update_source
+    assert "&offset=" in import_source
+    assert "data.has_more" in import_source
+    assert "被导入" in import_source
+    assert 'id="import-results-more"' in html
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is unavailable")

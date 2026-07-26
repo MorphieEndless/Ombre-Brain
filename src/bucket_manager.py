@@ -1394,6 +1394,7 @@ class BucketManager:
         media: Any = None,
         test_data: bool = False,
         defer_derived_index: bool = False,
+        imported: bool = False,
     ) -> str:
         """
         Create a new memory bucket, return bucket ID.
@@ -1404,13 +1405,15 @@ class BucketManager:
         pinned/protected 桶不参与合并与衰减，importance 强制锁定为 10。
 
         iter 2.0 来源追踪：
-        - source_tool: "hold" | "grow" — 记录由哪个工具创建。feel 走 hold 分支，
-          所以 feel 桶 source_tool="hold"，依靠 bucket_type 区分。
+        - source_tool: "hold" | "grow" | "import" — 记录创建来源。feel 走 hold
+          分支，所以 feel 桶 source_tool="hold"，依靠 bucket_type 区分。
         - grow_batch_id: 同一次 grow 调用拆出的所有桶共享同一个 batch_id，
           dashboard 可按 batch 聚合显示。
         - bucket_id_override: 调用方提供的可读 id（如 feel 的
           ``feel_202605011423_V085``）。如果与已有桶冲突，自动追加秒级后缀。
           为空 → 走默认 ``generate_bucket_id()``（12 位 hex）。
+        - imported=True: 对话导入桶的持久化来源标记；创建时间与最后活跃时间
+          均使用本次导入时刻。
         """
         # ``allow_embedding_fallback`` is retained for API compatibility.
         # All memory types now write first; embedding is a derived index.
@@ -1462,6 +1465,7 @@ class BucketManager:
 
         # --- Build YAML frontmatter metadata / 构建元数据 ---
         # 越界不静默 clamp：会产生 OB-W001/OB-W002 提示走到 MCP 返回末尾
+        created_at = now_iso()
         metadata = {
             "id": bucket_id,
             "name": bucket_name,
@@ -1471,10 +1475,12 @@ class BucketManager:
             "arousal": _clamp_unit(arousal, "arousal", f"create:{bucket_id}"),
             "importance": _clamp_importance(importance, f"create:{bucket_id}"),
             "type": bucket_type,
-            "created": now_iso(),
-            "last_active": now_iso(),
+            "created": created_at,
+            "last_active": created_at,
             "activation_count": 0,
         }
+        if imported:
+            metadata["imported"] = True
         if test_data:
             metadata["provenance"] = {
                 "kind": "test",

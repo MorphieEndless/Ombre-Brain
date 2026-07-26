@@ -1429,9 +1429,9 @@
   }
   .embed-warn-btn:hover { background: rgba(184,151,98,0.18); }
 
-  /* ====== P1 常驻系统状态条 / persistent system status bar ====== */
+  /* ====== P1 常驻系统状态条 ====== */
   #status-banner {
-    position: sticky; top: 56px; z-index: 40;
+    position: sticky; top: var(--ob-header-height, 96px); z-index: 40;
     font-size: 12.5px; color: var(--text);
     background: rgba(253,252,240,0.85); backdrop-filter: blur(6px);
     border-bottom: 1px solid var(--border);
@@ -2064,7 +2064,7 @@
       <div style="display:flex;gap:16px;margin-top:8px;font-size:13px;color:var(--text-dim);">
         <span>API调用 Calls: <b id="import-api-calls">0</b></span>
         <span>新建 New: <b id="import-created">0</b></span>
-        <span>合并 Merged: <b id="import-merged">0</b></span>
+        <span>精确去重 Skipped: <b id="import-skipped">0</b></span>
         <span>原文 Raw: <b id="import-raw">0</b></span>
       </div>
       <div style="margin-top:12px;">
@@ -2077,6 +2077,7 @@
     <div id="import-results-section" style="margin:20px 0;">
       <h3>已导入记忆 <span class="en">Imported</span> <button onclick="loadImportResults()" title="刷新 / Refresh" style="font-size:12px;padding:2px 8px;"><i data-lucide="refresh-cw"></i></button></h3>
       <div id="import-results-list" style="max-height:500px;overflow-y:auto;"></div>
+      <button id="import-results-more" type="button" onclick="loadMoreImportResults()" style="display:none;margin:10px auto 0;">加载更多 / Load more</button>
     </div>
 
     <hr style="border-color:var(--border);margin:24px 0;" />
@@ -2914,13 +2915,14 @@
         </div>
       </div>
 
-      <!-- MCP 鉴权模式（OAuth / 静态 Token / 关闭）-->
+      <!-- MCP 鉴权模式（OAuth / OAuth+Token / 静态 Token / 关闭）-->
       <div style="margin:18px 0;padding:14px;background:var(--surface-solid);border-radius:11px;box-shadow:inset 2px 2px 5px var(--shadow-dark-subtle),inset -2px -2px 4px var(--shadow-light);">
         <div style="font-weight:600;font-size:13px;margin-bottom:8px;">MCP 鉴权</div>
         <div class="config-row" style="align-items:center;">
           <label>连接鉴权</label>
           <select id="cfg-mcp-auth" onchange="onMcpAuthModeChange()" style="flex:1;max-width:440px;min-width:0;">
             <option value="oauth">开启 OAuth（Claude.ai 网页版 / Claude Code 远程需要）</option>
+            <option value="hybrid">OAuth + 静态 Token 共存（网页与第三方客户端同时连接）</option>
             <option value="token">静态 Token 鉴权（第三方 MCP 客户端，不走 OAuth）</option>
             <option value="off">关闭 · 免认证直连（仅限已确认的本机回环边界）</option>
           </select>
@@ -2928,8 +2930,8 @@
           <span id="mcp-auth-msg" style="margin-left:8px;font-size:11px;"></span>
         </div>
         <div style="margin-top:6px;font-size:11px;color:var(--text-light);line-height:1.7;">
-          三选一，<b>不会叠加</b>：选 OAuth 就不认 Token，选 Token 就不认 OAuth。改动写入 config.yaml，<b>需重启服务后生效</b>。
-          关闭鉴权后任何能访问 /mcp 的人都能读写记忆，系统默认只允许已确认的本机回环边界；NAS、局域网和第三方客户端请使用静态 Token。静态 Token 泄露也等同公开访问——<b>无论选哪种模式都请勿把服务直接暴露公网</b>。
+          共存模式保留 OAuth 动态注册，并让同一 <code>Authorization: Bearer</code> 入口同时接受预置静态 Token；改动写入 config.yaml，<b>需重启服务后生效</b>。
+          关闭鉴权后任何能访问 /mcp 的人都能读写记忆，系统默认只允许已确认的本机回环边界。静态 Token 泄露也等同公开访问——<b>公网连接必须使用 HTTPS，并妥善保管凭据</b>。
         </div>
 
         <div id="mcp-token-panel" style="display:none;margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:9px;">
@@ -2948,7 +2950,7 @@
             </div>
             <div style="margin-top:10px;color:var(--text-light);">
               用法：请求头二选一 —— <code>Authorization: Bearer &lt;token&gt;</code> 或 <code>Ombre-MCP-Token: &lt;token&gt;</code>。
-              切换鉴权模式需重启生效；重新生成 Token <b>立即生效，无需重启</b>。
+               共存模式下 OAuth 客户端仍走授权流程；切换鉴权模式需重启生效。当前进程已处于 Token/共存模式时，重新生成 Token <b>立即生效，无需重启</b>。
             </div>
           </div>
         </div>
@@ -3516,7 +3518,7 @@ async function loadTunnelStatus() {
   const authCaution = document.getElementById('tunnel-auth-caution');
   const tunnelActive = !!d.token_set;
   if (authDanger) authDanger.style.display = (tunnelActive && d.mcp_auth_required === false) ? '' : 'none';
-  if (authCaution) authCaution.style.display = (tunnelActive && d.mcp_auth_required !== false && d.mcp_auth_mode === 'token') ? '' : 'none';
+  if (authCaution) authCaution.style.display = (tunnelActive && d.mcp_auth_required !== false && (d.mcp_auth_mode === 'token' || d.mcp_auth_mode === 'hybrid')) ? '' : 'none';
   if (d.running) {
     _setTunnelUI(true, '已连接 / Connected', 'var(--positive, #9DC880)', '停止', '');
   } else {
@@ -3907,7 +3909,7 @@ async function loadSystemDiagnostics() {
   }
 }
 
-// ====== P1 常驻系统状态条 / persistent system status bar ======
+// ====== P1 常驻系统状态条 ======
 // 只有这几项对应用户能自己动手改的设置字段；其余（契约 / 开发类检查）一律「查看详情」跳到设置体检。
 const SB_ACTION_TARGETS = {
   embedding: { field: 'cfg-emb-api-key' },   // 向量化 Key
@@ -3964,6 +3966,31 @@ function toggleStatusBanner() {
   if (!b) return;
   if (b.getAttribute('data-state') === 'ok') { gotoDiagnostics(); return; }
   b.classList.toggle('open');
+}
+
+// 顶栏会随窗口宽度、按钮换行和字体加载改变高度，状态条不能使用固定偏移。
+var _statusHeaderResizeObserver = null;
+function syncStatusBannerOffset() {
+  const header = document.querySelector('.header');
+  if (!header) return;
+  const height = Math.ceil(header.getBoundingClientRect().height);
+  document.documentElement.style.setProperty('--ob-header-height', height + 'px');
+}
+function watchStatusBannerOffset() {
+  const header = document.querySelector('.header');
+  if (!header) return;
+  syncStatusBannerOffset();
+  if (typeof ResizeObserver === 'function') {
+    _statusHeaderResizeObserver = new ResizeObserver(syncStatusBannerOffset);
+    _statusHeaderResizeObserver.observe(header);
+  } else {
+    window.addEventListener('resize', syncStatusBannerOffset);
+  }
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', watchStatusBannerOffset, { once: true });
+} else {
+  watchStatusBannerOffset();
 }
 
 function renderStatusBannerCard(check) {
@@ -4457,6 +4484,7 @@ function activateDashboardTab(tab) {
     if (target !== 'network' && _netRAF) { cancelAnimationFrame(_netRAF); _netRAF = null; }
     if (target === 'network') pending.push(loadNetwork());
     if (target === 'plan') pending.push(loadPlans());
+    if (target === 'list') pending.push(loadBuckets());
     if (target === 'import') pending.push(pollImportStatus(), loadImportResults());
     if (target === 'logs') pending.push(loadLogs(), loadOBErrors());
     if (target === 'v3-debug') pending.push(loadV3Debug());
@@ -4705,6 +4733,7 @@ function _paintBuckets() {
     else if (b.resolved)     iconHtml = '<i data-lucide="moon"></i>';
     else                     iconHtml = '<i data-lucide="message-circle"></i>';
     var firstBadge = b.first_of_kind ? ' <i data-lucide="sparkles" title="首次出现" style="width:12px;height:12px;color:var(--accent);vertical-align:-1px;"></i>' : '';
+    var importedBadge = b.imported ? ' <span title="由对话导入" style="font-size:10px;color:var(--accent);border:1px solid var(--accent);border-radius:999px;padding:1px 5px;white-space:nowrap;">被导入</span>' : '';
     var vPos = Math.round(b.valence * 100);
     var modelV = b.model_valence != null ? ' → V' + b.model_valence.toFixed(1) : '';
     var activityTime = firstValidBucketTime(
@@ -4733,7 +4762,7 @@ function _paintBuckets() {
       '<div class="bucket-row-top">' +
         '<input class="bucket-select" type="checkbox" data-id="' + escAttr(b.id) + '" onclick="event.stopPropagation()" onchange="toggleBucketSelection(this.dataset.id,this.checked)"' + (selectedBucketIds.has(b.id) ? ' checked' : '') + '>' +
         '<span class="' + iconCls + '">' + iconHtml + '</span>' +
-        '<span class="name" title="' + escAttr(b.name) + '">' + esc(b.name) + firstBadge + '</span>' +
+        '<span class="name" title="' + escAttr(b.name) + '">' + esc(b.name) + firstBadge + importedBadge + '</span>' +
         '<div class="bucket-row-tags">' +
           domainHtml +
           emotionHtml +
@@ -4869,6 +4898,7 @@ async function showDetail(id) {
         '<div class="field"><label>已解决 / Resolved</label>' + (meta.resolved ? _SV.ok : '—') + '</div>' +
         '<div class="field"><label>已消化 / Digested</label>' + (meta.digested ? _SV.ok : '—') + '</div>' +
         '<div class="field"><label>钉选 / Pinned</label>' + (meta.pinned ? _SV.ok : '—') + '</div>' +
+        '<div class="field"><label>导入来源 / Imported</label>' + (meta.imported || meta.source_tool === 'import' ? '被导入' : '—') + '</div>' +
         '<div class="field"><label>Anchor</label>' + (meta.anchor ? _SV.anchor+' 坐标系 / anchor' : '—') + '</div>' +
         '<div class="field"><label>创建 / Created</label>' + esc(meta.created || '—') + '</div>' +
         '<div class="field"><label>最后活跃 / Last active</label>' + esc(meta.last_active || '—') + '</div>' +
@@ -7010,9 +7040,9 @@ async function loadConfig() {
       ? cfg.merge_threshold : 75;
     var mcpAuthEl = document.getElementById('cfg-mcp-auth');
     if (mcpAuthEl) {
-      mcpAuthEl.value = cfg.mcp_require_auth
-        ? (cfg.mcp_auth_mode === 'token' ? 'token' : 'oauth')
-        : 'off';
+      const configuredAuthMode = ['oauth', 'token', 'hybrid'].includes(cfg.mcp_auth_mode)
+        ? cfg.mcp_auth_mode : 'oauth';
+      mcpAuthEl.value = cfg.mcp_require_auth ? configuredAuthMode : 'off';
     }
     window._mcpTokenConfigured = !!cfg.mcp_token_configured;
     window._mcpTokenHint = cfg.mcp_token_hint || null;
@@ -7997,13 +8027,16 @@ function updateImportUI(s) {
   document.getElementById('import-progress-text').textContent = s.processed + '/' + s.total_chunks;
   document.getElementById('import-api-calls').textContent = s.api_calls;
   document.getElementById('import-created').textContent = s.memories_created;
-  document.getElementById('import-merged').textContent = s.memories_merged;
+  document.getElementById('import-skipped').textContent = s.memories_skipped || 0;
   document.getElementById('import-raw').textContent = s.memories_raw;
-  const statusMap = { running: _SV.clock+' 导入中…', paused: _SV.pause+' 已暂停', completed: _SV.ok+' 完成', error: _SV.err+' 出错' };
+  const statusMap = { running: _SV.clock+' 导入中…', paused: _SV.pause+' 已暂停', completed: _SV.ok+' 完成', partial: _SV.warn+' 部分完成', error: _SV.err+' 出错' };
   document.getElementById('import-status-text').innerHTML = statusMap[s.status] || esc(s.status);
   document.getElementById('import-pause-btn').style.display = s.status === 'running' ? '' : 'none';
   if (s.status !== 'running') clearInterval(importPollTimer);
-  if (s.status === 'completed') loadImportResults();
+  if (s.status === 'completed' || s.status === 'partial') {
+    loadImportResults();
+    loadBuckets();
+  }
   const errDiv = document.getElementById('import-errors');
   if (s.errors && s.errors.length) {
     errDiv.style.display = '';
@@ -8016,9 +8049,26 @@ async function pauseImport() {
 }
 
 let importResultsLoadGeneration = 0;
+let importResultsNextOffset = 0;
+const IMPORT_RESULTS_PAGE_SIZE = 50;
+
+function updateImportResultsMoreButton(hasMore) {
+  const button = document.getElementById('import-results-more');
+  if (button) button.style.display = hasMore ? 'block' : 'none';
+}
+
+async function loadMoreImportResults() {
+  if (importResultsNextOffset === null) return true;
+  return loadImportResults({append:true, preserveScroll:true});
+}
+
 async function loadImportResults(options) {
   const container = document.getElementById('import-results-list');
+  if (!container) return false;
   const opts = options && typeof options === 'object' ? options : {};
+  const append = opts.append === true;
+  const offset = append ? importResultsNextOffset : 0;
+  if (append && offset === null) return true;
   const generation = ++importResultsLoadGeneration;
   const preserveScroll = opts.preserveScroll === true;
   const requestedScrollTop = Number(opts.scrollTop);
@@ -8026,24 +8076,33 @@ async function loadImportResults(options) {
     ? (Number.isFinite(requestedScrollTop) ? Math.max(0, requestedScrollTop) : container.scrollTop)
     : 0;
   container.setAttribute('aria-busy', 'true');
-  if (!preserveScroll) container.innerHTML = '<div class="loading">加载中… / Loading…</div>';
+  if (!append && !preserveScroll) container.innerHTML = '<div class="loading">加载中… / Loading…</div>';
   try {
-    const res = await fetch(BASE + '/api/import/results?limit=30');
+    const query = '?limit=' + IMPORT_RESULTS_PAGE_SIZE + '&offset=' + Number(offset || 0);
+    const res = await fetch(BASE + '/api/import/results' + query);
     const data = await readJsonSafe(res);
     if (generation !== importResultsLoadGeneration) return false;
     if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
     if (!data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.buckets)) {
       throw new Error('导入结果响应无效 / Invalid import results response');
     }
-    if (!data.buckets || !data.buckets.length) {
-      container.innerHTML = '<p style="color:var(--text-dim)">暂无记忆桶</p>';
+
+    const nextOffset = Number(data.next_offset);
+    importResultsNextOffset = data.has_more && Number.isInteger(nextOffset) && nextOffset >= 0
+      ? nextOffset
+      : null;
+    updateImportResultsMoreButton(importResultsNextOffset !== null);
+
+    if (!data.buckets.length) {
+      if (!append) container.innerHTML = '<p style="color:var(--text-dim)">暂无已导入记忆</p>';
       if (preserveScroll) container.scrollTop = previousScrollTop;
       return true;
     }
-    container.innerHTML = data.buckets.map(b => `
+
+    const cards = data.buckets.map(b => `
       <div data-review-bucket-id="${escAttr(b.id)}" style="background:var(--surface);border-radius:12px;padding:14px;margin:8px 0;">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <b>${esc(b.name || b.id)}</b>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <b>${esc(b.name || b.id)} <span title="由对话导入" style="font-size:10px;color:var(--accent);border:1px solid var(--accent);border-radius:999px;padding:1px 5px;white-space:nowrap;">被导入</span></b>
           <span style="font-size:11px;color:var(--text-dim);">${esc(b.type)} | ${esc((b.domain||[]).join(','))} | imp:${Number(b.importance || 0)}</span>
         </div>
         <p style="font-size:13px;margin:6px 0;white-space:pre-wrap;">${esc(b.content)}</p>
@@ -8057,20 +8116,21 @@ async function loadImportResults(options) {
         </div>
       </div>
     `).join('');
+    if (append) container.insertAdjacentHTML('beforeend', cards);
+    else container.innerHTML = cards;
     if (preserveScroll) container.scrollTop = previousScrollTop;
     return true;
   } catch(e) {
     if (generation !== importResultsLoadGeneration) return false;
-    container.innerHTML = '<p style="color:var(--negative)">加载失败: ' + esc(e.message) + '</p>';
+    if (!append) container.innerHTML = '<p style="color:var(--negative)">加载失败: ' + esc(e.message) + '</p>';
+    updateImportResultsMoreButton(importResultsNextOffset !== null);
     return false;
   } finally {
     if (generation === importResultsLoadGeneration) container.removeAttribute('aria-busy');
   }
 }
-
 async function openImportedBucketEditor(bid) {
-  // Import results intentionally contain only a short preview. Always enter
-  // through showDetail so the editor receives the complete Markdown body.
+  // 导入结果只含正文预览；先进入详情，确保编辑器拿到完整 Markdown 正文。
   if (!await showDetail(bid)) return;
   const editor = document.getElementById('bucket-edit-form');
   if (!editor) return;
@@ -8378,7 +8438,7 @@ function onMcpAuthModeChange() {
   const sel = document.getElementById('cfg-mcp-auth');
   const panel = document.getElementById('mcp-token-panel');
   if (!sel || !panel) return;
-  panel.style.display = sel.value === 'token' ? '' : 'none';
+  panel.style.display = (sel.value === 'token' || sel.value === 'hybrid') ? '' : 'none';
   const statusEl = document.getElementById('mcp-token-status');
   if (statusEl) {
     statusEl.textContent = window._mcpTokenConfigured
@@ -8389,7 +8449,7 @@ function onMcpAuthModeChange() {
 
 async function saveMcpAuth() {
   const msg = document.getElementById('mcp-auth-msg');
-  const sel = document.getElementById('cfg-mcp-auth').value; // 'oauth' | 'token' | 'off'
+  const sel = document.getElementById('cfg-mcp-auth').value; // 'oauth' | 'hybrid' | 'token' | 'off'
   const payload = sel === 'off'
     ? { mcp_require_auth: false, persist: true }
     : { mcp_require_auth: true, mcp_auth_mode: sel, persist: true };

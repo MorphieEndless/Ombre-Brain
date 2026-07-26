@@ -36,8 +36,8 @@
 - `OMBRE_PORT`：容器或裸机监听端口。
 - `OMBRE_BIND_HOST`：进程实际监听地址；容器/PaaS 通常需要 `0.0.0.0`，裸机仅限本机访问时应设为 `127.0.0.1`。
 - `OMBRE_MCP_REQUIRE_AUTH`：是否要求 MCP 鉴权。
-- `OMBRE_MCP_AUTH_MODE`：`oauth` 或 `token`；关闭鉴权由 `OMBRE_MCP_REQUIRE_AUTH=false` 控制。
-- `OMBRE_MCP_TOKEN`：静态 Token 模式密钥。
+- `OMBRE_MCP_AUTH_MODE`：`oauth`、`token` 或 `hybrid`。`hybrid` 保留 OAuth 动态注册，同时让 `Authorization: Bearer` 也接受预置静态 Token；关闭鉴权仍由 `OMBRE_MCP_REQUIRE_AUTH=false` 控制。
+- `OMBRE_MCP_TOKEN`：静态 Token / OAuth + 静态 Token 共存模式的预置密钥。
 - `OMBRE_ALLOW_INSECURE_MCP`：高风险逃生阀。仅显式设为 `true` 时，才允许在非回环或无法确认的网络边界关闭 MCP 鉴权；默认关闭，不应在普通、NAS 或公网部署中设置。
 - `OMBRE_DASHBOARD_PASSWORD`：Dashboard 密码。
 - `OMBRE_DASHBOARD_SESSION_DAYS`：Dashboard 登录会话天数。
@@ -74,6 +74,7 @@
 - `OMBRE_OWNER_COUNT`：多所有者实例数。
 - `OMBRE_MING_VAULT_DIR`、`OMBRE_HONG_VAULT_DIR`：示例多所有者数据目录。
 - `OMBRE_MING_PASSWORD`、`OMBRE_HONG_PASSWORD`：示例多所有者密码。
+- `OMBRE_MING_MCP_TOKEN`、`OMBRE_HONG_MCP_TOKEN`：多所有者 Compose 中每个实例各自的静态 MCP Token；不要让多个 owner 共用同一密钥。
 - `AI_NAME`：AI 显示名称。
 
 ## v1.x 兼容变量

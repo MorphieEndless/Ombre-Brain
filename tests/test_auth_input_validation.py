@@ -3,6 +3,7 @@ import json
 import pytest
 
 from web import auth as auth_web
+from web import _shared as shared_web
 
 
 class FakeMCP:
@@ -31,6 +32,34 @@ class JsonRequest:
 
 def _payload(response):
     return json.loads(response.body)
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "expected"),
+    [
+        ("密码", "密码", True),
+        ("密码", "密碼", False),
+        ("密码", "ascii", False),
+        ("ascii", "ascii", True),
+    ],
+)
+def test_constant_time_text_compare_accepts_unicode(left, right, expected):
+    assert shared_web._constant_time_text_equal(left, right) is expected
+
+
+def test_environment_password_rejects_unicode_without_type_error(monkeypatch):
+    monkeypatch.setenv("OMBRE_DASHBOARD_PASSWORD", "ascii-secret")
+
+    assert shared_web._verify_password_for_rotation("错误密码") is None
+
+
+def test_remote_setup_rejects_unicode_token_without_type_error(monkeypatch):
+    monkeypatch.setenv("OMBRE_SETUP_TOKEN", "ascii-secret")
+    request = JsonRequest({})
+    request.headers["X-Ombre-Setup-Token"] = "错误令牌"
+    request.client = type("Client", (), {"host": "203.0.113.10"})()
+
+    assert auth_web._setup_request_allowed(request) is False
 
 
 @pytest.fixture

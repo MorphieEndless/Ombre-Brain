@@ -13,6 +13,7 @@ web/buckets.py — 记忆桶管理 + 设置 + 锚点 + 自我认知读取
 
 import math
 import threading
+import unicodedata
 from contextlib import AsyncExitStack
 
 from starlette.requests import Request
@@ -130,6 +131,8 @@ def register(mcp) -> None:
                     "resolved": meta.get("resolved", False),
                     "pinned": meta.get("pinned", False),
                     "digested": meta.get("digested", False),
+                    "imported": parse_bool(meta.get("imported"), default=False)
+                    or str(meta.get("source_tool") or "").strip() == "import",
                     "created": meta.get("created", ""),
                     "created_epoch_ms": created_epoch_ms,
                     "last_active": meta.get("last_active", ""),
@@ -776,6 +779,11 @@ def register(mcp) -> None:
             human = "人类"
         if len(human) > 20:
             return JSONResponse({"error": "human name must be ≤ 20 characters"}, status_code=400)
+        if any(unicodedata.category(char).startswith("C") for char in human):
+            return JSONResponse(
+                {"error": "human name must not contain control characters"},
+                status_code=400,
+            )
         # Config read/write, live runtime update and the full-vault replacement
         # are one outer transaction.  Without it, concurrent A->B and B->C
         # requests can interleave their per-bucket writes and leave mixed names.

@@ -16,6 +16,7 @@ web/config_api.py — Dashboard 配置 / 环境变量 / API Key 测试 / 模型�
 ========================================
 """
 
+import copy
 import math
 import os
 import secrets
@@ -109,13 +110,13 @@ def _rebuild_embedding_runtime():
 
 
 def _mcp_auth_mode(config: Mapping[str, object] | object) -> str:
-    """Normalize one config snapshot's mutually exclusive MCP auth mode."""
+    """规范化一个配置快照中的 MCP 鉴权模式。"""
     raw = (
         str(config.get("mcp_auth_mode", "oauth")).strip().lower()
         if isinstance(config, Mapping)
         else "oauth"
     )
-    return raw if raw in ("oauth", "token") else "oauth"
+    return raw if raw in ("oauth", "token", "hybrid") else "oauth"
 
 
 def _current_mcp_token() -> str:
@@ -139,18 +140,16 @@ def register(mcp) -> None:
     # 被测试客户端从多个事件循环调用时，也能串行提交而不会触发跨循环错误。
     mcp_token_commit_lock = threading.Lock()
 
-    # MCP auth is bound into middleware and OAuth route visibility at process
-    # startup. Keep the effective value separate from the desired persisted
-    # value so the Dashboard cannot falsely claim a hot switch took effect.
+    # MCP 鉴权在进程启动时绑定到中间件和 OAuth 路由可见性。有效值与期望持久值
+    # 必须分开，避免 Dashboard 错称启动期切换已经热生效。
     runtime_mcp_auth_required = _parse_bool(
         sh.config.get("mcp_require_auth", True), default=True
     )
     runtime_mcp_auth_mode = _mcp_auth_mode(sh.config)
     runtime_transport = str(sh.config.get("transport") or "stdio")
-    # deployment.public_url participates in OAuth resource/audience binding and
-    # is a startup snapshot too.  Keep a separate desired value for Dashboard
-    # round-trips; publishing it into sh.config before restart would split the
-    # already-bound OAuth routes from MCP middleware.
+    # deployment.public_url 参与 OAuth resource/audience 绑定，同样是启动快照。
+    # Dashboard 往返使用独立期望值；重启前发布到 sh.config 会让已绑定的 OAuth
+    # 路由与 MCP 中间件看到不同配置。
     runtime_public_url = configured_public_origin(sh.config)
 
     def _desired_startup_state(persisted: Mapping[str, object]) -> dict[str, object]:
@@ -230,7 +229,7 @@ def register(mcp) -> None:
             {"name": "OMBRE_LOG_FILE", "group": "system", "label": "日志文件路径", "sensitive": False, **_plain("OMBRE_LOG_FILE")},
             {"name": "OMBRE_CONFIG_PATH", "group": "system", "label": "配置文件路径", "sensitive": False, **_plain("OMBRE_CONFIG_PATH")},
             {"name": "OMBRE_MCP_REQUIRE_AUTH", "group": "auth", "label": "MCP 鉴权开关覆盖", "sensitive": False, **_plain("OMBRE_MCP_REQUIRE_AUTH")},
-            {"name": "OMBRE_MCP_AUTH_MODE", "group": "auth", "label": "MCP 鉴权模式覆盖 (oauth/token)", "sensitive": False, **_plain("OMBRE_MCP_AUTH_MODE")},
+            {"name": "OMBRE_MCP_AUTH_MODE", "group": "auth", "label": "MCP 鉴权模式覆盖 (oauth/token/hybrid)", "sensitive": False, **_plain("OMBRE_MCP_AUTH_MODE")},
             {"name": "OMBRE_MCP_TOKEN", "group": "auth", "label": "MCP 静态 Token", "sensitive": True, **_masked("OMBRE_MCP_TOKEN")},
             {"name": "AI_NAME", "group": "identity", "label": "AI 显示名", "sensitive": False, **_plain("AI_NAME")},
             # 路径组
@@ -304,7 +303,7 @@ def register(mcp) -> None:
             # 渲染一键开关；关掉后 /mcp 免认证直连（供自有前端 / GPT / GLM 等）。
             "mcp_require_auth": desired["mcp_require_auth"],
             "mcp_require_auth_effective": runtime_mcp_auth_required,
-            # 鉴权模式（仅 mcp_require_auth=true 时有意义）："oauth"（默认）或 "token"，二者互斥。
+            # 鉴权模式（仅 mcp_require_auth=true 时有意义）：OAuth、静态 Token 或两者共存。
             "mcp_auth_mode": desired["mcp_auth_mode"],
             "mcp_auth_mode_effective": runtime_mcp_auth_mode,
             "mcp_network_security": runtime_network_security,
@@ -365,9 +364,9 @@ def register(mcp) -> None:
             mcp_auth_mode_value = None
             if "mcp_auth_mode" in body:
                 mcp_auth_mode_value = str(body["mcp_auth_mode"]).strip().lower()
-                if mcp_auth_mode_value not in ("oauth", "token"):
+                if mcp_auth_mode_value not in ("oauth", "token", "hybrid"):
                     return JSONResponse(
-                        {"error": "mcp_auth_mode must be 'oauth' or 'token'"},
+                        {"error": "mcp_auth_mode must be 'oauth', 'token', or 'hybrid'"},
                         status_code=400,
                     )
             embedding_payload = body.get("embedding")
@@ -564,6 +563,34 @@ def register(mcp) -> None:
                     "mcp_network_security": mcp_network_security,
                 }, status_code=400)
 
+        runtime_config_before = copy.deepcopy(sh.config)
+        embedding_before = sh.embedding_engine
+        dehydrator_fields = (
+            "model",
+            "base_url",
+            "max_tokens",
+            "temperature",
+            "timeout_seconds",
+            "api_format",
+            "api_key",
+            "api_available",
+            "client",
+        )
+        dehydrator_before = {
+            field: getattr(sh.dehydrator, field)
+            for field in dehydrator_fields
+            if hasattr(sh.dehydrator, field)
+        }
+
+        def _rollback_hot_runtime() -> None:
+            """在验证或持久化失败时恢复同一份运行态快照。"""
+            sh.config.clear()
+            sh.config.update(copy.deepcopy(runtime_config_before))
+            for field, value in dehydrator_before.items():
+                setattr(sh.dehydrator, field, value)
+            if sh.embedding_engine is not embedding_before:
+                sh.replace_embedding_engine(embedding_before)
+
         # --- Dehydration config ---
         if "dehydration" in body:
             d = dehydration_payload
@@ -575,7 +602,7 @@ def register(mcp) -> None:
             if "api_key" in d and d["api_key"]:
                 dehy["api_key"] = d["api_key"]
                 updated.append("dehydration.api_key")
-            # Hot-reload dehydrator — sync ALL attributes so dashboard changes take effect immediately
+            # 热重载压缩器：同步所有属性，让 Dashboard 修改立即生效。
             sh.dehydrator.model = dehy.get("model", sh.dehydrator.model)
             sh.dehydrator.base_url = dehy.get("base_url", sh.dehydrator.base_url)
             sh.dehydrator.max_tokens = int(dehy.get("max_tokens") or sh.dehydrator.max_tokens)
@@ -587,14 +614,25 @@ def register(mcp) -> None:
             if "api_key" in d and d["api_key"]:
                 sh.dehydrator.api_key = dehy["api_key"]
             sh.dehydrator.api_available = bool(sh.dehydrator.api_key)
-            # Rebuild OpenAI-compat client whenever key or url changes
+            # 密钥或 URL 改变时重建 OpenAI 兼容客户端。
             if sh.dehydrator.api_available and sh.dehydrator.api_format == "openai_compat":
                 from openai import AsyncOpenAI
-                sh.dehydrator.client = AsyncOpenAI(
-                    api_key=sh.dehydrator.api_key,
-                    base_url=sh.dehydrator.base_url,
-                    timeout=sh.dehydrator.timeout_seconds,
-                )
+                try:
+                    sh.dehydrator.client = AsyncOpenAI(
+                        api_key=sh.dehydrator.api_key,
+                        base_url=sh.dehydrator.base_url,
+                        timeout=sh.dehydrator.timeout_seconds,
+                    )
+                except Exception as exc:
+                    _rollback_hot_runtime()
+                    logger.warning(
+                        "dehydration reload failed: err_type=%s detail=hidden",
+                        type(exc).__name__,
+                    )
+                    return JSONResponse(
+                        {"error": "dehydration reload failed"},
+                        status_code=400,
+                    )
             else:
                 sh.dehydrator.client = None
 
@@ -628,15 +666,19 @@ def register(mcp) -> None:
                 updated.append("embedding.backend")
                 rebuild_embedding = True
 
-            # One request may change several fields. Rebuild once, then publish
-            # the same instance to web routes, BucketManager, ImportEngine and
-            # the MCP tools runtime so reads and writes cannot split models.
+            # 一个请求可能修改多个字段；只重建一次，再把同一实例发布给 Web 路由、
+            # BucketManager、ImportEngine 和 MCP 工具运行时，避免读写使用不同模型。
             if rebuild_embedding:
                 try:
                     _rebuild_embedding_runtime()
                 except Exception as e:
+                    _rollback_hot_runtime()
+                    logger.warning(
+                        "embedding reload failed: err_type=%s detail=hidden",
+                        type(e).__name__,
+                    )
                     return JSONResponse(
-                        {"error": f"embedding reload failed: {e}"},
+                        {"error": "embedding reload failed"},
                         status_code=400,
                     )
 
@@ -753,9 +795,18 @@ def register(mcp) -> None:
                 if deployment_public_url is not None:
                     updated.append("deployment.public_url")
             except ValueError as e:
-                return JSONResponse({"error": str(e), "updated": updated}, status_code=400)
+                _rollback_hot_runtime()
+                return JSONResponse({"error": str(e), "updated": []}, status_code=400)
             except Exception as e:
-                return JSONResponse({"error": f"persist failed: {e}", "updated": updated}, status_code=500)
+                _rollback_hot_runtime()
+                logger.error(
+                    "config persist failed: err_type=%s detail=hidden",
+                    type(e).__name__,
+                )
+                return JSONResponse(
+                    {"error": "persist failed", "updated": []},
+                    status_code=500,
+                )
 
         desired = _desired_startup_state(
             persisted_after if persisted_after is not None else sh.config
@@ -823,7 +874,7 @@ def register(mcp) -> None:
 
 
     # =============================================================
-    # /api/mcp-token/regenerate — 生成/轮换 mcp_auth_mode=token 用的静态密钥
+    # /api/mcp-token/regenerate — 生成/轮换 token/hybrid 模式使用的静态密钥
     # 独立成一个小路由（而不是塞进 POST /api/config）：生成新密钥和改配置项
     # 是两件不同的事，参照 oauth.py 里 token 签发自成一块的做法。
     # =============================================================
@@ -833,8 +884,9 @@ def register(mcp) -> None:
 
         Returns the plaintext token exactly once — GET /api/config only ever
         returns a masked hint, so the Dashboard must capture this response.
-        Takes effect immediately (no restart needed): _is_valid_static_mcp_token
-        reads sh.config/env fresh on every request.
+        Takes effect immediately when the running process is already in token
+        or hybrid mode: _is_valid_static_mcp_token reads sh.config/env fresh on
+        every request. A newly selected auth mode still requires a restart.
         """
         from starlette.responses import JSONResponse
         err = sh._require_auth(request)
@@ -873,7 +925,7 @@ def register(mcp) -> None:
                 "请改用该环境变量或先取消设置它。"
                 if env_override
                 else "新 Token 已生成并保存，请立即复制；刷新页面后不再显示完整值。"
-                     "重新生成立即生效，无需重启。"
+                     "当前进程已处于 Token/共存模式时立即生效；刚切换模式仍需重启。"
             ),
         })
 

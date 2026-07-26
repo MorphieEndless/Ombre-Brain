@@ -458,12 +458,22 @@ def register(mcp) -> None:
                 )
 
             human_label = str((sh.config or {}).get("human") or "用户")
-            preview = await _await_history_worker(
-                preview_import,
-                raw_content,
-                filename,
-                human_label,
-            )
+            try:
+                preview = await _await_history_worker(
+                    preview_import,
+                    raw_content,
+                    filename,
+                    human_label,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "import preflight rejected malformed input: err_type=%s detail=hidden",
+                    type(exc).__name__,
+                )
+                return JSONResponse(
+                    {"ok": False, "error": "Import preview could not parse file"},
+                    status_code=400,
+                )
             raw_content = ""
             llm_ready = _import_llm_ready()
             return JSONResponse({
@@ -555,7 +565,11 @@ def register(mcp) -> None:
                         result["error"],
                     )
             except Exception as e:
-                logger.error(f"Import job {job_id} failed: {e}")
+                logger.error(
+                    "Import job %s failed: err_type=%s detail=hidden",
+                    job_id,
+                    type(e).__name__,
+                )
             finally:
                 release_job()
 
@@ -619,7 +633,7 @@ def register(mcp) -> None:
 
     @mcp.custom_route("/api/import/results", methods=["GET"])
     async def api_import_results(request: Request) -> Response:
-        """List recently imported/created buckets for review."""
+        """按有界分页列出待复核的导入桶。"""
         from starlette.responses import JSONResponse
         err = sh._require_auth(request)
         if err:
@@ -627,13 +641,38 @@ def register(mcp) -> None:
         try:
             limit = max(1, min(int(request.query_params.get("limit", "50")), 200))
         except (TypeError, ValueError, OverflowError):
-            return JSONResponse({"error": "limit must be an integer in [1,200]"}, status_code=400)
+            return JSONResponse({"error": "limit 必须是 [1,200] 范围内的整数"}, status_code=400)
+        try:
+            offset = int(request.query_params.get("offset", "0"))
+            if offset < 0:
+                raise ValueError
+        except (TypeError, ValueError, OverflowError):
+            return JSONResponse({"error": "offset 必须是非负整数"}, status_code=400)
         try:
             all_buckets = await sh.bucket_mgr.list_all(include_archive=False)
-            # Sort by created time, newest first
-            all_buckets.sort(key=lambda b: b["metadata"].get("created", ""), reverse=True)
+            imported_buckets = []
+            for bucket in all_buckets:
+                metadata = bucket.get("metadata", {})
+                if not isinstance(metadata, dict):
+                    continue
+                if not (
+                    parse_bool(metadata.get("imported"), default=False)
+                    or str(metadata.get("source_tool") or "").strip() == "import"
+                ):
+                    continue
+                imported_buckets.append(bucket)
+
+            # 使用稳定的最新优先顺序；即使有新导入追加，分页顺序仍可预测。
+            imported_buckets.sort(
+                key=lambda b: (
+                    str(b.get("metadata", {}).get("created", "")),
+                    str(b.get("id", "")),
+                ),
+                reverse=True,
+            )
+            page = imported_buckets[offset:offset + limit]
             results = []
-            for b in all_buckets[:limit]:
+            for b in page:
                 results.append({
                     "id": b["id"],
                     "name": b["metadata"].get("name", ""),
@@ -643,8 +682,18 @@ def register(mcp) -> None:
                     "tags": b["metadata"].get("tags", []),
                     "importance": b["metadata"].get("importance", 5),
                     "created": b["metadata"].get("created", ""),
+                    "imported": True,
                 })
-            return JSONResponse({"buckets": results, "total": len(all_buckets)})
+            next_offset = offset + len(results)
+            has_more = next_offset < len(imported_buckets)
+            return JSONResponse({
+                "buckets": results,
+                "total": len(imported_buckets),
+                "offset": offset,
+                "limit": limit,
+                "has_more": has_more,
+                "next_offset": next_offset if has_more else None,
+            })
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=500)
 

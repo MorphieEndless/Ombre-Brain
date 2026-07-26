@@ -379,7 +379,6 @@ async def test_concurrent_initial_setup_creates_exactly_one_session(monkeypatch)
 
     monkeypatch.setattr(auth_web.sh, "_save_password_hash", save_password)
     monkeypatch.setattr(auth_web.sh, "_sessions", sessions)
-    monkeypatch.setattr(auth_web.sh, "_save_sessions", lambda: None)
     monkeypatch.setattr(auth_web.sh, "_revoke_all_sessions", sessions.clear)
     monkeypatch.setattr(auth_web.sh, "_create_session", create_session)
     monkeypatch.setattr(
@@ -651,6 +650,40 @@ async def test_mcp_error_fallback_still_sanitizes_exception_text(monkeypatch):
     assert "\r" not in result
     assert "\n\x1b" not in result
     assert "\x1b" not in result
+
+
+@pytest.mark.asyncio
+async def test_mcp_public_tool_error_returns_only_reviewed_static_message():
+    import server as server_mod
+    from errors import PublicToolError
+
+    safe_message = (
+        "API key 未配置或调用失败，日记拆分无法完成，桶未创建。"
+        "请检查 OMBRE_COMPRESS_API_KEY。"
+    )
+
+    async def fail():
+        try:
+            raise RuntimeError("provider-secret-key https://provider.invalid/private")
+        except RuntimeError as provider_error:
+            raise PublicToolError(safe_message) from provider_error
+
+    result = await server_mod._with_notice(fail(), op="grow")
+
+    assert safe_message in result
+    assert "provider-secret-key" not in result
+    assert "provider.invalid" not in result
+
+
+@pytest.mark.parametrize(
+    "message",
+    ("", "line one\nline two", "control\x1btext", "x" * 501),
+)
+def test_public_tool_error_rejects_unsafe_public_messages(message):
+    from errors import PublicToolError
+
+    with pytest.raises(ValueError):
+        PublicToolError(message)
 
 
 @pytest.mark.asyncio

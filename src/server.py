@@ -188,6 +188,7 @@ try:
         begin_warnings,
         pop_warnings,
         format_warnings_suffix,
+        PublicToolError,
     )
 except ImportError:
     from .errors import (  # type: ignore
@@ -199,6 +200,7 @@ except ImportError:
         begin_warnings,
         pop_warnings,
         format_warnings_suffix,
+        PublicToolError,
     )
 configure_errors_path(config.get("buckets_dir", "buckets"))
 
@@ -491,6 +493,8 @@ def _log_op_err(op: str, exc: BaseException) -> None:
 
 def _safe_exception_detail(exc: BaseException) -> str:
     """异常对外或持久化前只保留类型与泛化说明。"""
+    if isinstance(exc, PublicToolError):
+        return f"{_safe_exception_type(exc)}: {exc.public_message}"
     return (
         f"{_safe_exception_type(exc)}: 工具执行失败；"
         "异常正文已隐藏，以保护密钥、本机路径与调用内容。"
@@ -1043,8 +1047,7 @@ for _strict_tool_name in (
 
 # ============================================================
 # OAuth 2.0 — MCP Remote Auth —— 已拆分到 web/oauth.py（路由在其 register 内注册）。
-# 这里把启动期 MCP 鉴权中间件要用的两个校验函数 import 回来：mcp_auth_mode=="oauth"（默认）
-# 用 _is_valid_mcp_token，mcp_auth_mode=="token" 用 _is_valid_static_mcp_token，二选一注入中间件。
+# 这里把启动期 MCP 鉴权中间件要用的两个校验函数 import 回来；hybrid 会同时注入。
 # ============================================================
 from web.oauth import _is_valid_mcp_token, _is_valid_static_mcp_token  # noqa: F401
 
@@ -1095,12 +1098,18 @@ if __name__ == "__main__":
             if _http_settings.auth_mode == "token"
             else _is_valid_mcp_token
         )
+        _mcp_static_token_validator = (
+            _is_valid_static_mcp_token
+            if _http_settings.auth_mode == "hybrid"
+            else None
+        )
         _app = build_http_app(
             mcp,
             transport,
             settings=_http_settings,
             token_validator=_mcp_token_validator,
             lifecycle=_runtime_lifecycle,
+            static_token_validator=_mcp_static_token_validator,
         )
         if transport == "streamable-http":
             logger.info("MCP 单连接器 /mcp：14 个工具统一对外暴露")
@@ -1124,6 +1133,14 @@ if __name__ == "__main__":
                 "    该模式与 OAuth 互斥，本进程不再提供 OAuth 授权流程；请勿把本服务\n"
                 "    直接暴露到公网，仅在可信内网或自带鉴权的隧道场景使用，并妥善保管、\n"
                 "    定期轮换该 Token。\n"
+                + "=" * 60
+            )
+        elif _mcp_auth_required and _http_settings.auth_mode == "hybrid":
+            logger.info("MCP OAuth + 静态 Token 共存鉴权已启用")
+            logger.warning(
+                "=" * 60 + "\n"
+                "⚠️  共存模式保留 OAuth，同时接受预置静态 Token；静态 Token 等同万能密钥。\n"
+                "    请仅向受信任客户端分发并定期轮换，不要提交到仓库或截图分享。\n"
                 + "=" * 60
             )
         elif _mcp_auth_required:
@@ -1162,7 +1179,11 @@ if __name__ == "__main__":
             _endpoint_path,
             (
                 "开启(需静态 Token)" if _http_settings.auth_mode == "token"
-                else "开启(需 OAuth Bearer)"
+                else (
+                    "开启(OAuth 或静态 Token)"
+                    if _http_settings.auth_mode == "hybrid"
+                    else "开启(需 OAuth Bearer)"
+                )
             ) if _mcp_auth_required
             else "关闭(免 token 直连，仅限本机回环/显式高风险豁免)",
         )

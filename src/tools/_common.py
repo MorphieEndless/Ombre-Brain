@@ -34,12 +34,9 @@ from concurrent.futures import Future, InvalidStateError
 from contextlib import AsyncExitStack, asynccontextmanager
 import hashlib
 import math
-import os
-from pathlib import Path
 import threading
-import time
-import uuid
 
+from bucket_manager import _filesystem_turn as _kernel_filesystem_turn
 from utils import parse_bool
 from ombrebrain.domain.plan_history import append_plan_change_log as append_plan_change_log
 
@@ -114,10 +111,8 @@ def stored_data_marker(payload: str, *, provenance: str = "") -> str:
 
 # --- content lock 哈希 key 长度 ---
 _CONTENT_LOCK_KEY_HEX = 16             # 64 bit 空间，碰撞概率徽不足道
-_CONTENT_LOCK_POLL_SECONDS = 0.01
-_CONTENT_LOCK_STALE_MIN_SECONDS = 180.0
+_CONTENT_LOCK_WAIT_MIN_SECONDS = 300.0
 _CONTENT_LOCK_STALE_GRACE_SECONDS = 60.0
-_CONTENT_LOCK_WAIT_GRACE_SECONDS = 30.0
 
 # Per-content turns use concurrent futures rather than asyncio.Lock. FastMCP may
 # dispatch independent HTTP sessions from different event loops/threads;
@@ -143,16 +138,12 @@ def _complete_content_turn(key: str, turn: Future[None]) -> None:
 
 @asynccontextmanager
 async def _filesystem_content_turn(key: str):
-    """Use atomic lock-file creation as a cross-loop/process final guard."""
+    """用内核持有的文件租约保护跨 loop/进程的同内容写入。"""
     base_dir = str(getattr(rt.bucket_mgr, "base_dir", "") or "").strip()
     if not base_dir:
         yield
         return
 
-    lock_dir = Path(base_dir) / ".locks"
-    lock_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = lock_dir / f"content-{key}.lock"
-    token = f"{os.getpid()}:{threading.get_ident()}:{uuid.uuid4().hex}"
     try:
         llm_timeout = float(
             (rt.config.get("dehydration") or {}).get("timeout_seconds", 120)
@@ -161,43 +152,18 @@ async def _filesystem_content_turn(key: str):
         llm_timeout = 120.0
     if not math.isfinite(llm_timeout) or llm_timeout <= 0:
         llm_timeout = 120.0
-    stale_seconds = max(
-        _CONTENT_LOCK_STALE_MIN_SECONDS,
-        llm_timeout + _CONTENT_LOCK_STALE_GRACE_SECONDS,
+    wait_seconds = max(
+        _CONTENT_LOCK_WAIT_MIN_SECONDS,
+        llm_timeout * 2 + _CONTENT_LOCK_STALE_GRACE_SECONDS,
     )
-    deadline = time.monotonic() + stale_seconds + _CONTENT_LOCK_WAIT_GRACE_SECONDS
-    acquired = False
-
-    while not acquired:
-        try:
-            descriptor = os.open(
-                lock_path,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                0o600,
-            )
-        except FileExistsError:
-            try:
-                if time.time() - lock_path.stat().st_mtime > stale_seconds:
-                    lock_path.unlink(missing_ok=True)
-                    continue
-            except OSError:
-                pass
-            if time.monotonic() >= deadline:
-                raise TimeoutError("timed out waiting for identical-content write lock")
-            await asyncio.sleep(_CONTENT_LOCK_POLL_SECONDS)
-        else:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(token)
-            acquired = True
-
-    try:
+    # 旧实现按 mtime 删除“过期”锁；两次串行 provider 调用可能超过该阈值，
+    # 从而让第二进程偷走仍存活的锁。内核租约只会在描述符关闭/进程退出时释放。
+    async with _kernel_filesystem_turn(
+        base_dir,
+        f"content-{key}",
+        timeout_seconds=wait_seconds,
+    ):
         yield
-    finally:
-        try:
-            if lock_path.read_text(encoding="utf-8") == token:
-                lock_path.unlink(missing_ok=True)
-        except OSError:
-            pass
 
 
 @asynccontextmanager

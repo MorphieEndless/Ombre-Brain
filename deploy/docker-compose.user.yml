@@ -37,6 +37,8 @@ services:
       # 容器内安全门禁据此区分宿主回环绑定与局域网/公网暴露。
       - OMBRE_BIND_ADDRESS=${OMBRE_BIND_ADDRESS:-127.0.0.1}
       - OMBRE_ALLOW_INSECURE_MCP=${OMBRE_ALLOW_INSECURE_MCP:-false}
+      - OMBRE_MCP_AUTH_MODE=${OMBRE_MCP_AUTH_MODE:-}
+      - OMBRE_MCP_TOKEN=${OMBRE_MCP_TOKEN:-}
       # config 放进数据卷（./buckets），而不是单文件挂载 —— 见文件顶部说明。
       # 首启自动生成，Dashboard 改动持久化到这里，重启不丢。
       - OMBRE_CONFIG_PATH=/app/buckets/config.yaml

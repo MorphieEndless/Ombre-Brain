@@ -79,6 +79,20 @@ def test_profile_defaults_keep_local_and_public_authenticated() -> None:
     assert catalog_local["defaults"]["mcp_require_auth"] is True
 
 
+def test_public_profile_allows_explicit_hybrid_because_oauth_remains_available() -> None:
+    patch = build_profile_patch(
+        "public_secure", {"public_url": "https://ob.example"}
+    )
+    patch["mcp_auth_mode"] = "hybrid"
+
+    assert validate_profile_patch(patch) == []
+
+    patch["mcp_auth_mode"] = "token"
+    assert "公网安全模式必须包含 OAuth 鉴权（oauth 或 hybrid）" in validate_profile_patch(
+        patch
+    )
+
+
 @pytest.mark.parametrize(
     "host",
     ["127.0.0.1", "127.42.0.8", "::1", "[::1]", "::ffff:127.0.0.1"],
@@ -368,6 +382,24 @@ def test_effective_report_includes_auth_mode_and_environment_override() -> None:
     assert report["overrides"] == [
         {"env": "OMBRE_MCP_AUTH_MODE", "field": "mcp_auth_mode", "value": "token"}
     ]
+
+
+def test_effective_report_preserves_hybrid_mode() -> None:
+    report = effective_configuration_report(
+        {
+            "transport": "streamable-http",
+            "mcp_require_auth": True,
+            "mcp_auth_mode": "hybrid",
+        },
+        {
+            "transport": "streamable-http",
+            "mcp_require_auth": True,
+            "mcp_auth_mode": "hybrid",
+        },
+    )
+
+    assert report["saved"]["mcp_auth_mode"] == "hybrid"
+    assert report["effective"]["mcp_auth_mode"] == "hybrid"
 
 
 def test_effective_report_flags_manual_auth_configuration_without_onboarding() -> None:

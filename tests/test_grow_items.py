@@ -12,7 +12,8 @@ import pytest
 
 import tools._runtime as rt
 from tools.grow import dispatch
-from tools.grow.core import grow_items
+from tools.grow.core import grow_core, grow_items
+from errors import PublicToolError
 
 
 class StubDehydrator:
@@ -119,3 +120,27 @@ async def test_dispatch_without_items_unchanged(grow_rt):
     # → 证明默认路径没变、digest 仍在原路径被调用
     with pytest.raises(RuntimeError):
         await dispatch(content="这是一段超过三十个字的长文本内容需要走 digest 拆分路径来验证向后兼容性没有被破坏")
+
+
+@pytest.mark.asyncio
+async def test_grow_digest_failure_hides_provider_detail(grow_rt):
+    _bucket_mgr, _stub = grow_rt
+    provider_secret = "sk-provider-secret https://provider.invalid/private"
+
+    class FailingDehydrator:
+        async def digest(self, _content):
+            raise RuntimeError(provider_secret)
+
+    rt.dehydrator = FailingDehydrator()
+
+    with pytest.raises(PublicToolError) as caught:
+        await grow_core("这是一段需要调用摘要服务的长内容，长度足够进入 grow 的日记拆分主路径。")
+
+    assert "OMBRE_COMPRESS_API_KEY" in caught.value.public_message
+    assert provider_secret not in caught.value.public_message
+    assert provider_secret not in str(caught.value)
+    rendered_logs = "\n".join(
+        str(call) for call in rt.logger.error.call_args_list
+    )
+    assert "RuntimeError" in rendered_logs
+    assert provider_secret not in rendered_logs

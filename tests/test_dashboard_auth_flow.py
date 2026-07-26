@@ -67,6 +67,54 @@ def test_all_auth_success_paths_share_the_dashboard_initializer():
     ) == 2
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is unavailable")
+def test_auth_status_check_bypasses_http_cache():
+    check_auth = _dashboard_section("async function checkAuth()", "function showAuthError")
+    script = r"""
+let _dashboardAuthGeneration = 0;
+let fetchCall = null;
+const elements = new Map();
+const document = {
+  getElementById(id) {
+    if (!elements.has(id)) elements.set(id, {textContent:'', style:{}});
+    return elements.get(id);
+  },
+};
+function invalidateAuthenticatedDashboardSession() {}
+async function fetch(url, options) {
+  fetchCall = {url, options: options ?? null};
+  return {
+    async json() { return {authenticated:true, setup_needed:false}; },
+  };
+}
+""" + check_auth + r"""
+
+(async function() {
+  const authenticated = await checkAuth();
+  process.stdout.write(JSON.stringify({authenticated, fetchCall}));
+})().catch(error => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    completed = subprocess.run(
+        [shutil.which("node"), "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    result = json.loads(completed.stdout)
+
+    assert result == {
+        "authenticated": True,
+        "fetchCall": {
+            "url": "/auth/status",
+            "options": {"cache": "no-store"},
+        },
+    }
+
+
 def test_auth_only_initial_loads_do_not_run_before_authentication():
     html = DASHBOARD.read_text(encoding="utf-8")
     dom_ready = _dashboard_section(
@@ -113,6 +161,58 @@ def test_auth_only_initial_loads_do_not_run_before_authentication():
     self_fab = _dashboard_section("async function initSelfFab()", "</script>")
     assert "classList.toggle('has-entries', hasEntries)" in self_fab
     assert "_selfEntries = hasEntries ? data : [];" in self_fab
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is unavailable")
+def test_login_failure_displays_backend_error_message():
+    auth_source = (
+        _dashboard_section("function showAuthError(msg)", "async function doSetup()")
+        + _dashboard_section("async function doLogin()", "async function doLogout()")
+    )
+    expected_error = "登录服务繁忙，请 17 秒后重试"
+    script = r"""
+const elements = new Map([
+  ['auth-login-pwd', {value:'wrong-password', textContent:'', style:{}}],
+  ['auth-error', {value:'', textContent:'', style:{}}],
+]);
+const document = {
+  getElementById(id) {
+    if (!elements.has(id)) throw new Error('unexpected element: ' + id);
+    return elements.get(id);
+  },
+};
+async function fetch(url) {
+  if (url !== '/auth/login') throw new Error('unexpected fetch: ' + url);
+  return {
+    ok: false,
+    async json() { return {error:'登录服务繁忙，请 17 秒后重试'}; },
+  };
+}
+""" + auth_source + r"""
+
+(async function() {
+  await doLogin();
+  const error = elements.get('auth-error');
+  process.stdout.write(JSON.stringify({
+    textContent: error.textContent,
+    display: error.style.display,
+  }));
+})().catch(error => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    completed = subprocess.run(
+        [shutil.which("node"), "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    result = json.loads(completed.stdout)
+
+    assert result["textContent"] == expected_error
+    assert result["display"] == "block"
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is unavailable")

@@ -154,7 +154,10 @@ def assess_mcp_network_safety(
     env = environment if environment is not None else os.environ
     transport = str(config.get("transport") or "stdio").strip().lower()
     auth_required = _as_bool(config.get("mcp_require_auth"), default=True)
-    bind_host = str(env.get("OMBRE_BIND_HOST", "") or "0.0.0.0").strip()
+    # 这里读取容器内监听面的默认值并立即进入下方鉴权边界门禁，不负责启动监听。
+    bind_host = str(
+        env.get("OMBRE_BIND_HOST", "") or "0.0.0.0"  # nosec B104
+    ).strip()
     external_bind = str(env.get("OMBRE_BIND_ADDRESS", "") or "").strip()
     allow_insecure = insecure_mcp_override_enabled(env)
 

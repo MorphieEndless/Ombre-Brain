@@ -4,7 +4,7 @@
 
 首次登录后打开 `/onboarding`，只选择部署意图：
 
-- 本机：自己的设备或可信内网使用，OAuth 可关闭。
+- 本机：仅同一设备回环使用；默认保留鉴权，第三方客户端推荐静态 Token。
 - 公网安全：HTTPS 域名远程使用，OAuth 强制开启。
 - 高级：已有反向代理或外部鉴权时自行选择，系统仍持续报告风险。
 
@@ -13,6 +13,10 @@
 公网安全模式中的“公网连接地址”是 OAuth 与 MCP 共同使用的外部来源地址。可以粘贴域名、`https://域名` 或完整的 `https://域名/mcp`，系统会保存为规范化的 HTTPS origin，并自动生成 `/mcp` 地址。修改地址后需重启服务，并让 MCP 客户端重新连接/授权；绑定旧地址的授权码或 refresh token 会返回 `invalid_grant`，不会继续签发随后必然 401 的 token。
 
 Docker/Zeabur 的持久卷统一挂载 `/app/buckets`，配置路径为 `/app/buckets/config.yaml`。Zeabur 从 GitHub 部署时只需添加模型 Key、挂载该卷、绑定 HTTPS 域名，再从向导选择“公网安全模式”。不要在平台中长期保留 `OMBRE_MCP_REQUIRE_AUTH` 或 `OMBRE_TRANSPORT`，除非明确希望平台覆盖 Dashboard。
+
+网络 MCP 关闭鉴权时，OB 只认可可确认的本机回环边界。裸机由 `OMBRE_BIND_HOST` 表示进程监听地址；Docker 由 Compose 的宿主端口绑定决定，三个官方模板会把 `OMBRE_BIND_ADDRESS` 同步传入容器。非回环地址、局域网/NAS 或旧 Docker 模板未声明宿主边界时，启动门禁会只在内存中强制开启鉴权，不改写 `config.yaml`、不阻止 Dashboard 启动。此时 MCP 客户端可能从免鉴权连接变为 `401`；应更新 Compose 并以 `up -d --force-recreate` 重建容器，或改用 OAuth/静态 Token。只有已有独立可信鉴权边界的高级部署才可设置精确值 `OMBRE_ALLOW_INSECURE_MCP=true`；内置 Tunnel 默认阻断免鉴权，显式高风险豁免除外；外部独立隧道则无法由 OB 自动探测。
+
+`OMBRE_BIND_ADDRESS=127.0.0.1` 证明的是官方 Compose 的**宿主端口映射**不向局域网开放，不等于隔离同一 Docker 网络中的其他容器。免鉴权部署必须同时保证该容器网络没有不可信成员；多实例、自定义网络或无法确认的编排应使用 OAuth/静态 Token。
 
 这份文档说明 Ombre Brain 在断网、模型限流、外部编辑和备份恢复时真正保证什么。
 
@@ -83,6 +87,7 @@ python tools/check_buckets.py --json
 | outbox 长时间不下降 | 记忆正文仍安全 | 查看熔断状态、最近错误、Key/模型/维度和 provider 连通性 |
 | 编辑记忆、热更新或重启提示 `Cross-origin request rejected` | 写请求被来源防护拒绝，原数据未改动；这不是 CORS 缺失 | 优先手动升级到 2.7.1+；nginx 必须保留公网 authority，传入 `X-Forwarded-Proto: https`，并让应用精确信任最后一跳代理 CIDR。不要添加 CORS 头或改写浏览器 `Origin` |
 | Polaris 报 `Failed to fetch`，`/health` 为 200，但 `OPTIONS /mcp` 为 401 且无 CORS 头 | 2.8.1 及更早版本中 CORS 位于 MCP 鉴权内层，静态 Token 模式错误拦截了不携带 Token 的浏览器预检 | 升级到 2.8.2+ 并重建/重启服务；确认预检返回 200，且响应包含 `Access-Control-Allow-Origin`、允许 `POST` 和客户端使用的 Token 请求头 |
+| 升级后免鉴权 MCP 变为 `401`，日志显示“MCP 安全门禁已启用” | 服务监听非回环，或旧 Docker 模板没有向容器声明宿主绑定；门禁已在内存中恢复鉴权 | 局域网/NAS 改用静态 Token；仅同机使用则显式绑定回环。Docker 更新 Compose 并重建容器以传入 `OMBRE_BIND_ADDRESS`，记忆卷与 Dashboard 不受影响 |
 
 ### nginx 反代与 v2.7.0 脱困
 
@@ -132,6 +137,7 @@ docker compose -f deploy/docker-compose.yml up -d --build --force-recreate
 ## 访问控制
 
 - Dashboard 会话默认 30 天过期，可通过 `OMBRE_DASHBOARD_SESSION_DAYS` 调整为 1-365 天。认证文件与 token 文件使用原子写入，并在支持的系统上限制为仅文件所有者可读写。
+- 网络 MCP 免鉴权只允许已确认的本机回环边界。启动门禁、Dashboard 配置、部署向导与内置 Tunnel 共用同一规则；`OMBRE_ALLOW_INSECURE_MCP=true` 是不在 Dashboard 暴露的高风险逃生阀，只接受精确的 `true`。
 - 登录和 OAuth 授权共用失败限流。`X-Forwarded-For` / `X-Forwarded-Proto` / `X-Forwarded-Host` 只在请求确实来自可信反代时采用；内置 Tunnel 使用回环地址，外置 nginx/Caddy/容器反代应通过 `OMBRE_TRUSTED_PROXY_CIDRS` 添加直接连接 OB 的最后一跳代理 CIDR，不能使用 `0.0.0.0/0`。三个官方 Compose 模板都会把该变量从 `.env` 传入容器。
 - 内置 JSON OAuth 状态按单进程部署设计。官方 Docker/Render 启动方式使用单 worker；自行部署时不要启动多个 Web worker 或多个共享同一数据卷的副本，否则授权状态不具备跨进程事务保证。
 - `limits.max_management_request_bytes` 限制普通 Dashboard/OAuth 写请求；导入文本和迁移 ZIP 仍使用各自更大的流式上限。

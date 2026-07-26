@@ -28,7 +28,12 @@ import httpx
 from starlette.requests import Request
 from starlette.responses import Response
 
-from ombrebrain.security.deployment_profile import normalize_public_https_origin
+from ombrebrain.security.deployment_profile import (
+    assess_mcp_network_safety,
+    current_mcp_network_security,
+    mcp_network_safety_issue,
+    normalize_public_https_origin,
+)
 from ombrebrain.security.public_origin import configured_public_origin
 
 from . import _shared as sh
@@ -168,6 +173,14 @@ def register(mcp) -> None:
             else runtime_public_url,
         }
 
+    def _runtime_network_security(desired_auth_required: object | None = None) -> dict:
+        return current_mcp_network_security(
+            sh.config,
+            desired_auth_required=desired_auth_required,
+            environment=os.environ,
+            in_docker=sh.in_docker(),
+        )
+
     @mcp.custom_route("/dashboard", methods=["GET"])
     async def dashboard(request: Request) -> Response:
         """Legacy alias: /dashboard 永久跳到根路径。
@@ -216,7 +229,7 @@ def register(mcp) -> None:
             {"name": "OMBRE_PORT", "group": "system", "label": "服务端口", "sensitive": False, **_plain("OMBRE_PORT")},
             {"name": "OMBRE_LOG_FILE", "group": "system", "label": "日志文件路径", "sensitive": False, **_plain("OMBRE_LOG_FILE")},
             {"name": "OMBRE_CONFIG_PATH", "group": "system", "label": "配置文件路径", "sensitive": False, **_plain("OMBRE_CONFIG_PATH")},
-            {"name": "OMBRE_MCP_REQUIRE_AUTH", "group": "auth", "label": "MCP OAuth 开关覆盖", "sensitive": False, **_plain("OMBRE_MCP_REQUIRE_AUTH")},
+            {"name": "OMBRE_MCP_REQUIRE_AUTH", "group": "auth", "label": "MCP 鉴权开关覆盖", "sensitive": False, **_plain("OMBRE_MCP_REQUIRE_AUTH")},
             {"name": "OMBRE_MCP_AUTH_MODE", "group": "auth", "label": "MCP 鉴权模式覆盖 (oauth/token)", "sensitive": False, **_plain("OMBRE_MCP_AUTH_MODE")},
             {"name": "OMBRE_MCP_TOKEN", "group": "auth", "label": "MCP 静态 Token", "sensitive": True, **_masked("OMBRE_MCP_TOKEN")},
             {"name": "AI_NAME", "group": "identity", "label": "AI 显示名", "sensitive": False, **_plain("AI_NAME")},
@@ -253,6 +266,9 @@ def register(mcp) -> None:
             )
         dehy = sh.config.get("dehydration", {})
         emb = sh.config.get("embedding", {})
+        runtime_network_security = _runtime_network_security(
+            desired["mcp_require_auth"]
+        )
         api_key = dehy.get("api_key", "")
         masked_key = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else ("***" if api_key else "")
         return JSONResponse({
@@ -284,13 +300,14 @@ def register(mcp) -> None:
             "transport": desired["transport"],
             "transport_effective": runtime_transport,
             "buckets_dir": sh.config.get("buckets_dir", ""),
-            # MCP OAuth 鉴权开关。默认 true（强制 OAuth）。前端「⑥ MCP 连接」面板用它
+            # MCP 鉴权开关。默认 true；具体 OAuth/静态 Token 模式由 mcp_auth_mode 决定。
             # 渲染一键开关；关掉后 /mcp 免认证直连（供自有前端 / GPT / GLM 等）。
             "mcp_require_auth": desired["mcp_require_auth"],
             "mcp_require_auth_effective": runtime_mcp_auth_required,
             # 鉴权模式（仅 mcp_require_auth=true 时有意义）："oauth"（默认）或 "token"，二者互斥。
             "mcp_auth_mode": desired["mcp_auth_mode"],
             "mcp_auth_mode_effective": runtime_mcp_auth_mode,
+            "mcp_network_security": runtime_network_security,
             # 静态 Token 状态：只回掩码/是否已配置，绝不回明文。
             "mcp_token_configured": bool(_current_mcp_token()),
             "mcp_token_hint": _mask_mcp_token(_current_mcp_token()),
@@ -301,7 +318,11 @@ def register(mcp) -> None:
                 "public_url_effective": runtime_public_url,
             },
             "restart_required": (
-                desired["mcp_require_auth"] != runtime_mcp_auth_required
+                (
+                    desired["mcp_require_auth"] != runtime_mcp_auth_required
+                    and not runtime_network_security.get("guard_active")
+                    and not runtime_network_security.get("auth_environment_override")
+                )
                 or desired["mcp_auth_mode"] != runtime_mcp_auth_mode
                 or desired["transport"] != runtime_transport
                 or desired["public_url"] != runtime_public_url
@@ -507,6 +528,41 @@ def register(mcp) -> None:
                 },
                 status_code=400,
             )
+        hot_update_keys = {
+            "dehydration",
+            "embedding",
+            "merge_threshold",
+            "host_port",
+            "surfacing",
+        }
+        if startup_setting_requested and hot_update_keys.intersection(body):
+            return JSONResponse(
+                {
+                    "error": (
+                        "MCP startup settings cannot be combined with hot runtime "
+                        "settings; save them in separate requests"
+                    )
+                },
+                status_code=400,
+            )
+
+        mcp_network_security: dict | None = None
+        if mcp_auth_value is False:
+            # 先于任何热配置变更执行，避免同一请求稍后因危险鉴权设置被拒绝时，
+            # 其他字段却已经部分生效；原子写入锁内还会基于最新磁盘配置再检查一次。
+            security_candidate = dict(sh.config)
+            security_candidate["mcp_require_auth"] = False
+            mcp_network_security = assess_mcp_network_safety(
+                security_candidate,
+                environment=os.environ,
+                in_docker=sh.in_docker(),
+            )
+            security_issue = mcp_network_safety_issue(mcp_network_security)
+            if security_issue:
+                return JSONResponse({
+                    "error": security_issue,
+                    "mcp_network_security": mcp_network_security,
+                }, status_code=400)
 
         # --- Dehydration config ---
         if "dehydration" in body:
@@ -641,6 +697,17 @@ def register(mcp) -> None:
                     save_config["merge_threshold"] = merge_threshold_value
 
                 if mcp_auth_value is not None:
+                    security_candidate = dict(save_config)
+                    security_candidate.setdefault("transport", runtime_transport)
+                    security_candidate["mcp_require_auth"] = mcp_auth_value
+                    latest_security = assess_mcp_network_safety(
+                        security_candidate,
+                        environment=os.environ,
+                        in_docker=sh.in_docker(),
+                    )
+                    security_issue = mcp_network_safety_issue(latest_security)
+                    if security_issue:
+                        raise ValueError(security_issue)
                     save_config["mcp_require_auth"] = mcp_auth_value
 
                 if mcp_auth_mode_value is not None:
@@ -685,14 +752,28 @@ def register(mcp) -> None:
                     updated.append("mcp_auth_mode")
                 if deployment_public_url is not None:
                     updated.append("deployment.public_url")
+            except ValueError as e:
+                return JSONResponse({"error": str(e), "updated": updated}, status_code=400)
             except Exception as e:
                 return JSONResponse({"error": f"persist failed: {e}", "updated": updated}, status_code=500)
 
         desired = _desired_startup_state(
             persisted_after if persisted_after is not None else sh.config
         )
+        runtime_network_security = _runtime_network_security(
+            desired["mcp_require_auth"]
+        )
+        auth_environment_conflict = (
+            runtime_network_security.get("auth_environment_override")
+            and runtime_network_security.get("auth_environment_value")
+            != desired["mcp_require_auth"]
+        )
         restart_required = (
-            desired["mcp_require_auth"] != runtime_mcp_auth_required
+            (
+                desired["mcp_require_auth"] != runtime_mcp_auth_required
+                and not runtime_network_security.get("guard_active")
+                and not runtime_network_security.get("auth_environment_override")
+            )
             or desired["mcp_auth_mode"] != runtime_mcp_auth_mode
             or desired["transport"] != runtime_transport
             or desired["public_url"] != runtime_public_url
@@ -707,13 +788,36 @@ def register(mcp) -> None:
             "transport_effective": runtime_transport,
             "mcp_require_auth": desired["mcp_require_auth"],
             "mcp_auth_mode": desired["mcp_auth_mode"],
+            "mcp_network_security": runtime_network_security,
+            "warnings": (
+                (
+                    [runtime_network_security["reason"]]
+                    if runtime_network_security.get("override_active") else []
+                )
+                + (
+                    [
+                        "OMBRE_MCP_REQUIRE_AUTH 仍由平台环境变量控制；"
+                        "请在部署平台修改或删除该变量后重建/重启服务。"
+                    ]
+                    if auth_environment_conflict else []
+                )
+            ),
             "deployment": {
                 "public_url": desired["public_url"],
                 "public_url_effective": runtime_public_url,
             },
             "message": (
-                "MCP 启动配置已保存，需要重启服务后生效。"
-                if restart_required else "设置已生效。"
+                "设置已保存；当前配置或环境仍请求免鉴权，安全门禁继续强制鉴权。"
+                if runtime_network_security.get("guard_active")
+                else (
+                    "设置已保存，但 OMBRE_MCP_REQUIRE_AUTH 仍由平台环境变量控制；"
+                    "请在部署平台修改或删除该变量后重建/重启服务。"
+                    if auth_environment_conflict
+                    else (
+                        "MCP 启动配置已保存，需要重启服务后生效。"
+                        if restart_required else "设置已生效。"
+                    )
+                )
             ),
         })
 

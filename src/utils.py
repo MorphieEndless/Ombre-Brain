@@ -560,11 +560,11 @@ def load_config(config_path: Optional[str] = None) -> dict:
     _apply_env_override(config, "OMBRE_BUCKETS_DIR", "buckets_dir")
     env_buckets_dir = os.environ.get("OMBRE_BUCKETS_DIR", "")
 
-    # MCP OAuth 开关（布尔，单独处理）—— OMBRE_MCP_REQUIRE_AUTH
+    # MCP 鉴权开关（布尔，单独处理）—— OMBRE_MCP_REQUIRE_AUTH
     # 不能走 _apply_env_override：它只写字符串，而鉴权中间件和诊断接口都要求
     # 配置中保存真正的 bool；否则字符串 "false" 仍可能被普通真值判断误当成开启。
-    # 用途：把 OB 接进自有前端 / GPT / GLM 等不走 OAuth 的客户端时，
-    # 设 OMBRE_MCP_REQUIRE_AUTH=false（或 config.yaml: mcp_require_auth: false）即可免认证直连 /mcp。
+    # 用途：把 OB 接进同机自有前端等不走 OAuth 的客户端时，可在明确回环边界关闭鉴权；
+    # 局域网/NAS/公网应改用 OAuth 或静态 Token，启动期网络门禁还会统一复核真实边界。
     # 仅在显式设置为可识别的值时才覆盖；不设 / 设成乱七八糟的值都保持默认（安全：默认开启）。
     _env_mcp_auth = os.environ.get("OMBRE_MCP_REQUIRE_AUTH", "").strip()
     if _env_mcp_auth:

@@ -327,23 +327,31 @@ claude mcp add ombre-brain --transport http https://ombre.example.com/mcp
 
 ---
 
-### 方式三：接入自有前端 / 自定义客户端（关闭 OAuth）
+### 方式三：仅本机回环免鉴权（高级）
 
-适合：想把 Ombre Brain 接进**自己的前端**、或用 **GPT / GLM / 自定义脚本**等不走 OAuth 流程的客户端调用 MCP 工具。
+适合：OB 与自有前端 / GPT / GLM / 自定义脚本运行在**同一设备**，客户端又不支持 OAuth 或自定义 Token 请求头。
 
-默认情况下，HTTPS 连接 `/mcp` 会**强制 OAuth 2.1**（这是 Claude.ai 网页版的要求）。自定义客户端往往不实现这套流程，于是工具调用会被 401 卡住。把鉴权关掉即可免认证直连：
+默认情况下，HTTP(S) `/mcp` 会**强制 OAuth 2.1**（这是 Claude.ai 网页版的要求）。第三方客户端不实现 OAuth 时，优先使用下方“静态 Token 鉴权”；只有端口明确限制在本机回环时才关闭鉴权：
 
 ```bash
-# 方式 A：环境变量（Docker 用户最方便，优先级最高）
-OMBRE_MCP_REQUIRE_AUTH=false
+# 裸机 / Python：写入 .env，或在 bash 中 export 后再启动服务
+export OMBRE_BIND_HOST=127.0.0.1
+export OMBRE_MCP_REQUIRE_AUTH=false
 
-# 方式 B：config.yaml
+# config.yaml（仍需配合上面的回环监听）
 mcp_require_auth: false
 ```
 
-改完**重启服务**即可。之后 `/mcp` 不再要求 Bearer token，任何客户端都能直连。
+裸机修改后需**重启服务**。官方 Docker Compose 默认把宿主端口绑定到 `127.0.0.1`，并把 `OMBRE_BIND_ADDRESS` 传入容器供安全门禁核验。
 
-> ⚠️ **安全提醒**：关闭后，任何能访问到该端点的人都能读写记忆。请确保服务**不直接裸奔在公网**——放在内网、或在反代（nginx / Cloudflare Access 等）层另加一道鉴权。需要公网且用 Claude.ai 时，保持默认 `true` 走 OAuth 更安全。
+2.8.12 之前已关闭鉴权的旧 Docker 实例若只热更新代码，旧 Compose 不会自动获得这个新增声明，因此会安全回退为鉴权并出现 `401`。OAuth/静态 Token 用户无需处理；受影响用户需重新下载同版本 Compose 并重建容器（持久记忆卷不受影响）：
+
+```bash
+curl -O https://raw.githubusercontent.com/P0luz/Ombre-Brain/main/deploy/docker-compose.user.yml
+docker compose -f docker-compose.user.yml up -d --force-recreate
+```
+
+> ⚠️ **安全门禁**：关闭鉴权后，任何能访问 `/mcp` 的人都能读写全部记忆。非回环地址（包括局域网/NAS 的 `0.0.0.0`）或无法确认 Docker 宿主绑定时，OB 会在启动期只对当前进程强制恢复鉴权，并拒绝 Dashboard / 向导保存该危险组合；原配置文件不会被改写。已有可信外部鉴权边界的高级部署可显式设置 `OMBRE_ALLOW_INSECURE_MCP=true`，但这会接受匿名访问到达 OB 后的全部风险。外部独立隧道可能把回环端口转发到公网，OB 无法自动识别，仍应使用 OAuth 或静态 Token；内置 Tunnel 默认阻止免鉴权启动，仅上述显式高风险豁免会放行并记录严重告警。
 
 ---
 
@@ -409,11 +417,11 @@ Ombre-MCP-Token: 你的Token
    默认是 `stdio`——**stdio 根本不开 HTTP 服务**，本地桥自然连不上。config.yaml 里写 `transport: streamable-http`，或设环境变量 `OMBRE_TRANSPORT=streamable-http`，然后重启。
    （已放宽：写成 `http` / `streamable_http` 等常见变体也会被自动归一成 `streamable-http`，但推荐写规范值。）
 
-2. **本地桥接把鉴权关掉**
-   默认 `/mcp` 强制 OAuth 2.1，Operit 这类客户端不走该流程，会在 401 处卡成「半连接」（正是黄灯）。设 `OMBRE_MCP_REQUIRE_AUTH=false`（或 `config.yaml: mcp_require_auth: false`）重启即可。本机/可信内网桥接可放心关；同机回环连接本就不经过公网。
+2. **同一手机回环可关闭鉴权，跨设备连接改用静态 Token**
+   默认 `/mcp` 强制 OAuth 2.1，Operit 这类客户端不走该流程，会在 401 处卡成「半连接」（正是黄灯）。OB 与 Operit 在同一手机时，同时设 `OMBRE_BIND_HOST=127.0.0.1` 和 `OMBRE_MCP_REQUIRE_AUTH=false` 后重启；需要让局域网其他设备连接时，保持鉴权并使用“静态 Token”模式。
 
 3. **客户端 URL 用 `127.0.0.1`，不要用 `localhost`**
-   服务监听 `0.0.0.0`（仅 IPv4）。Proot / Termux 里 `localhost` 常先解析到 IPv6 `::1`，连不上 IPv4 监听。Operit 里填 **`http://127.0.0.1:<端口>/mcp`**，注意末尾必须是 `/mcp`，端口对上你的实际监听端口。
+   Proot / Termux 里 `localhost` 可能先解析到 IPv6 `::1`，与 IPv4 回环监听不一致。Operit 里填 **`http://127.0.0.1:<端口>/mcp`**，注意末尾必须是 `/mcp`，端口对上你的实际监听端口。
 
 对齐后仍黄灯，就看服务端 `server.log`：启动时会打印一行 `MCP endpoint ready | transport=... | 鉴权: ...`，据此确认传输和鉴权是否如预期；再看黄灯那一刻有没有 `/mcp` 的请求进来、是不是 `401`。
 
@@ -634,7 +642,7 @@ docker compose -f deploy/docker-compose.yml up -d
 | **记忆网络** | 基于 embedding 相似度的桶关系图 |
 | **③ 引擎** | 内联填写 LLM / Embedding API Key，在线修改参数，点「保存 Key」立即热更新 |
 | **导入** | 上传历史对话文件批量导入 |
-| **设置** | 修改密码、MCP OAuth 开关、版本状态、Cloudflare Tunnel 管理、API Key 测试 |
+| **设置** | 修改密码、MCP 鉴权开关、版本状态、Cloudflare Tunnel 管理、API Key 测试 |
 
 **设置页 Cloudflare Tunnel 区**：填入 Token 后点启动，状态点颜色表示连接状态（灰=未运行，橙=连接中，绿=已连接，红=连接失败+错误原因）。支持「启动时自动连接」。
 
@@ -756,6 +764,8 @@ docker compose -f docker-compose.user.yml down
 docker compose -f docker-compose.user.yml up -d
 ```
 
+首次从 v2.8.11 或更早版本升级到 v2.8.12+，且曾关闭 MCP 鉴权的 Docker 用户，还需同步新版 Compose 并执行 `--force-recreate`，详见[“仅本机回环免鉴权”的旧版迁移说明](#方式三仅本机回环免鉴权高级)。若你的 Compose 做过自定义，请手工合并新版的 `OMBRE_BIND_ADDRESS` 与 `OMBRE_ALLOW_INSECURE_MCP` 环境项，不要直接覆盖自定义文件。
+
 ### 从源码部署用户
 
 ```bash
@@ -802,7 +812,7 @@ docker compose -f deploy/docker-compose.yml up -d
 | 工具调用显示「执行报错」但记忆其实写进去了 | **不是服务器问题**：服务端已成功返回，是 Claude.ai 连接器/渲染层把一次成功往返显示成了报错 | 用 `letter_read` 或 Dashboard 确认数据已落盘；服务端日志 `phase=ok` 即表示成功 |
 | embedding API 暂时离线时 `breath(query=...)` 出现“检索降级” | OB 正在使用关键词/BM25 继续检索；命中桶仍逐字返回完整存储正文，不是记忆丢失 | 可继续使用；到系统诊断查看向量队列，恢复 API 后语义通道会自动回来 |
 | 向量化不生效 / 语义检索没结果（压缩却正常） | base_url 漏 `/v1`（→404）、model 漏 `BAAI/` 前缀（→Model does not exist），或后台队列因网络 / 配额持续重试 | 用 Dashboard 向量化区的「测试」和系统诊断查看待处理 / 重试数；按上面「用硅基流动…」一节填对 base_url 与 model；错误详情见设置页错误面板（OB-E001） |
-| 自有前端 / GPT / GLM 调用 MCP 工具被 401 卡住 | 默认强制 OAuth，自定义客户端不走该流程 | 设 `OMBRE_MCP_REQUIRE_AUTH=false`（或 `config.yaml: mcp_require_auth: false`）后重启；详见「方式三：接入自有前端」 |
+| 自有前端 / GPT / GLM 调用 MCP 工具被 401 卡住 | 默认强制 OAuth，自定义客户端不走该流程；或危险的非回环免鉴权配置已被安全门禁收紧 | 推荐改用“静态 Token”模式；仅同机连接可同时设 `OMBRE_BIND_HOST=127.0.0.1` 与 `OMBRE_MCP_REQUIRE_AUTH=false` 后重启；Docker 旧模板需更新 Compose 以声明 `OMBRE_BIND_ADDRESS` |
 | **Operit / 安卓 / Proot 本地桥接一直黄灯、连不上 `/mcp`** | 多为下面三点之一：① `transport` 没设成 `streamable-http`（默认 `stdio` **根本不开 HTTP 服务**）；② 默认强制 OAuth，Operit 这类本地桥不走该流程被 401 卡半通；③ 客户端填了 `localhost`，在 Proot/Termux 里常解析成 IPv6 `::1`，连不上 IPv4 监听 | 见下方「**Operit / 安卓 / Proot 本地桥接**」一节，三步逐个对齐 |
 | Token 过期后无法自动重连 | 旧版本不支持 `refresh_token` grant，headless 环境只能重新打开授权页 | 更新到 v2.4.11+ 后重新授权一次，之后客户端可用 refresh token 自动续期 |
 | Dashboard 401 | 未登录 / 密码错 | 浏览器重新登录 |
@@ -833,7 +843,7 @@ docker compose -f deploy/docker-compose.yml up -d
 - **🛟 记忆只有一份很危险，强烈建议开异地备份**：本地/单卷就是「一份」，磁盘坏了或误删就找不回。到 Dashboard → GitHub 同步 配一下（几分钟），记忆就多一份云端存档，换机/灾难也能拉回来（embeddings.db 不上传，靠「重算所有向量」恢复）。
 - **切换向量化后端会全库重算**：云端 3072 维和本地 bge-m3 1024 维不通用，每次切换都会重算，别频繁来回切。
 - **热更新按钮看部署方式**：Docker（有 restart 策略）点完自动恢复；裸机/纯 Python 需要 systemd/pm2 等守护，否则更新后要手动重启。点之前先「导出记忆备份」。
-- **自有前端 / GPT / GLM 接入**：默认强制 OAuth，会卡住非 Claude 客户端；设 `OMBRE_MCP_REQUIRE_AUTH=false` 关掉（注意别裸奔公网）。
+- **自有前端 / GPT / GLM 接入**：默认强制 OAuth；优先改用静态 Token。免鉴权只允许已确认的同机回环边界，局域网/NAS 不属于回环。
 - **首次访问先设密码**：设完之后所有 `/api/*` 都要登录；忘了密码可用设置里的安全问题急救。
 
 ---
@@ -850,6 +860,6 @@ MIT
 
 当前正式变量名：
 
-`OMBRE_COMPRESS_API_KEY`、`OMBRE_COMPRESS_BASE_URL`、`OMBRE_COMPRESS_MODEL`、`OMBRE_COMPRESS_FORMAT`、`OMBRE_COMPRESS_TIMEOUT_SECONDS`、`OMBRE_EMBED_API_KEY`、`OMBRE_EMBED_BASE_URL`、`OMBRE_EMBED_MODEL`、`OMBRE_EMBED_FORMAT`、`OMBRE_EMBED_TIMEOUT_SECONDS`、`OMBRE_EMBED_BACKEND`、`OMBRE_OLLAMA_URL`、`OMBRE_VAULT_DIR`、`OMBRE_MEDIA_DIR`、`OMBRE_MEDIA_MAX_BYTES`、`OMBRE_CONFIG_PATH`、`OMBRE_CODE_DIR`、`OMBRE_LOG_DIR`、`OMBRE_LOG_FILE`、`OMBRE_EXTERNAL_CHANGE_POLL_SECONDS`、`OMBRE_TRANSPORT`、`OMBRE_PORT`、`OMBRE_BIND_HOST`、`OMBRE_MCP_REQUIRE_AUTH`、`OMBRE_MCP_AUTH_MODE`、`OMBRE_MCP_TOKEN`、`OMBRE_DASHBOARD_PASSWORD`、`OMBRE_DASHBOARD_SESSION_DAYS`、`OMBRE_TRUSTED_PROXY_CIDRS`、`OMBRE_GITHUB_TOKEN`、`OMBRE_HOOK_URL`、`OMBRE_HOOK_TOKEN`、`OMBRE_HOOK_SKIP`、`OMBRE_HOOK_ALLOW_PUBLIC`、`OMBRE_ALLOW_CUSTOM_UPDATE_REPO`、`OMBRE_ALLOW_UNTRUSTED_MIRROR`、`OMBRE_UPDATE_ALLOW_PIP`、`OMBRE_FORCE_CODE_RESEED`、`AI_NAME`。
+`OMBRE_COMPRESS_API_KEY`、`OMBRE_COMPRESS_BASE_URL`、`OMBRE_COMPRESS_MODEL`、`OMBRE_COMPRESS_FORMAT`、`OMBRE_COMPRESS_TIMEOUT_SECONDS`、`OMBRE_EMBED_API_KEY`、`OMBRE_EMBED_BASE_URL`、`OMBRE_EMBED_MODEL`、`OMBRE_EMBED_FORMAT`、`OMBRE_EMBED_TIMEOUT_SECONDS`、`OMBRE_EMBED_BACKEND`、`OMBRE_OLLAMA_URL`、`OMBRE_VAULT_DIR`、`OMBRE_MEDIA_DIR`、`OMBRE_MEDIA_MAX_BYTES`、`OMBRE_CONFIG_PATH`、`OMBRE_CODE_DIR`、`OMBRE_LOG_DIR`、`OMBRE_LOG_FILE`、`OMBRE_EXTERNAL_CHANGE_POLL_SECONDS`、`OMBRE_TRANSPORT`、`OMBRE_PORT`、`OMBRE_BIND_HOST`、`OMBRE_BIND_ADDRESS`、`OMBRE_MCP_REQUIRE_AUTH`、`OMBRE_MCP_AUTH_MODE`、`OMBRE_MCP_TOKEN`、`OMBRE_ALLOW_INSECURE_MCP`、`OMBRE_DASHBOARD_PASSWORD`、`OMBRE_DASHBOARD_SESSION_DAYS`、`OMBRE_TRUSTED_PROXY_CIDRS`、`OMBRE_GITHUB_TOKEN`、`OMBRE_HOOK_URL`、`OMBRE_HOOK_TOKEN`、`OMBRE_HOOK_SKIP`、`OMBRE_HOOK_ALLOW_PUBLIC`、`OMBRE_ALLOW_CUSTOM_UPDATE_REPO`、`OMBRE_ALLOW_UNTRUSTED_MIRROR`、`OMBRE_UPDATE_ALLOW_PIP`、`OMBRE_FORCE_CODE_RESEED`、`AI_NAME`。
 
 永久兼容旧名：`OMBRE_API_KEY` → `OMBRE_COMPRESS_API_KEY`，`OMBRE_BASE_URL` → `OMBRE_COMPRESS_BASE_URL`，`PASSWORD` → `OMBRE_DASHBOARD_PASSWORD`，`OMBRE_BUCKETS_DIR` → `OMBRE_VAULT_DIR`。

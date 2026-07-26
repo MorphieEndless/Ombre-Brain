@@ -31,6 +31,9 @@ services:
       - "${OMBRE_BIND_ADDRESS:-127.0.0.1}:${OMBRE_HOST_PORT:-18001}:8000"
     environment:
       - OMBRE_TRANSPORT=streamable-http
+      # 把宿主端口真实绑定地址同步给容器内安全门禁；进程本身仍监听容器全接口。
+      - OMBRE_BIND_ADDRESS=${OMBRE_BIND_ADDRESS:-127.0.0.1}
+      - OMBRE_ALLOW_INSECURE_MCP=${OMBRE_ALLOW_INSECURE_MCP:-false}
       - OMBRE_CONFIG_PATH=/app/buckets/config.yaml
       - OMBRE_EMBED_BACKEND=${OMBRE_EMBED_BACKEND:-api}
       - OMBRE_COMPRESS_API_KEY=${OMBRE_COMPRESS_API_KEY}

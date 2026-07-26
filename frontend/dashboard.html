@@ -2922,14 +2922,14 @@
           <select id="cfg-mcp-auth" onchange="onMcpAuthModeChange()" style="flex:1;max-width:440px;min-width:0;">
             <option value="oauth">开启 OAuth（Claude.ai 网页版 / Claude Code 远程需要）</option>
             <option value="token">静态 Token 鉴权（第三方 MCP 客户端，不走 OAuth）</option>
-            <option value="off">关闭 · 免认证直连（自有前端 / GPT / GLM）</option>
+            <option value="off">关闭 · 免认证直连（仅限已确认的本机回环边界）</option>
           </select>
           <button type="button" onclick="saveMcpAuth()" title="保存并写入 config.yaml / Save &amp; write to config.yaml" style="margin-left:8px;padding:0 12px;height:32px;font-size:12px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="save"></i> 保存 Save</button>
           <span id="mcp-auth-msg" style="margin-left:8px;font-size:11px;"></span>
         </div>
         <div style="margin-top:6px;font-size:11px;color:var(--text-light);line-height:1.7;">
           三选一，<b>不会叠加</b>：选 OAuth 就不认 Token，选 Token 就不认 OAuth。改动写入 config.yaml，<b>需重启服务后生效</b>。
-          关闭鉴权后任何能访问 /mcp 的人都能读写记忆；静态 Token 泄露也等同公开访问——<b>无论选哪种模式都请勿把服务直接暴露公网</b>（放内网，或在反代层另加一道鉴权）。
+          关闭鉴权后任何能访问 /mcp 的人都能读写记忆，系统默认只允许已确认的本机回环边界；NAS、局域网和第三方客户端请使用静态 Token。静态 Token 泄露也等同公开访问——<b>无论选哪种模式都请勿把服务直接暴露公网</b>。
         </div>
 
         <div id="mcp-token-panel" style="display:none;margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:9px;">
@@ -7017,6 +7017,21 @@ async function loadConfig() {
     window._mcpTokenConfigured = !!cfg.mcp_token_configured;
     window._mcpTokenHint = cfg.mcp_token_hint || null;
     onMcpAuthModeChange();
+    var mcpNetwork = cfg.mcp_network_security || {};
+    var mcpAuthMsg = document.getElementById('mcp-auth-msg');
+    if (mcpAuthMsg && mcpNetwork.guard_active) {
+      mcpAuthMsg.style.color = 'var(--warning)';
+      mcpAuthMsg.textContent = '当前配置或环境变量请求关闭鉴权；当前生效：安全门禁已强制开启鉴权。'
+        + (mcpNetwork.reason ? ' 原因：' + mcpNetwork.reason : '');
+    } else if (mcpAuthMsg && mcpNetwork.override_active) {
+      mcpAuthMsg.style.color = 'var(--negative)';
+      mcpAuthMsg.textContent = '高风险：已显式允许非回环免鉴权。'
+        + (mcpNetwork.reason ? ' ' + mcpNetwork.reason : '')
+        + (mcpNetwork.auth_environment_override
+          ? ' OMBRE_MCP_REQUIRE_AUTH 仍由平台环境变量控制。' : '');
+    } else if (mcpAuthMsg) {
+      mcpAuthMsg.textContent = '';
+    }
     const publicUrl = String((cfg.deployment || {}).public_url || '');
     const publicMode = document.querySelector('input[name="mcp-mode"][value="public"]');
     const localMode = document.querySelector('input[name="mcp-mode"][value="local"]');
@@ -7131,7 +7146,7 @@ async function refreshEnvShadowWarning() {
     OMBRE_EMBED_MODEL: '向量化 Model',
     OMBRE_EMBED_API_KEY: '向量化 API Key',
     OMBRE_EMBED_TIMEOUT_SECONDS: '向量化 Timeout',
-    OMBRE_MCP_REQUIRE_AUTH: 'MCP OAuth 开关',
+    OMBRE_MCP_REQUIRE_AUTH: 'MCP 鉴权开关',
   };
   try {
     var r = await authFetch('/api/env-vars');
@@ -8387,8 +8402,10 @@ async function saveMcpAuth() {
     if (!res) return;
     const result = await res.json();
     if (result.ok) {
-      msg.style.color = result.restart_required ? 'var(--warning)' : 'var(--positive)';
-      msg.textContent = result.message || (result.restart_required ? '已保存，需要重启服务后生效' : '已保存');
+      const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+      msg.style.color = (warnings.length || result.restart_required) ? 'var(--warning)' : 'var(--positive)';
+      msg.textContent = (result.message || (result.restart_required ? '已保存，需要重启服务后生效' : '已保存'))
+        + (warnings.length ? '；高风险豁免：' + warnings.join('；') : '');
       setRestartRequired(!!result.restart_required, 'MCP 鉴权设置已保存');
     } else {
       msg.style.color = 'var(--negative)';

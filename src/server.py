@@ -47,6 +47,7 @@ from dehydrator import Dehydrator
 from decay_engine import DecayEngine
 from embedding_engine import EmbeddingEngine
 from ombrebrain.storage.embedding_outbox import EmbeddingOutbox
+from ombrebrain.security.deployment_profile import enforce_mcp_network_guard
 from import_memory import ImportEngine
 from migrate_engine import MigrateEngine
 from utils import get_version, load_config, setup_logging
@@ -325,6 +326,33 @@ mcp = FastMCP(
 # =============================================================
 import web as _web
 import web._shared as _wsh
+
+# 旧版可能已经把本机模式保存成免鉴权。注册 OAuth 路由和 MCP 中间件之前统一
+# 评估真实网络边界；危险组合只收紧当前进程，不改写用户配置，也不让服务退出重启。
+_mcp_network_security = enforce_mcp_network_guard(
+    config,
+    environment=os.environ,
+    in_docker=_wsh.in_docker(),
+)
+if _mcp_network_security["guard_active"]:
+    logger.error(
+        "=" * 60 + "\n"
+        "🛡️  MCP 安全门禁已启用：检测到非回环或无法确认边界的免鉴权配置。\n"
+        "    当前进程已在内存中强制开启 MCP 鉴权，config.yaml 原值未被改写。\n"
+        "    原因：%s\n"
+        "    请改用 OAuth/静态 Token，或把服务明确限制到本机回环地址。\n"
+        + "=" * 60,
+        _mcp_network_security["reason"],
+    )
+elif _mcp_network_security["override_active"]:
+    logger.critical(
+        "=" * 60 + "\n"
+        "⚠️  已显式允许非回环免鉴权 MCP：任何能访问该端口的人都可读写记忆。\n"
+        "    原因：%s\n"
+        "    不再需要时请立即删除 OMBRE_ALLOW_INSECURE_MCP。\n"
+        + "=" * 60,
+        _mcp_network_security["reason"],
+    )
 _wsh.init(config)
 # 记忆持久性自检：容器里记忆目录若没挂持久卷，重建就全丢。开机就醒目告警，别让用户
 # 以为「存住了其实没有」。只提示不阻断（阻断会伤部署）。
@@ -1107,8 +1135,8 @@ if __name__ == "__main__":
                 "=" * 60 + "\n"
                 "⚠️  MCP 认证已关闭 (mcp_require_auth: false)：/mcp 无需任何令牌即可直连，\n"
                 "    14 个记忆工具全部对外开放——任何能访问本端口的人都能读写你的全部记忆。\n"
-                "    本服务监听 0.0.0.0，若端口暴露到局域网/公网，请务必用反代鉴权、防火墙\n"
-                "    或仅绑定 127.0.0.1 保护；仅在可信内网/本机自有前端场景才建议关闭鉴权。\n"
+                f"    本服务进程监听 {_BIND_HOST}，若端口暴露到局域网/公网，请务必用反代鉴权、防火墙\n"
+                "    或仅绑定 127.0.0.1 保护；免鉴权只建议用于已确认的本机回环连接。\n"
                 + "=" * 60
             )
         # 端口口径澄清（用户反馈：Docker 与裸机端口容易混淆）。容器内固定监听 8000，
@@ -1136,7 +1164,7 @@ if __name__ == "__main__":
                 "开启(需静态 Token)" if _http_settings.auth_mode == "token"
                 else "开启(需 OAuth Bearer)"
             ) if _mcp_auth_required
-            else "关闭(免 token 直连，仅限可信内网/本机)",
+            else "关闭(免 token 直连，仅限本机回环/显式高风险豁免)",
         )
         # Forwarded headers are validated inside the application against
         # OMBRE_TRUSTED_PROXY_CIDRS.  Uvicorn's default proxy middleware rewrites

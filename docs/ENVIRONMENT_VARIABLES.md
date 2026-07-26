@@ -34,10 +34,11 @@
 
 - `OMBRE_TRANSPORT`：`stdio`、`sse` 或 `streamable-http`。
 - `OMBRE_PORT`：容器或裸机监听端口。
-- `OMBRE_BIND_HOST`：监听主机名。
+- `OMBRE_BIND_HOST`：进程实际监听地址；容器/PaaS 通常需要 `0.0.0.0`，裸机仅限本机访问时应设为 `127.0.0.1`。
 - `OMBRE_MCP_REQUIRE_AUTH`：是否要求 MCP 鉴权。
-- `OMBRE_MCP_AUTH_MODE`：`oauth`、`token` 或 `off`。
+- `OMBRE_MCP_AUTH_MODE`：`oauth` 或 `token`；关闭鉴权由 `OMBRE_MCP_REQUIRE_AUTH=false` 控制。
 - `OMBRE_MCP_TOKEN`：静态 Token 模式密钥。
+- `OMBRE_ALLOW_INSECURE_MCP`：高风险逃生阀。仅显式设为 `true` 时，才允许在非回环或无法确认的网络边界关闭 MCP 鉴权；默认关闭，不应在普通、NAS 或公网部署中设置。
 - `OMBRE_DASHBOARD_PASSWORD`：Dashboard 密码。
 - `OMBRE_DASHBOARD_SESSION_DAYS`：Dashboard 登录会话天数。
 - `OMBRE_TRUSTED_PROXY_CIDRS`：直接连接 OB 的最后一跳可信反向代理 CIDR；不是公网客户端 IP 或域名，禁止使用 `0.0.0.0/0`。官方 Compose 模板会从 `.env` 透传该值，修改后需要重新创建容器。
@@ -65,7 +66,7 @@
 
 ## 部署编排与多所有者
 
-- `OMBRE_BIND_ADDRESS`：Compose 对外绑定地址。
+- `OMBRE_BIND_ADDRESS`：Compose 宿主机对外绑定地址，默认 `127.0.0.1`；官方模板同时把该值传入容器，供 MCP 安全门禁判断真实宿主边界。
 - `OMBRE_HOST_PORT`：Compose 宿主机端口。
 - `OMBRE_HOST_VAULT_DIR`：Compose 宿主机数据目录。
 - `OMBRE_CONTAINER_NAME`：目标容器名。

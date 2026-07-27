@@ -19,11 +19,43 @@ from import_memory import (
     ImportEngine,
     ImportState,
     _EXTRACT_TOKEN_CEILING,
+    _safe_import_error_detail,
     chunk_turns,
+    diagnose_import_errors,
 )
 from tools import _runtime as rt
 from tools._common import count_high_importance
 from utils import count_tokens_approx
+
+
+def test_import_error_diagnostics_cover_known_and_unknown_provider_errors():
+    diagnostics = diagnose_import_errors(
+        [
+            "LLM 提取失败：Model does not exist: deepseek-v3",
+            "balance is insufficient",
+            "token ceiling reached, truncating",
+            "provider exploded with code 599",
+        ]
+    )
+
+    assert [item["code"] for item in diagnostics] == [
+        "model_not_found",
+        "insufficient_balance",
+        "token_ceiling",
+        "unknown",
+    ]
+    assert all(item["solution"] for item in diagnostics[:3])
+    assert diagnostics[3]["solution"] == ""
+    assert diagnostics[3]["error"] == "provider exploded with code 599"
+
+
+def test_import_provider_error_detail_redacts_credentials():
+    detail = _safe_import_error_detail(
+        RuntimeError("api_key=sk-secretvalue123456 balance is insufficient")
+    )
+
+    assert "secretvalue" not in detail
+    assert "[REDACTED]" in detail
 
 
 class FakeDehydrator:

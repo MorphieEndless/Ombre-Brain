@@ -110,6 +110,11 @@ dehydration:
   max_tokens: 1024
   temperature: 0.1
   timeout_seconds: 120             # LLM request timeout seconds / LLM 请求超时秒数
+  # OpenAI-compatible provider extensions / OpenAI 兼容服务商扩展参数
+  # DeepSeek thinking models can disable reasoning to preserve the output budget:
+  # extra_body:
+  #   thinking:
+  #     type: disabled
 
 # --- Decay parameters / 记忆衰减参数 ---
 # Simulates Ebbinghaus forgetting curve, auto-archives inactive memories

@@ -27,6 +27,7 @@ import json
 import hashlib
 import logging
 import math
+import re
 import threading
 import uuid
 from datetime import datetime
@@ -91,6 +92,69 @@ _PATTERN_RESULT_LIMIT = 20        # 返回给 dashboard 的 pattern 上限
 _PATTERN_CONTENT_PREVIEW = 200    # pattern_content 预览长度
 
 _TEXT_HASH_CHUNK_CHARS = 1024 * 1024
+
+_IMPORT_ERROR_RULES = (
+    (
+        "model_not_found",
+        re.compile(r"model does not exist|model[_ ]?not[_ ]?found|模型不存在", re.I),
+        "模型名称不可用",
+        "检查模型名是否包含服务商要求的完整前缀；例如硅基流动通常需要填写 deepseek-ai/DeepSeek-V3 这类完整名称。",
+    ),
+    (
+        "insufficient_balance",
+        re.compile(r"balance is insufficient|insufficient (?:balance|quota)|余额不足", re.I),
+        "账户余额或额度不足",
+        "为当前服务商账户充值，或切换到仍有额度的模型与 API Key。",
+    ),
+    (
+        "token_ceiling",
+        re.compile(r"token ceiling|truncating|context length|maximum context|token 上限", re.I),
+        "对话超过模型 Token 上限",
+        "把导出文件按单场对话拆成较小的 TXT/Markdown 文件后分批导入，并确认所选模型的上下文长度足够。",
+    ),
+)
+
+
+def _safe_import_error_detail(exc: BaseException) -> str:
+    """Return a bounded provider error while redacting common credential forms."""
+
+    detail = str(exc).strip() or type(exc).__name__
+    detail = re.sub(r"(?i)(bearer\s+)[^\s,;]+", r"\1[REDACTED]", detail)
+    detail = re.sub(r"\bsk-[A-Za-z0-9_-]{8,}\b", "[REDACTED]", detail)
+    detail = re.sub(
+        r"(?i)((?:api[_-]?key|token)\s*[=:]\s*)[^\s,;]+",
+        r"\1[REDACTED]",
+        detail,
+    )
+    return detail[:_CHUNK_ERR_PREVIEW]
+
+
+def diagnose_import_errors(errors: list[object]) -> list[dict[str, str]]:
+    """Classify import errors without hiding unknown provider messages."""
+
+    diagnostics: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for value in errors:
+        error = str(value).strip()
+        if not error:
+            continue
+        code, title, solution = "unknown", "导入处理出错", ""
+        for candidate_code, pattern, candidate_title, candidate_solution in _IMPORT_ERROR_RULES:
+            if pattern.search(error):
+                code, title, solution = (
+                    candidate_code,
+                    candidate_title,
+                    candidate_solution,
+                )
+                break
+        key = (code, error)
+        if key in seen:
+            continue
+        seen.add(key)
+        diagnostics.append(
+            {"code": code, "title": title, "error": error, "solution": solution}
+        )
+    return diagnostics
 
 
 def _has_non_whitespace(text: str) -> bool:
@@ -828,6 +892,7 @@ class ImportEngine:
             if self._active_job_id:
                 status["job_id"] = self._active_job_id
                 status["status"] = "running"
+        status["diagnostics"] = diagnose_import_errors(status.get("errors", []))
         return status
 
     def _record_start_error(
@@ -1123,7 +1188,10 @@ class ImportEngine:
             items = await self._extract_memories(content)
             self.state.data["api_calls"] += 1
         except Exception as e:
-            err_msg = f"LLM 提取失败（{type(e).__name__}）"
+            err_msg = (
+                f"LLM 提取失败（{type(e).__name__}）："
+                f"{_safe_import_error_detail(e)}"
+            )
             logger.warning(
                 "Import extraction failed: err_type=%s detail=hidden",
                 type(e).__name__,

@@ -489,6 +489,39 @@ async def test_native_gemini_calls_keep_api_keys_out_of_urls(monkeypatch, tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_openai_compat_passes_configured_extra_body(tmp_path):
+    dehydrator = Dehydrator(
+        {
+            "buckets_dir": str(tmp_path),
+            "dehydration": {
+                "api_key": "test-key",
+                "model": "deepseek-v4-flash",
+                "extra_body": {"thinking": {"type": "disabled"}},
+            },
+        }
+    )
+    captured = {}
+
+    class Completions:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="OK"))]
+            )
+
+    dehydrator.client = SimpleNamespace(
+        chat=SimpleNamespace(completions=Completions())
+    )
+    try:
+        result = await dehydrator._chat_once("system", "user")
+    finally:
+        dehydrator.close()
+
+    assert result == "OK"
+    assert captured["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
+@pytest.mark.asyncio
 async def test_gemini_model_catalog_keeps_api_key_out_of_query(monkeypatch):
     calls = []
 

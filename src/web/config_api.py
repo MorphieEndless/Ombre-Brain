@@ -385,6 +385,13 @@ def register(mcp) -> None:
                     {"error": "surfacing must be an object"}, status_code=400
                 )
             dehydration_payload = dict(body.get("dehydration") or {})
+            if "extra_body" in dehydration_payload and not isinstance(
+                dehydration_payload["extra_body"], dict
+            ):
+                return JSONResponse(
+                    {"error": "dehydration.extra_body must be an object"},
+                    status_code=400,
+                )
             if "max_tokens" in dehydration_payload:
                 dehydration_payload["max_tokens"] = _bounded_config_int(
                     dehydration_payload["max_tokens"],
@@ -572,6 +579,7 @@ def register(mcp) -> None:
             "temperature",
             "timeout_seconds",
             "api_format",
+            "extra_body",
             "api_key",
             "api_available",
             "client",
@@ -595,7 +603,7 @@ def register(mcp) -> None:
         if "dehydration" in body:
             d = dehydration_payload
             dehy = sh.config.setdefault("dehydration", {})
-            for key in ("model", "base_url", "max_tokens", "temperature", "api_format", "timeout_seconds"):
+            for key in ("model", "base_url", "max_tokens", "temperature", "api_format", "timeout_seconds", "extra_body"):
                 if key in d:
                     dehy[key] = d[key]
                     updated.append(f"dehydration.{key}")
@@ -611,6 +619,7 @@ def register(mcp) -> None:
                 sh.dehydrator.temperature = float(configured_temperature)
             sh.dehydrator.timeout_seconds = _positive_float(dehy.get("timeout_seconds"), sh.dehydrator.timeout_seconds)
             sh.dehydrator.api_format = dehy.get("api_format", getattr(sh.dehydrator, "api_format", "openai_compat"))
+            sh.dehydrator.extra_body = dict(dehy.get("extra_body") or {})
             if "api_key" in d and d["api_key"]:
                 sh.dehydrator.api_key = dehy["api_key"]
             sh.dehydrator.api_available = bool(sh.dehydrator.api_key)
@@ -717,7 +726,7 @@ def register(mcp) -> None:
                     if not isinstance(sc_dehy, dict):
                         sc_dehy = {}
                         save_config["dehydration"] = sc_dehy
-                    for key in ("model", "base_url", "max_tokens", "temperature", "api_format", "timeout_seconds"):
+                    for key in ("model", "base_url", "max_tokens", "temperature", "api_format", "timeout_seconds", "extra_body"):
                         if key in dehydration_payload:
                             sc_dehy[key] = dehydration_payload[key]
                     # Never persist api_key to yaml (use env var)

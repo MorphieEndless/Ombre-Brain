@@ -2072,7 +2072,10 @@
       </div>
     </div>
 
-    <div id="import-errors" style="display:none;margin:12px 0;padding:12px;background:var(--surface);border-radius:8px;font-size:12px;color:var(--negative);max-height:120px;overflow-y:auto;"></div>
+    <div id="import-errors" style="display:none;margin:12px 0;padding:14px;background:rgba(190,90,65,.07);border:1px solid rgba(190,90,65,.35);border-radius:12px;font-size:12px;">
+      <div style="display:flex;align-items:center;gap:7px;color:var(--negative);font-weight:700;margin-bottom:10px;"><i data-lucide="circle-alert" style="width:16px;height:16px;"></i> 导入报错提醒 <span class="en">Import diagnostics</span></div>
+      <div id="import-error-list" style="display:flex;flex-direction:column;gap:9px;"></div>
+    </div>
 
     <div id="import-results-section" style="margin:20px 0;">
       <h3>已导入记忆 <span class="en">Imported</span> <button onclick="loadImportResults()" title="刷新 / Refresh" style="font-size:12px;padding:2px 8px;"><i data-lucide="refresh-cw"></i></button></h3>
@@ -8038,9 +8041,20 @@ function updateImportUI(s) {
     loadBuckets();
   }
   const errDiv = document.getElementById('import-errors');
-  if (s.errors && s.errors.length) {
+  const errList = document.getElementById('import-error-list');
+  const diagnostics = Array.isArray(s.diagnostics) ? s.diagnostics : [];
+  if (diagnostics.length) {
     errDiv.style.display = '';
-    errDiv.textContent = s.errors.join('\n');
+    errList.innerHTML = diagnostics.map(function(item) {
+      const solution = item.solution
+        ? '<div style="margin-top:6px;color:var(--text-dim);"><b style="color:var(--text);">解决方案：</b>' + esc(item.solution) + '</div>'
+        : '<div style="margin-top:6px;color:var(--text-dim);">暂未匹配到通用解决方案，请复制下方具体报错进行排查。</div>';
+      return '<div style="padding:10px 11px;background:var(--surface-solid);border-radius:8px;box-shadow:inset 2px 2px 5px var(--shadow-dark-subtle),inset -2px -2px 4px var(--shadow-light);">'
+        + '<div style="font-weight:700;color:var(--negative);">' + esc(item.title || '导入处理出错') + '</div>'
+        + '<code style="display:block;margin-top:6px;white-space:pre-wrap;word-break:break-word;color:var(--negative);font-family:\'Share Tech Mono\',\'SF Mono\',Consolas,monospace;">' + esc(item.error || '') + '</code>'
+        + solution + '</div>';
+    }).join('');
+    if (typeof lucide !== 'undefined') lucide.createIcons();
   } else { errDiv.style.display = 'none'; }
 }
 

@@ -302,6 +302,10 @@ class Dehydrator:
         # 思考，关掉它既修了空输出、又更快更省。设为 None 可彻底不发该字段（兼容
         # 不支持 thinkingConfig 的老模型）。
         self.thinking_budget = dehy_cfg.get("thinking_budget", 0)
+        # OpenAI-compatible providers may expose request extensions that are not
+        # part of the OpenAI schema (for example DeepSeek's thinking switch).
+        extra_body = dehy_cfg.get("extra_body")
+        self.extra_body = dict(extra_body) if isinstance(extra_body, dict) else {}
 
         # --- Human display name / 人类一方的称呼 ---
         # 注入脱水/合并的「视角铁律」：原文里人类那一方统一还原为这个名字，
@@ -493,6 +497,7 @@ class Dehydrator:
             ],
             max_tokens=max_tokens if max_tokens is not None else self.max_tokens,
             temperature=temperature if temperature is not None else self.temperature,
+            extra_body=self.extra_body or None,
         )
         if not response.choices:
             return ""

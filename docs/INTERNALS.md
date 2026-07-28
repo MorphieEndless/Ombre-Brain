@@ -107,7 +107,7 @@ Ombre-Brain/
 
 每个模块「干什么、边界在哪、依赖谁」：
 
-- **server.py**（约 1000 行）— MCP 服务入口。创建所有组件后调 `tools._runtime.init(...)` 注入依赖；14 个薄封装全部以 `@mcp.tool()` 直接注册到唯一公开实例（每个 ≤ 10 行，只转发到 `tools/<名字>/`），不依赖 FastMCP 私有注册表合并；对外只暴露 **单连接器 `/mcp`**（14 工具全在这一条，详见 §3 抬头）；启动段调 `web.register_all(mcp)` 装配所有 HTTP 路由，并起 `mcp.streamable_http_app()` 一个 uvicorn 进程。**不写业务逻辑，也不再直接定义 HTTP 路由**——后者已全部迁到 `web/`。
+- **server.py**（约 1000 行）— MCP 服务入口。创建所有组件后调 `tools._runtime.init(...)` 注入依赖；15 个薄封装全部以 `@mcp.tool()` 直接注册到唯一公开实例；对外只暴露 **单连接器 `/mcp`**。
 - **tools/**（MCP 工具应用层）— 详见下面「1.x tools/ 包结构」。
 - **web/**（HTTP/Dashboard 路由层）— 详见下面「1.y web/ 包结构」。从旧 server.py 巨石里拆出的 16 个域模块，每个导出 `register(mcp)`；cookie/CSRF/会话鉴权等共享依赖在 `web/_shared.py`（类比 `tools/_runtime.py`）。
 - **bucket_manager.py** — 桶 CRUD + 多维加权搜索 + `touch()` 激活刷新 + `_time_ripple()` 时间涟漪 + 文件搬运（archive/permanent 之间）。
@@ -265,11 +265,11 @@ feel 桶自身：
 
 ---
 
-## 3. MCP 工具规格（共 14 个）
+## 3. MCP 工具规格（共 15 个）
 
-> **单连接器（iter 2.2）**：claude.ai 的 5 工具上限已解除，14 个工具合并回一个连接器 `/mcp`。
-> 历史上（iter 2.1）曾因该上限拆成主 `mcp` + 副 `mcp_extra` 两个 FastMCP 实例，后来又在启动时操作私有注册表合并。2.8.5 起删除这层历史容器，14 个工具全部直接注册到唯一 `mcp`，stdio / sse / streamable-http 三种 transport 与导入式 ASGI 启动一致。
-> - 高频 7 个 —— `breath` / `breath_search` / `breath_advanced` / `hold` / `grow` / `trace` / `dream`
+> **单连接器（iter 2.2）**：当前 15 个工具统一由连接器 `/mcp` 暴露。
+> 历史上（iter 2.1）曾拆成两个 FastMCP 实例。2.8.5 起删除历史容器，当前 15 个工具全部直接注册到唯一 `mcp`。
+> - 高频 8 个 —— `breath` / `breath_search` / `breath_advanced` / `hold` / `grow` / `source_read` / `trace` / `dream`
 > - 低频 7 个 —— `anchor` / `release` / `pulse` / `plan` / `letter_write` / `letter_read` / `I`
 
 ### 3.1 `breath` / `breath_search` / `breath_advanced` — 检索/浮现
@@ -297,12 +297,12 @@ feel 桶自身：
 
 ### 3.2 `hold` — 存储单条记忆
 
-签名：`hold(content, tags="", importance=5, pinned=False, feel=False, source_bucket="", valence=-1, arousal=-1, why_remembered="", meaning="", media=None, test_data=False)`
+签名：`hold(content, title="", tags="", importance=5, pinned=False, feel=False, source_bucket="", valence=-1, arousal=-1, why_remembered="", meaning="", media=None, test_data=False)`
 
 两种路径：
 
 - **Feel 模式** (`feel=True`)：跳过 LLM 分析，自动注入 `__feel__` 标签，写入 `feel/沉淀物/`。`source_bucket` 提供时把源桶标记为 `digested=True` 并写 `model_valence`。返回 `🫧feel→{id}`。
-- **普通模式**：`analyze()` → 用户传入的 `valence`/`arousal` 优先于 LLM 结果（B-09 修复）→ `_merge_or_create(raw_merge=True)`（相似度 > `merge_threshold` 时以分隔线追加原文，否则新建）→ 原文落盘后投递 embedding outbox → 异步触发 `_check_plan_resolution()` 扫 active plans。返回 `合并→{name}` 或 `新建→{name}`。`analyze()` 或 embedding 不可用时只降级元数据/向量索引，正文仍原样落盘；**hold 永远不调 `dehydrate()`/`merge()` 压缩正文**。
+- **普通模式**：`analyze()` → 显式 `title` 与用户传入的 `valence`/`arousal` 优先于 LLM 结果 → `_merge_or_create(raw_merge=True)` → 原文落盘后投递 embedding outbox。打标或 embedding 不可用时只降级元数据/索引，正文仍原样落盘。
 - `meaning` 追加一条“为什么值得被想起”的第一人称含义；`media` 接受持久化前可读取路径或 `data_base64+filename` 项，失败时不写失效引用。
 - `test_data=True` 只在创建时写入不可后补的可擦除 provenance，并禁止与 pinned/feel 组合；这是 `trace(hard_delete=True)` 唯一允许物理删除的来源边界。
 
@@ -314,10 +314,19 @@ feel 桶自身：
 
 - 短内容（< 30 字符）走快速路径：`analyze()` + `_merge_or_create()`，跳过 `digest()` 节省一次 API。
 - 正常路径：`dehydrator.digest()` 拆为 2~6 条 → 每条独立走 `_merge_or_create()`，单条失败 try/except 隔离，标 `⚠️条目名`。
-- `items=[...]` 模式表示调用方已经拆好最终正文：忽略 `content`，逐条原文入库，只补元数据；最多 100 条且每条仍受单桶大小限制。
+- `items=[...]` 模式表示调用方已经拆好最终正文。对象条目可显式给出 `title/content/tags/importance/domain/valence/arousal/source_ranges`，显式字段优先于自动打标。若同时传 `content`，它会作为整批共享的不可变原文证据保存一次；每个桶以 1-based 闭区间 `source_ranges` 指向自己的片段。
 - 末尾异步触发 `_check_plan_resolution()`。
 
 返回示例：`3条|新2合1\n📝体检结果\n📌朋友聚餐\n📎近期焦虑情绪`。
+
+### 3.3.1 `source_read` — 单桶原文核对
+
+签名：`source_read(bucket_id, expected_title, scope="event", cursor=0, max_tokens=6000)`
+
+- 精确校验桶 ID 与显式标题；任一不符即拒绝，不做语义搜索、相关桶扩散或 LLM 处理。
+- `scope="event"` 只返回该桶声明的原文行范围；`scope="full_source"` 返回共享原文全文。
+- 原文存于 `<vault>/_sources/src_<sha256>.source`，按内容寻址并在读取时校验哈希。它不是 `.md`，不参与普通桶扫描、默认 GitHub Markdown 同步或当前 Markdown 备份导出。
+- 每次只处理一个桶。过长时返回非零 `next_cursor`，必须显式续读；不静默摘要。
 
 ### 3.4 `trace` — 修改/删除
 
@@ -473,7 +482,7 @@ feel 桶自身：
 | `/api/env-vars` | GET | 🔒 | dashboard 设置页「⑤ 环境变量」只读区：当前进程读到的所有 `OMBRE_*`，敏感字段脱敏 |
 | `/api/env-config` | GET | 🔒 | 可写 6 字段的当前值（脱敏） |
 | `/api/env-config` | POST | 🔒 | 热更新 6 字段并写回 `.env`（重启仍有效） |
-| `/mcp/*` | — | 公开 | FastMCP 单连接器（iter 2.2）：全部 14 个工具 —— breath / breath_search / breath_advanced / hold / grow / dream / trace / anchor / release / pulse / plan / letter_write / letter_read / **I** |
+| `/mcp/*` | — | 公开 | FastMCP 单连接器：全部 15 个工具 —— breath / breath_search / breath_advanced / hold / grow / source_read / dream / trace / anchor / release / pulse / plan / letter_write / letter_read / **I** |
 
 🔒 = 需要 cookie 认证，未认证返回 `JSON {error, setup_needed}` 状态码 401。
 
@@ -1589,7 +1598,7 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 |---|---|---|
 | Dashboard 401 | `web/_shared.py` + `web/auth.py` | 会话鉴权 helper；检查 cookie `ombre_session`；`OMBRE_DASHBOARD_PASSWORD` 是否正确 |
 | 改密码报「环境变量密码」错误 | `web/auth.py` | `auth_change_password` 检测 `OMBRE_DASHBOARD_PASSWORD` 设置时禁用 |
-| HTTP 模式下 Claude.ai 连不上 | `server.py` | `__main__` CORS 中间件；`_app = mcp.streamable_http_app()`（单连接器，14 个工具直接注册在 `mcp`）；URL 末尾必须 `/mcp` |
+| HTTP 模式下 Claude.ai 连不上 | `server.py` | `__main__` CORS 中间件；`_app = mcp.streamable_http_app()`（单连接器，15 个工具直接注册在 `mcp`）；URL 末尾必须 `/mcp` |
 | docker compose 重启后桶丢失 | — | 使用 `OMBRE_HOST_VAULT_DIR` 将宿主机目录 bind mount 到 `/app/buckets`；该目录同时持久化桶、配置和 Tunnel token |
 | Dashboard 改 host vault 不生效 | `web/import_api.py` | 容器无法修改启动前确定的宿主机挂载；Docker 内界面只读，必须编辑宿主机 compose 同目录 `.env` 后 `--force-recreate` |
 | keepalive 失败 | `server.py` | `_keepalive_loop`；检查 `OMBRE_PORT` 实际监听端口 |

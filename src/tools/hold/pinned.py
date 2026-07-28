@@ -32,6 +32,7 @@ async def store_pinned(
     valence: float,
     arousal: float,
     why_remembered: str,
+    title: str = "",
     meaning: str = "",
     media: list | None = None,
 ) -> str:
@@ -70,6 +71,7 @@ async def store_pinned(
             valence=final_valence,
             arousal=final_arousal,
             name=suggested_name or None,
+            title=title,
             bucket_type="permanent",
             pinned=True,
             why_remembered=why_remembered,

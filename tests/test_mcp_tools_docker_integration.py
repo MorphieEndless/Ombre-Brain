@@ -1,4 +1,4 @@
-"""Real streamable-HTTP integration coverage for all 14 public MCP tools.
+"""Real streamable-HTTP integration coverage for all 15 public MCP tools.
 
 Run this file against an isolated Docker service by setting
 OMBRE_DOCKER_INTEGRATION_URL=http://ombre-brain:8000/mcp.
@@ -29,6 +29,7 @@ EXPECTED_TOOLS = {
     "breath_advanced",
     "hold",
     "grow",
+    "source_read",
     "trace",
     "anchor",
     "release",
@@ -45,6 +46,7 @@ EXPECTED_TOOL_ORDER = (
     "breath_advanced",
     "hold",
     "grow",
+    "source_read",
     "trace",
     "dream",
     "anchor",
@@ -74,6 +76,7 @@ EXPECTED_TOOL_PROPERTIES = {
     },
     "hold": {
         "content",
+        "title",
         "tags",
         "importance",
         "pinned",
@@ -87,6 +90,7 @@ EXPECTED_TOOL_PROPERTIES = {
         "test_data",
     },
     "grow": {"content", "items"},
+    "source_read": {"bucket_id", "expected_title", "scope", "cursor", "max_tokens"},
     "trace": {
         "bucket_id",
         "name",
@@ -127,6 +131,7 @@ EXPECTED_TOOL_PROPERTIES = {
 EXPECTED_REQUIRED_PROPERTIES = {
     "breath_search": {"query"},
     "hold": {"content"},
+    "source_read": {"bucket_id", "expected_title"},
     "trace": {"bucket_id"},
     "anchor": {"bucket_id"},
     "release": {"bucket_id"},
@@ -284,7 +289,7 @@ def test_kelivo_handshake_versions_list_all_tools_without_session_header(
         client.close()
 
 
-def test_manifest_exposes_exactly_the_documented_14_tools(mcp_client):
+def test_manifest_exposes_exactly_the_documented_15_tools(mcp_client):
     tools = mcp_client.list_tools()
     assert [tool["name"] for tool in tools] == list(EXPECTED_TOOL_ORDER)
     tools_by_name = {tool["name"]: tool for tool in tools}
@@ -311,6 +316,7 @@ def test_manifest_exposes_exactly_the_documented_14_tools(mcp_client):
         ("breath_advanced", {"catalog": {"not": "a boolean"}}, "catalog"),
         ("hold", {}, "content"),
         ("grow", {"items": {"not": "a list"}}, "items"),
+        ("source_read", {}, "bucket_id"),
         ("trace", {}, "bucket_id"),
         ("anchor", {}, "bucket_id"),
         ("release", {}, "bucket_id"),
@@ -338,6 +344,7 @@ def test_all_tools_reject_schema_invalid_arguments(mcp_client, tool, arguments, 
         ("breath_advanced", {}),
         ("hold", {"content": "unknown-field-probe", "test_data": True}),
         ("grow", {"items": []}),
+        ("source_read", {"bucket_id": "unknown", "expected_title": "unknown"}),
         ("trace", {"bucket_id": "missing-unknown-field-probe"}),
         ("anchor", {"bucket_id": "missing-unknown-field-probe"}),
         ("release", {"bucket_id": "missing-unknown-field-probe"}),
@@ -504,6 +511,41 @@ def test_grow_long_content_obeys_configured_provider_contract(mcp_client):
     assert "batch:g_" in result
     recalled = mcp_client.call("breath_search", {"query": marker, "max_results": 5})
     assert marker in recalled
+
+
+def test_grow_items_source_layer_requires_exact_title_and_reads_one_event(mcp_client):
+    marker = _marker("source-layer")
+    source = f"开场 {marker}\n妻子说 wife 喔，不是 girlfriend 喔。\n直接 wife。\n尾声"
+    result = mcp_client.call(
+        "grow",
+        {
+            "content": source,
+            "items": [{
+                "title": "wife",
+                "content": f"{marker} 她注意到我直接用了 wife。",
+                "tags": ["老婆", "称呼"],
+                "importance": 8,
+                "domain": ["恋爱"],
+                "source_ranges": [[2, 3]],
+            }],
+        },
+    )
+    bucket_id = list(re.findall(r"(?<![0-9a-f])[0-9a-f]{12}(?![0-9a-f])", result))[-1]
+
+    denied = mcp_client.call(
+        "source_read",
+        {"bucket_id": bucket_id, "expected_title": "直接确认关系"},
+    )
+    assert "标题不匹配" in denied
+
+    event = mcp_client.call(
+        "source_read",
+        {"bucket_id": bucket_id, "expected_title": "wife", "scope": "event"},
+    )
+    assert "wife 喔" in event
+    assert "直接 wife" in event
+    assert "开场" not in event
+    assert "尾声" not in event
 
 
 def test_trace_updates_existing_memory_metadata(mcp_client):

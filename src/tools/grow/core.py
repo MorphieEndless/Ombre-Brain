@@ -113,7 +113,7 @@ async def grow_core(content: str) -> str:
     return summary
 
 
-async def grow_items(items: list) -> str:
+async def grow_items(items: list, source_content: str = "") -> str:
     """预拆分模式：上层 AI 已把长文拆成 N 条最终正文，直接逐字入库。
 
     与 grow_core 的关键差别（issue 的诉求）：
@@ -126,19 +126,37 @@ async def grow_items(items: list) -> str:
     if payload_err:
         return payload_err
 
-    # 规整：接受字符串条目；也容忍 {"content": "..."} 形式，取其正文。空条目丢弃。
-    clean: list[str] = []
+    # 规整：字典条目会保留人工给出的最终元数据；未给出的字段才由 analyze 补齐。
+    clean: list[dict] = []
     for it in items:
         if isinstance(it, str):
             s = it.strip()
+            item = {"content": s}
         elif isinstance(it, dict):
             s = str(it.get("content", "")).strip()
+            item = dict(it)
+            item["content"] = s
         else:
             s = ""
         if s:
-            clean.append(s)
+            clean.append(item)
     if not clean:
         return "items 为空或都不合法，未创建任何桶。"
+
+    source_ref = ""
+    if source_content and source_content.strip():
+        try:
+            from ombrebrain.storage.source_store import normalize_source_ranges
+
+            line_count = len(source_content.splitlines()) or 1
+            for item in clean:
+                ranges = normalize_source_ranges(item.get("source_ranges"))
+                if any(end > line_count for _, end in ranges):
+                    raise ValueError(f"source_ranges 超出原文总行数 {line_count}")
+                item["_source_ranges"] = ranges
+            source_ref = rt.source_store.put(source_content)
+        except (OSError, ValueError) as exc:
+            return f"原文证据保存失败，未创建任何桶：{exc}"
 
     batch_id = f"g_{uuid.uuid4().hex[:12]}"
     results = []
@@ -147,7 +165,8 @@ async def grow_items(items: list) -> str:
     embed_warnings = []
 
     metadata_fallback = False
-    for content_str in clean:
+    for item in clean:
+        content_str = item["content"]
         try:
             size_err = check_content_size(content_str)
             if size_err:
@@ -155,26 +174,70 @@ async def grow_items(items: list) -> str:
                 continue
             # 只打标，不改写正文；打标失败（如 API key 未配置）不应丢正文——
             # 落回本地中性元数据，与 hold 的降级行为保持一致（见 tools/hold/core.py）。
+            needs_analysis = (
+                not str(item.get("title") or "").strip()
+                or item.get("tags") is None
+                or item.get("domain") is None
+                or item.get("valence") is None
+                or item.get("arousal") is None
+            )
+            default_analysis = getattr(rt.dehydrator, "_default_analysis", None)
+            meta = default_analysis() if callable(default_analysis) else {
+                "domain": ["未分类"],
+                "valence": 0.5,
+                "arousal": 0.3,
+                "tags": [],
+                "suggested_name": "",
+            }
+            if needs_analysis:
+                try:
+                    meta = await rt.dehydrator.analyze(content_str)
+                except Exception as e:
+                    metadata_fallback = True
+                    rt.logger.warning(
+                        "grow items metadata analysis failed; preserving raw content with local defaults / "
+                        "grow items 打标失败，使用本地默认元数据并原样保存正文: "
+                        f"{type(e).__name__}: {e}"
+                    )
+            explicit_title = str(item.get("title") or "").strip()
+            explicit_tags = item.get("tags")
+            if isinstance(explicit_tags, str):
+                explicit_tags = [t.strip() for t in explicit_tags.split(",") if t.strip()]
+            if not isinstance(explicit_tags, list):
+                explicit_tags = None
+            explicit_domain = item.get("domain")
+            if isinstance(explicit_domain, str):
+                explicit_domain = [explicit_domain.strip()] if explicit_domain.strip() else []
+            if not isinstance(explicit_domain, list):
+                explicit_domain = None
             try:
-                meta = await rt.dehydrator.analyze(content_str)
-            except Exception as e:
-                metadata_fallback = True
-                rt.logger.warning(
-                    "grow items metadata analysis failed; preserving raw content with local defaults / "
-                    f"grow items 打标失败，使用本地默认元数据并原样保存正文: {type(e).__name__}: {e}"
-                )
-                default_analysis = getattr(rt.dehydrator, "_default_analysis", None)
-                meta = default_analysis() if callable(default_analysis) else {
-                    "domain": ["未分类"], "valence": 0.5, "arousal": 0.3, "tags": [], "suggested_name": "",
-                }
+                importance = max(1, min(10, int(item.get("importance", 5))))
+            except (TypeError, ValueError, OverflowError):
+                importance = 5
+            try:
+                valence = float(item.get("valence", meta.get("valence", 0.5)))
+            except (TypeError, ValueError, OverflowError):
+                valence = float(meta.get("valence", 0.5))
+            try:
+                arousal = float(item.get("arousal", meta.get("arousal", 0.3)))
+            except (TypeError, ValueError, OverflowError):
+                arousal = float(meta.get("arousal", 0.3))
+
+            source_refs = None
+            if source_ref:
+                ranges = item.get("_source_ranges") or []
+                source_refs = [{"ref": source_ref, "ranges": ranges}]
+
             result_name, is_merged, embed_warn = await merge_or_create(
                 content=content_str,
-                tags=meta.get("tags") or [],
-                importance=5,
-                domain=meta.get("domain") or ["未分类"],
-                valence=meta.get("valence", 0.5),
-                arousal=meta.get("arousal", 0.3),
+                tags=explicit_tags if explicit_tags is not None else (meta.get("tags") or []),
+                importance=importance,
+                domain=explicit_domain if explicit_domain is not None else (meta.get("domain") or ["未分类"]),
+                valence=valence,
+                arousal=arousal,
                 name=meta.get("suggested_name", ""),
+                title=explicit_title,
+                source_refs=source_refs,
                 source_tool="grow",
                 grow_batch_id=batch_id,
                 raw_merge=True,  # 逐字追加，合并不压缩
@@ -192,7 +255,7 @@ async def grow_items(items: list) -> str:
             rt.logger.warning(f"grow items 条目处理失败 / verbatim item failed: {e}")
             results.append("⚠️")
 
-    asyncio.create_task(check_plan_resolution("\n".join(clean)))
+    asyncio.create_task(check_plan_resolution("\n".join(item["content"] for item in clean)))
     summary = f"{len(clean)}条(预拆分·逐字)|新{created}合{merged} batch:{batch_id}\n" + "\n".join(results)
     if embed_warnings:
         summary += f"\n⚠️ {embed_warnings[0]}"

@@ -1381,6 +1381,7 @@ class BucketManager:
         arousal: float = 0.3,
         bucket_type: str = "dynamic",
         name: Optional[str] = None,
+        title: str = "",
         pinned: bool = False,
         protected: bool = False,
         why_remembered: str = "",
@@ -1395,6 +1396,7 @@ class BucketManager:
         test_data: bool = False,
         defer_derived_index: bool = False,
         imported: bool = False,
+        source_refs: Any = None,
     ) -> str:
         """
         Create a new memory bucket, return bucket ID.
@@ -1423,6 +1425,11 @@ class BucketManager:
         self._validate_bucket_content(content)
         if name:
             name = self._sanitize_text(name)
+        title = self._sanitize_text(title).strip()
+        if source_refs:
+            from ombrebrain.storage.source_store import normalize_source_refs
+
+            source_refs = normalize_source_refs(source_refs)
 
         # Candidate selection is finalized immediately before the no-overwrite
         # write while holding that exact ID's normal bucket turn.  The value
@@ -1437,7 +1444,7 @@ class BucketManager:
         # 桶名 = "YYYY-MM-DD HH-MM-SS [LLM生成的标题]"，无标题时仅用时间戳。
         # 使用连字符替代冒号，避免 sanitize_name 后续编辑时把冒号去掉破坏可读性。
         _ts = datetime.now().strftime("%Y-%m-%d %H-%M-%S")
-        _clean = sanitize_name(name) if name else ""
+        _clean = sanitize_name(title or name) if (title or name) else ""
         bucket_name = (f"{_ts} {_clean}" if (_clean and _clean != "unnamed") else _ts)[:80]
         # feel buckets are allowed to have empty domain; others default to ["未分类"]
         if bucket_type == "feel":
@@ -1479,6 +1486,10 @@ class BucketManager:
             "last_active": created_at,
             "activation_count": 0,
         }
+        if title:
+            metadata["title"] = title[:_METADATA_TEXT_LIMITS["title"]]
+        if source_refs:
+            metadata["source_refs"] = source_refs
         if imported:
             metadata["imported"] = True
         if test_data:
@@ -2200,6 +2211,16 @@ class BucketManager:
         if "meaning_append" in kwargs:
             # Miss: meaning_append 是追加一条新 meaning（trace 的 meaning_append / hold 每次调用）。
             kwargs["meaning_append"] = self._normalize_meaning_item(kwargs["meaning_append"])
+        if "title" in kwargs:
+            kwargs["title"] = self._sanitize_text(kwargs["title"]).strip()[
+                :_METADATA_TEXT_LIMITS["title"]
+            ]
+        if "source_refs_append" in kwargs:
+            from ombrebrain.storage.source_store import normalize_source_refs
+
+            kwargs["source_refs_append"] = normalize_source_refs(
+                kwargs["source_refs_append"]
+            )
 
         try:
             post = frontmatter.load(file_path)
@@ -2298,6 +2319,15 @@ class BucketManager:
             post["arousal"] = _clamp_unit(kwargs["arousal"], "arousal", f"update:{bucket_id}")
         if "name" in kwargs:
             post["name"] = sanitize_name(kwargs["name"])
+        if "title" in kwargs and kwargs["title"]:
+            post["title"] = kwargs["title"]
+        if "source_refs_append" in kwargs and kwargs["source_refs_append"]:
+            from ombrebrain.storage.source_store import normalize_source_refs
+
+            existing_refs = post.get("source_refs") or []
+            post["source_refs"] = normalize_source_refs(
+                list(existing_refs) + list(kwargs["source_refs_append"])
+            )
         if "resolved" in kwargs:
             post["resolved"] = kwargs["resolved"]
         if "pinned" in kwargs:

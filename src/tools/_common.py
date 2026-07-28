@@ -654,6 +654,8 @@ async def merge_or_create(
     valence: float,
     arousal: float,
     name: str = "",
+    title: str = "",
+    source_refs: list | None = None,
     raw_merge: bool = False,
     why_remembered: str = "",
     source_tool: str = "",
@@ -683,7 +685,8 @@ async def merge_or_create(
     async with _content_turn(content):
         result = await _merge_or_create_inner(
             content=content, tags=tags, importance=importance, domain=domain,
-            valence=valence, arousal=arousal, name=name, raw_merge=raw_merge,
+            valence=valence, arousal=arousal, name=name, title=title,
+            source_refs=source_refs, raw_merge=raw_merge,
             why_remembered=why_remembered, source_tool=source_tool,
             grow_batch_id=grow_batch_id, meaning=meaning, media=media,
             test_data=test_data,
@@ -710,6 +713,8 @@ async def _merge_or_create_inner(
     valence: float,
     arousal: float,
     name: str = "",
+    title: str = "",
+    source_refs: list | None = None,
     raw_merge: bool = False,
     why_remembered: str = "",
     source_tool: str = "",
@@ -841,6 +846,23 @@ async def _merge_or_create_inner(
                         "valence": merged_valence,
                         "arousal": merged_arousal,
                     }
+                    if title:
+                        update_kwargs["title"] = title
+                        old_name = str(metadata.get("name") or "")
+                        timestamp_prefix = old_name[:19]
+                        if (
+                            len(timestamp_prefix) == 19
+                            and timestamp_prefix[4] == "-"
+                            and timestamp_prefix[7] == "-"
+                            and timestamp_prefix[10] == " "
+                            and timestamp_prefix[13] == "-"
+                            and timestamp_prefix[16] == "-"
+                        ):
+                            update_kwargs["name"] = f"{timestamp_prefix} {title}"
+                        else:
+                            update_kwargs["name"] = title
+                    if source_refs:
+                        update_kwargs["source_refs_append"] = source_refs
                     if source_tool:
                         update_kwargs["last_merged_by"] = source_tool
                     if meaning:
@@ -963,12 +985,14 @@ async def _merge_or_create_inner(
             valence=valence,
             arousal=arousal,
             name=name or None,
+            title=title,
             why_remembered=why_remembered,
             source_tool=source_tool,
             grow_batch_id=grow_batch_id,
             meaning=meaning,
             media=media,
             test_data=test_data,
+            source_refs=source_refs,
             defer_derived_index=_defer_derived_index,
             # hold 的铁律：正文优先落盘。打标/embedding 可降级，但绝不压缩或撤销记忆。
             allow_embedding_fallback=(raw_merge and source_tool == "hold"),

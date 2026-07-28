@@ -56,19 +56,20 @@ Ombre Brain 的使用者是**模型自己**，不是它背后的人。所以这�
 
 ---
 
-## 它的 14 个工具 / The 14 Tools
+## 它的 15 个工具 / The 15 Tools
 
-14 个工具全部在**一个 MCP 连接器 `/mcp`** 上。连上 `/mcp` 即拥有全部能力。
+15 个工具全部在**一个 MCP 连接器 `/mcp`** 上。连上 `/mcp` 即拥有全部能力。
 
-### 高频 7 个
+### 高频 8 个
 
 | 工具 | 一句话 |
 |---|---|
 | `breath` | 睁眼。**0 参数**，让权重最高、未解决且未标记 digested 的事浮现 + 置顶核心准则；每条正文后附一行简洁 Footprint。digested 只从默认/被动浮现隐藏，仍可按 query 找回。**每次对话第一件事**。故意做成 0 参数：claude.ai 按需加载工具时会跳过参数复杂的工具，塞太多参数会导致它常年加载不上。 |
 | `breath_search` | 按关键词 / 语义找记忆：`query`（必填）/ `domain` / `max_results`。融合关键词/BM25 + 语义检索，向量不可用时自动退回关键词检索。可命中已归档记忆，但只提示足迹与明确恢复调用，不会自动恢复。 |
 | `breath_advanced` | `breath` 的完整参数版：`catalog=True` 目录模式（每桶一行元数据，0 LLM，最省 token）、`tags`、`importance_min`、`valence`/`arousal`、`max_tokens` 等精细控制，日常用不到时用前两个就够。 |
-| `hold` | 记下当下一件事（一句话级）。自动打标 + 与近似桶合并；打标失败时仍会原样落盘，绝不压缩正文。所有记忆的向量索引都在原文落盘后由后台生成，失败会自动重试。`pinned=True` 钉为永久核心；`feel=True` 写第一人称感受。 |
-| `grow` | 整理一段长内容（日记 / 总结），自动拆成 2~6 条独立桶。要存多条时用它，别连续 `hold`。 |
+| `hold` | 记下当下一件事（一句话级）。`title` 可显式指定最终标题并优先于模型建议；打标失败时仍会原样落盘，绝不压缩正文。 |
+| `grow` | 整理一段长内容（日记 / 总结），自动拆成 2~6 条独立桶。结构化 `items` 可逐字写入最终正文、标题和元数据；同时传 `content` 时，它作为共享原文证据保存。 |
+| `source_read` | 凭精确桶 ID + 精确标题读取该桶的隐藏原文证据；不搜索、不联想、不带出其他桶，过长则显式分页。 |
 | `trace` | 唯一的元数据写入口：resolved / pinned / 改情感坐标 / 替换正文 / 删除到档案 / 改 plan 状态。长正文可用 `old_str/new_str` 做唯一片段的原子局部替换；只传要改的字段。 |
 | `dream` | 做梦消化最近窗口（默认 48h）有变动的记忆。**不是义务**，需要消化时再调。 |
 
@@ -213,9 +214,9 @@ curl http://localhost:18001/health
 }
 ```
 
-重启 Claude Desktop，工具列表里会出现全部 14 个工具：`breath` / `breath_search` / `breath_advanced` / `hold` / `grow` / `trace` / `dream` / `anchor` / `release` / `pulse` / `plan` / `letter_write` / `letter_read` / `I`。
+重启 Claude Desktop，工具列表里会出现全部 15 个工具：`breath` / `breath_search` / `breath_advanced` / `hold` / `grow` / `source_read` / `trace` / `dream` / `anchor` / `release` / `pulse` / `plan` / `letter_write` / `letter_read` / `I`。
 
-> 14 个工具全在同一连接器 `/mcp` 暴露，只配这一个即可。
+> 15 个工具全在同一连接器 `/mcp` 暴露，只配这一个即可。
 
 ---
 
@@ -292,13 +293,13 @@ Claude.ai                    Ombre Brain 服务器
 
 #### 步骤 3：连接端点
 
-14 个工具全在**一个 MCP 端点 `/mcp`** 上：
+15 个工具全在**一个 MCP 端点 `/mcp`** 上：
 
 | 端点 | 工具 | 说明 |
 |---|---|---|
-| `/mcp` | `breath` `breath_search` `breath_advanced` `hold` `grow` `dream` `trace` `anchor` `release` `pulse` `plan` `letter_write` `letter_read` `I` | 全部 14 个工具 |
+| `/mcp` | `breath` `breath_search` `breath_advanced` `hold` `grow` `source_read` `dream` `trace` `anchor` `release` `pulse` `plan` `letter_write` `letter_read` `I` | 全部 15 个工具 |
 
-> 旧版曾使用第二连接器 `/mcp-extra`，该端点现已退役并返回 `404`；不要再单独添加。全部 14 个工具都在 `/mcp`。
+> 旧版曾使用第二连接器 `/mcp-extra`，该端点现已退役并返回 `404`；不要再单独添加。全部 15 个工具都在 `/mcp`。
 
 在 Claude.ai / 你的客户端里添加这一个连接器即可使用全部工具：
 
@@ -834,7 +835,7 @@ docker compose -f deploy/docker-compose.yml up -d
 
 新用户最常踩、但文档里分散各处的点，集中提醒一下：
 
-- **只需加一个连接器 `/mcp`**：14 个工具全在这一个端点上，不用再单独加别的。
+- **只需加一个连接器 `/mcp`**：15 个工具全在这一个端点上，不用再单独加别的。
 - **反代/隧道要整主机名转发**：Cloudflare Tunnel / Nginx 按域名整体转发到 `localhost:端口`，覆盖所有路径即可。
 - **OpenAI 兼容向量化两个坑**：base_url 末尾要带 `/v1`（漏了 404）、model 要带完整前缀（如 `BAAI/bge-m3`，漏了报 Model does not exist）。填完用向量化区的「测试」按钮确认。
 - **改完 key / 配置点「保存」后再「测试」**：压缩和向量化各有独立的「测试」按钮，能用就用，别凭感觉。

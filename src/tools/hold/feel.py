@@ -48,6 +48,7 @@ async def store_feel(
     arousal: float,
     source_bucket: str,
     why_remembered: str,
+    title: str = "",
     meaning: str = "",
     media: list | None = None,
 ) -> str:
@@ -62,6 +63,7 @@ async def store_feel(
         valence=feel_valence,
         arousal=feel_arousal,
         name=None,
+        title=title,
         bucket_type="feel",
         why_remembered=why_remembered,
         triggered_by=source_bucket.strip() if source_bucket else "",

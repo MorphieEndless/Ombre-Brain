@@ -218,9 +218,12 @@ except RuntimeError as _emb_err:
     logger.error(f"[STARTUP FAILED] {_emb_err}")
     raise SystemExit(f"Ombre Brain 启动中止：{_emb_err}") from _emb_err
 bucket_mgr = BucketManager(config, embedding_engine=embedding_engine)  # Bucket manager / 记忆桶管理器
+_source_max_bytes = int(
+    (config.get("limits") or {}).get("max_grow_input_bytes", 2 * 1024 * 1024)
+)
 source_store = SourceStore(
     config.get("buckets_dir", "buckets"),
-    max_bytes=int((config.get("limits") or {}).get("max_grow_input_bytes") or 2 * 1024 * 1024),
+    max_bytes=_source_max_bytes,
 )
 embedding_outbox = EmbeddingOutbox(config, bucket_mgr, embedding_engine)
 bucket_mgr.attach_embedding_outbox(embedding_outbox)
@@ -239,6 +242,7 @@ github_sync_instance: GitHubSync | None = (
         repo=_gh_cfg.get("repo", ""),
         branch=_gh_cfg.get("branch", "main"),
         path_prefix=_gh_cfg.get("path_prefix", "ombre"),
+        max_source_bytes=_source_max_bytes,
     )
     if _gh_token and _gh_cfg.get("repo")
     else None

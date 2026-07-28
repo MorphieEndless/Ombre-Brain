@@ -116,11 +116,11 @@ Ombre-Brain/
 - **embedding_engine.py** — 「门面 + 后端」两层向量化：后端只有**一个 OpenAI 兼容 API 实现**（默认 Gemini 云端）；门面负责 SQLite 存取、余弦搜索、孤儿对账、模型/维度一致性校验（不一致记 OB-W005，不阻止启动）。**本地离线向量化**不是另一个后端，而是把 `base_url` 指向 OB 托管的 Ollama 边车（bge-m3，由 `web/ollama_local.py` 拉起子进程）。旧文档的「bge-small-zh / sentence-transformers 懒加载」已废弃。
 - **bm25_index.py** — BM25 稀疏检索（jieba 中文分词），给 `bucket_manager.search()` 提供 TF-IDF 加权的关键词召回（Dim 7）。`rank_bm25` / `jieba` 是软依赖，未装则静默 no-op，不影响其余维度；索引由 BucketManager 持有，写后脏标记、search 时懒重建。
 - **import_memory.py** — Claude JSON / ChatGPT / DeepSeek / Markdown / 纯文本五种格式的历史对话导入，超长单轮无损分块 + 断点续传 + 精确内容幂等去重 + 词频规律检测。导入只新建桶，不按语义合并旧桶；新桶持久化 `imported: true` 与 `source_tool: import`，创建/最后活跃时间均取导入时刻。
-- **ombrebrain/storage/backup_archive.py** — 本地备份格式：读取 Markdown、用 SQLite backup API 生成一致性快照、写 `backup_manifest.json`（逐文件 size + SHA-256）；导入前限制 ZIP 文件数/体积/压缩率并拒绝路径穿越、重复路径、损坏清单。
-- **migrate_engine.py** — 完整记忆包导入：把 `/api/export` 产生的 zip 增量 merge 进当前系统；识别 ID 冲突（skip/overwrite/keep_both），兼容新旧 embedding schema。模型不一致或快照缺向量时写入耐久 outbox，不把网络调用放在恢复事务里。旧版无清单包可兼容导入，但状态明确标记为未验证。
+- **ombrebrain/storage/backup_archive.py** — 本地备份格式：读取 Markdown 与 `_sources/src_<sha256>.source`、用 SQLite backup API 生成一致性快照、写 `backup_manifest.json`（逐文件 size + SHA-256）；导出/导入同时限制 ZIP 文件数、体积和压缩率，并校验证据路径、文件名哈希、UTF-8，拒绝路径穿越、符号链接、重复路径和损坏清单。
+- **migrate_engine.py** — 完整记忆包导入：把 `/api/export` 产生的 zip 增量 merge 进当前系统；证据在任何桶写入前完成校验并按不可变语义安装；识别 ID 冲突（skip/overwrite/keep_both），兼容新旧 embedding schema。模型不一致或快照缺向量时写入耐久 outbox，不把网络调用放在恢复事务里。旧版无清单包可兼容导入并标记未验证；旧包缺被引用证据时保留事件桶但明确警告。
 - **ombrebrain/storage/vault_health.py** — Dashboard 与 `tools/check_buckets.py` 共用的只读健康检查：Markdown 解析、重复 ID、越界软链接、SQLite `quick_check`、孤儿向量、缺失且未进入 outbox 的向量。
 - **migration_engine.py** — embedding 后端切换（local ↔ api）时后台全量重算向量：先写 `embeddings.db.migrating`、跑完原子 swap；断点续传 + 失败跳过 + 进度文件供前端轮询。
-- **github_sync.py** — 把 `buckets_dir` 下的 .md 经 GitHub Git Trees API 批量提交做云端备份（不传 embeddings.db）；支持手动 + 定时自动同步。路由在 `web/github.py`。
+- **github_sync.py** — 把 `buckets_dir` 下的 `.md` 与 `_sources/src_<sha256>.source` 经 GitHub Git Trees API 批量提交做云端备份（不传 embeddings.db）；备份前交叉检查全部 `source_refs`，并在清单标记引用闭包完整。恢复时先暂存并复核全部 blob、清单、证据文件名哈希、UTF-8、引用闭包与目标配置大小上限，再安装全部证据，最后才覆盖 Markdown，避免 tree 顺序制造悬空引用。v2.10.0 及更早的清单没有闭包标记，缺证据时兼容恢复事件桶但返回醒目警告。支持手动 + 定时自动同步，路由在 `web/github.py`。原文以明文进入仓库，运维必须使用可信私有仓库。
 - **reclassify_api.py** — 一次性脚本：把历史落在「未分类/」的桶重新 `analyze()` 打标并搬到正确 domain 目录，只改 frontmatter 与文件位置。
 - **errors.py** — OB 统一错误码（如 OB-W005 embedding 模型漂移、OB-Startup 系列），供各模块抛结构化异常。
 
@@ -324,9 +324,11 @@ feel 桶自身：
 签名：`source_read(bucket_id, expected_title, scope="event", cursor=0, max_tokens=6000)`
 
 - 精确校验桶 ID 与显式标题；任一不符即拒绝，不做语义搜索、相关桶扩散或 LLM 处理。
-- `scope="event"` 只返回该桶声明的原文行范围；`scope="full_source"` 返回共享原文全文。
-- 原文存于 `<vault>/_sources/src_<sha256>.source`，按内容寻址并在读取时校验哈希。它不是 `.md`，不参与普通桶扫描、默认 GitHub Markdown 同步或当前 Markdown 备份导出。
-- 每次只处理一个桶。过长时返回非零 `next_cursor`，必须显式续读；不静默摘要。
+- `scope="event"` 只返回该桶声明的非空原文行范围；空范围失败关闭，行号超过实际内容时整次拒绝，不允许退化为全文。`scope="full_source"` 必须显式请求并返回共享原文全文，因此可能包含其他事件对应的相邻文字。
+- 原文存于 `<vault>/_sources/src_<sha256>.source`，按内容寻址并在读取时校验哈希。它不是 `.md`，不参与普通桶扫描、浮现或语义索引；v2.10.1 起会进入本地完整备份和 GitHub 备份。
+- 每次只处理一个桶，逐源读取并只保留当前分页窗口。最终响应头与正文共同受 `max_tokens` 约束；过长时返回非零 `next_cursor`，必须显式续读，不静默摘要。
+- 原文默认受 `limits.max_grow_input_bytes`（默认 2 MiB）约束，即使配置关闭该软限制也有 10 MiB 硬上限。不支持硬链接的 NAS/SMB/FUSE 会在发布时使用跨进程 sidecar 锁，且不会覆盖已经存在的不可变证据。
+- 精确桶 ID + 标题是读取意图门禁而非认证机制。远程可达的公网或局域网部署必须使用 OAuth/Token；stdio 与经安全门禁确认的本机回环模式继续遵循既有部署边界。正文始终包在“不可信存储数据”标记中。架构边界见 [ADR-0001](adr/ADR-0001-source-evidence-layer.md)。
 
 ### 3.4 `trace` — 修改/删除
 
@@ -462,7 +464,7 @@ feel 桶自身：
 | `/api/import/results` | GET | 🔒 | 仅返回已导入桶，支持 `limit`/`offset` 分页（含正文 300 字预览） |
 | `/api/import/review` | POST | 🔒 | 批量审阅（important / pin / noise / delete） |
 | `/api/bucket/{id}/edit` | PATCH/POST | 🔒 | iter 1.6 §6：Dashboard 编辑桶元数据（name/tags/domain/importance/resolved/pinned/digested/content）；走 §5 大小+pinned 配额 |
-| `/api/export` | GET | 🔒 | 返回可验证 zip：buckets/*.md + SQLite 一致性快照 + export_meta.json + backup_manifest.json；**不包含 config / 密钥**；任何源文件读取失败则整个导出失败，不产生“看似成功”的残缺包 |
+| `/api/export` | GET | 🔒 | 返回可验证 zip：`buckets/*.md` + `sources/src_<sha256>.source` + SQLite 一致性快照 + export_meta.json + backup_manifest.json；**不包含 config / 密钥**；任何记忆或证据源文件读取失败则整个导出失败，不产生“看似成功”的残缺包 |
 | `/api/migrate/upload` | POST | 🔒 | 上传 zip 包，先做 ZIP 安全边界与清单 SHA-256 校验，再解析内容、识别 ID 冲突、检查 embedding 模型/维度；返回冲突和 `integrity_verified`，不实际写入 |
 | `/api/migrate/status` | GET | 🔒 | 查询当前迁移任务状态（phase / 冲突列表 / 导入进度 / 重新向量化进度） |
 | `/api/migrate/apply` | POST | 🔒 | 执行导入；请求必须回传本次 upload 返回的 `job_id`，并携带冲突决策 `{bucket_id: "skip"|"overwrite"|"keep_both"}`。过期/缺失 job ID 返回 409；异步执行，轮询 status 看进度 |

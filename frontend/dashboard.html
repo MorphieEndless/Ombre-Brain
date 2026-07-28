@@ -2851,7 +2851,7 @@
     <div class="config-section" id="sec-mcp" data-sgroup="advanced">
       <h3>MCP 配置 <span class="sec-en">MCP Setup</span></h3>
       <div style="font-size:12px;color:var(--text-dim);margin-bottom:16px;line-height:1.7;">
-        生成 Claude Desktop / claude.ai 的 MCP 连接配置。14 个工具全在一个端点 /mcp 上，只需连这一条。
+        生成 Claude Desktop / claude.ai 的 MCP 连接配置。15 个工具全在一个端点 /mcp 上，只需连这一条。
       </div>
       <div style="margin-bottom:16px;padding:12px 14px;border:1px solid var(--border);border-radius:11px;background:var(--surface-solid);font-size:12px;line-height:1.7;">
         不确定 OAuth、端口和持久目录怎么选？
@@ -2897,7 +2897,7 @@
             <button onclick="copyMcpUrl('main')" title="复制 / Copy" style="padding:3px 8px;font-size:11px;white-space:nowrap;background:none;border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text-dim);"><i data-lucide="copy"></i></button>
           </div>
         </div>
-        <div style="margin-top:6px;font-size:11px;color:var(--text-light);">14 个工具已合并到单一连接器 /mcp，只需连这一条。</div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text-light);">15 个工具已合并到单一连接器 /mcp，只需连这一条。</div>
         <div id="mcp-copy-msg" style="margin-top:4px;font-size:11px;color:var(--positive);min-height:16px;"></div>
       </div>
 
@@ -4884,7 +4884,7 @@ async function showDetail(id) {
         '</ul></div>';
     }
     content.innerHTML =
-      '<h2>' + esc(meta.name || id) + firstBadge + '</h2>' +
+      '<h2>' + esc(meta.title || meta.name || id) + firstBadge + '</h2>' +
       whyHtml +
       meaningHtml +
       '<div class="detail-meta">' +
@@ -6938,10 +6938,14 @@ async function runGithubImport(force) {
     });
     var d = await readJsonSafe(res);
     if (d.ok) {
+      var restoredBuckets = Number.isInteger(d.buckets_imported) ? d.buckets_imported : (d.imported || 0);
+      var restoredSources = Number.isInteger(d.sources_imported) && d.sources_imported > 0
+        ? '，安装 ' + d.sources_imported + ' 份原文证据' : '';
       var extra = (d.skipped ? '，跳过 ' + d.skipped : '') + (d.truncated ? '（⚠️ 仓库文件过多被截断，部分未导入）' : '');
-      msg.innerHTML = _SV.ok + ' 导入完成：恢复 ' + (d.imported||0) + ' 条记忆' + extra
-        + (d.pre_import_backup ? '<br><span style="color:var(--text-light)">本地备份：<code>' + esc(d.pre_import_backup) + '</code></span>' : '');
-      msg.style.color = 'var(--success, green)';
+      msg.innerHTML = _SV.ok + ' 导入完成：恢复 ' + restoredBuckets + ' 条记忆' + restoredSources + extra
+        + (d.pre_import_backup ? '<br><span style="color:var(--text-light)">本地备份：<code>' + esc(d.pre_import_backup) + '</code></span>' : '')
+        + (d.integrity_warning ? '<br><span style="color:var(--negative)">' + _SV.warn + ' ' + esc(d.integrity_warning) + '</span>' : '');
+      msg.style.color = d.integrity_warning ? 'var(--accent)' : 'var(--success, green)';
       // 导入后自动重建向量（恢复的桶 embeddings.db 里还没有）
       if (typeof startBackfill === 'function') {
         msg.innerHTML += '<br>正在为恢复的记忆重建向量索引…';
@@ -8761,6 +8765,9 @@ function renderMigrateParsed(d) {
   let infoHtml = d.integrity_verified
     ? `<span style="color:var(--positive)">${_SV.ok} 备份清单与 SHA-256 校验通过。</span> `
     : `<span style="color:var(--negative)">${_SV.warn} ${esc(d.integrity_warning || '旧版备份没有完整性清单，无法确认是否齐全。')}</span> `;
+  if (d.integrity_verified && d.integrity_warning) {
+    infoHtml += `<span style="color:var(--negative)">${_SV.warn} ${esc(d.integrity_warning)}</span> `;
+  }
   infoHtml += `解析到 <strong>${Number(d.total_buckets || 0)}</strong> 个 bucket。`;
   if (hasEmb) {
     if (embMatch) {
@@ -8918,6 +8925,8 @@ async function loadDuplicates() {
 // ========================================
 function renderEditForm(bid, meta) {
   const curContent = esc(meta._content_for_edit || '');
+  const fallbackTitle = String(meta.name || '').replace(/^\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\s*/, '');
+  const editTitle = String(meta.title || fallbackTitle || '');
   const safeImportance = Math.round(safeNumber(meta.importance, 5, 1, 10));
   const editableTypes = ['dynamic','permanent','feel','plan','letter'];
   const currentType = String(meta.type || 'dynamic');
@@ -8932,7 +8941,9 @@ function renderEditForm(bid, meta) {
     <details id="bucket-edit-form" style="margin-top:14px;border:1px solid var(--border);border-radius:2px;padding:12px 14px;background:var(--surface-solid);">
       <summary style="cursor:pointer;font-weight:600;color:var(--accent);display:flex;align-items:center;gap:5px;"><svg class="icon" aria-hidden="true"><use href="#i-edit"></use></svg> 编辑这条记忆</summary>
       <div style="display:grid;grid-template-columns:90px 1fr;gap:10px 12px;align-items:center;margin-top:14px;font-size:13px;">
-        <label>名称</label>
+        <label>标题</label>
+        <input id="edit-title" type="text" maxlength="120" value="${escAttr(editTitle)}" data-dirty="0" oninput="this.dataset.dirty='1'" placeholder="原文核对使用的精确标题" />
+        <label>显示名称</label>
         <input id="edit-name" type="text" value="${escAttr(meta.name || '')}" />
         <label>类型</label>
         <select id="edit-type" style="width:160px;" onchange="syncEditPinConstraints('type')" ${typeIsEditable ? '' : 'disabled title="特殊类型由对应工具维护，编辑其他字段时会保持原类型"'}>
@@ -9012,6 +9023,7 @@ async function bucketSaveEdit(bid) {
   // iter 1.8: 新增 why_remembered / dont_surface / weight，plan 才会有 weight
   const weightEl = document.getElementById('edit-weight');
   const typeEl = document.getElementById('edit-type');
+  const titleEl = document.getElementById('edit-title');
   const body = {
     name: document.getElementById('edit-name').value,
     tags: document.getElementById('edit-tags').value,
@@ -9023,6 +9035,9 @@ async function bucketSaveEdit(bid) {
     dont_surface: document.getElementById('edit-dont-surface').checked,
     why_remembered: document.getElementById('edit-why').value,
   };
+  // 历史桶可能没有显式 title；表单展示的是 name fallback。只有用户
+  // 真正动过标题输入框才提交，避免保存其他字段时意外固化或因空标题 400。
+  if (titleEl && titleEl.dataset.dirty === '1') body.title = titleEl.value;
   // i/self、archived 及未来特殊类型由专用生命周期维护；不要把浏览器
   // select 的默认首项 dynamic 写回。普通类型仍允许沿用现有编辑入口。
   if (typeEl && !typeEl.disabled) body.type = typeEl.value;

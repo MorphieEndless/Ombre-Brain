@@ -1,8 +1,8 @@
 """不可变原文证据存储。
 
 原文按 UTF-8 内容哈希写入 ``<vault>/_sources/src_<sha256>.source``。
-文件不参与普通 Markdown 扫描、浮现或 GitHub 同步；只有 source_read 在
-精确匹配桶 ID 与标题后才会读取。
+文件不参与普通 Markdown 扫描、浮现或语义索引；从 2.10.1 起会随完整
+本地/GitHub 备份迁移。只有 source_read 在精确匹配桶 ID 与标题后才会读取。
 """
 
 from __future__ import annotations
@@ -11,13 +11,62 @@ import hashlib
 import os
 import re
 import tempfile
+import threading
+import weakref
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
+
+import frontmatter
 
 
 SOURCE_REF_RE = re.compile(r"^src_[0-9a-f]{64}$")
 MAX_SOURCE_REFS = 32
 MAX_SOURCE_RANGES = 128
+HARD_MAX_SOURCE_BYTES = 10 * 1024 * 1024
+
+
+_PATH_LOCKS: weakref.WeakValueDictionary[str, threading.RLock] = (
+    weakref.WeakValueDictionary()
+)
+_PATH_LOCKS_GUARD = threading.Lock()
+
+
+def _path_lock(path: Path) -> threading.RLock:
+    key = str(path.resolve(strict=False))
+    with _PATH_LOCKS_GUARD:
+        return _PATH_LOCKS.setdefault(key, threading.RLock())
+
+
+@contextmanager
+def _exclusive_publish_lock(path: Path) -> Iterator[None]:
+    """Serialize the rare no-hardlink publish path across processes."""
+
+    lock_path = path.with_name(f".{path.name}.lock")
+    with _path_lock(path):
+        with lock_path.open("a+b") as handle:
+            if os.name == "nt":  # pragma: no branch - platform-specific
+                import msvcrt
+
+                handle.seek(0, os.SEEK_END)
+                if handle.tell() == 0:
+                    handle.write(b"\0")
+                    handle.flush()
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                try:
+                    yield
+                finally:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:  # pragma: no cover - exercised in Linux CI/Docker
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def normalize_source_ranges(value: Any) -> list[list[int]]:
@@ -32,10 +81,9 @@ def normalize_source_ranges(value: Any) -> list[list[int]]:
     for item in value:
         if not isinstance(item, (list, tuple)) or len(item) != 2:
             raise ValueError("source_ranges 每项必须包含起始行和结束行")
-        try:
-            start, end = int(item[0]), int(item[1])
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise ValueError("source_ranges 行号必须是整数") from exc
+        if any(isinstance(value, bool) or not isinstance(value, int) for value in item):
+            raise ValueError("source_ranges 行号必须是整数")
+        start, end = item
         if start < 1 or end < start:
             raise ValueError("source_ranges 必须使用 1-based 闭区间，且结束行不小于起始行")
         ranges.append((start, end))
@@ -74,6 +122,30 @@ def normalize_source_refs(value: Any) -> list[dict[str, Any]]:
     return normalized
 
 
+def referenced_source_ids_from_markdown(content: bytes | str) -> set[str]:
+    """Return validated source IDs declared by one bucket Markdown document."""
+
+    if isinstance(content, bytes) and b"source_refs" not in content:
+        return set()
+    if not isinstance(content, bytes) and "source_refs" not in str(content):
+        return set()
+    try:
+        text = content.decode("utf-8") if isinstance(content, bytes) else str(content)
+    except UnicodeDecodeError as exc:
+        raise ValueError("包含 source_refs 的桶不是 UTF-8") from exc
+    # Preserve legacy export compatibility for unrelated malformed Markdown;
+    # only documents that claim evidence references need this stricter parse.
+    try:
+        post = frontmatter.loads(text)
+    except Exception as exc:
+        raise ValueError("无法解析包含 source_refs 的桶 frontmatter") from exc
+    try:
+        refs = normalize_source_refs((post.metadata or {}).get("source_refs") or [])
+    except ValueError as exc:
+        raise ValueError(f"桶包含非法 source_refs：{exc}") from exc
+    return {item["ref"] for item in refs}
+
+
 class SourceStore:
     """内容寻址的只增不改原文层。"""
 
@@ -81,20 +153,39 @@ class SourceStore:
         self.root = Path(vault_dir).resolve() / "_sources"
         self.max_bytes = max(0, int(max_bytes))
 
+    @property
+    def effective_max_bytes(self) -> int:
+        configured = self.max_bytes or HARD_MAX_SOURCE_BYTES
+        return min(configured, HARD_MAX_SOURCE_BYTES)
+
+    @staticmethod
+    def _read_bounded(path: Path, limit: int) -> bytes:
+        if path.is_symlink():
+            raise OSError("原文证据文件不允许为符号链接")
+        declared_size = path.stat().st_size
+        if declared_size > limit:
+            raise OSError("原文证据文件超过配置的读取上限")
+        with path.open("rb") as handle:
+            raw = handle.read(limit + 1)
+        if len(raw) > limit or len(raw) != declared_size:
+            raise OSError("原文证据文件在读取期间发生变化")
+        return raw
+
     def put(self, content: str) -> str:
         raw = str(content).encode("utf-8")
         if not raw:
             raise ValueError("原文为空")
-        if self.max_bytes and len(raw) > self.max_bytes:
+        limit = self.effective_max_bytes
+        if len(raw) > limit:
             raise ValueError(
-                f"原文过大（{len(raw) / 1024:.1f} KB > 上限 {self.max_bytes / 1024:.0f} KB）"
+                f"原文过大（{len(raw) / 1024:.1f} KB > 上限 {limit / 1024:.0f} KB）"
             )
         digest = hashlib.sha256(raw).hexdigest()
         ref = f"src_{digest}"
         self.root.mkdir(parents=True, exist_ok=True)
         target = self.root / f"{ref}.source"
         if target.exists():
-            if target.read_bytes() != raw:
+            if self._read_bounded(target, limit) != raw:
                 raise OSError("原文哈希冲突或现有证据文件已损坏")
             return ref
 
@@ -107,8 +198,18 @@ class SourceStore:
             try:
                 os.link(temp_name, target)
             except FileExistsError:
-                if target.read_bytes() != raw:
+                if self._read_bounded(target, limit) != raw:
                     raise OSError("原文哈希冲突或并发写入结果不一致")
+            except OSError:
+                # Some NAS/SMB/FUSE volumes do not implement hard links.  The
+                # sidecar lease keeps ``os.replace`` from overwriting a
+                # concurrently published immutable source.
+                with _exclusive_publish_lock(target):
+                    if target.exists():
+                        if self._read_bounded(target, limit) != raw:
+                            raise OSError("原文哈希冲突或现有证据文件已损坏")
+                    else:
+                        os.replace(temp_name, target)
         finally:
             try:
                 os.unlink(temp_name)
@@ -121,7 +222,7 @@ class SourceStore:
         if not SOURCE_REF_RE.fullmatch(ref):
             raise ValueError("非法 source_ref")
         target = self.root / f"{ref}.source"
-        raw = target.read_bytes()
+        raw = self._read_bounded(target, self.effective_max_bytes)
         expected = ref.removeprefix("src_")
         if hashlib.sha256(raw).hexdigest() != expected:
             raise OSError("原文证据完整性校验失败")
@@ -135,7 +236,7 @@ class SourceStore:
         lines = content.splitlines(keepends=True)
         selected: list[str] = []
         for start, end in normalized:
-            if start > len(lines):
-                continue
-            selected.extend(lines[start - 1 : min(end, len(lines))])
+            if end > len(lines):
+                raise ValueError("原文证据行范围超出实际内容")
+            selected.extend(lines[start - 1 : end])
         return "".join(selected)

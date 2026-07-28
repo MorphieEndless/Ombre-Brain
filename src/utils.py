@@ -34,6 +34,7 @@ import logging
 import math
 import tempfile
 import threading
+import unicodedata
 from pathlib import Path
 from datetime import date, datetime
 from typing import Callable, Optional
@@ -59,6 +60,7 @@ _LOG_FALLBACK_DIR = os.path.join(tempfile.gettempdir(), "ombre_logs")
 
 # sanitize_name() 桶名最大长度（防止文件名过长导致 OS 报错）。
 _BUCKET_NAME_MAX_LEN = 80
+MEMORY_TITLE_MAX_CHARS = 120
 
 _BOOL_TRUE = frozenset({"1", "true", "yes", "on"})
 _BOOL_FALSE = frozenset({"0", "false", "no", "off"})
@@ -963,6 +965,17 @@ def sanitize_name(name: str) -> str:
     cleaned = re.sub(r"[^\w\s\u4e00-\u9fff-]", "", name, flags=re.UNICODE)
     cleaned = cleaned.strip()[:_BUCKET_NAME_MAX_LEN]
     return cleaned if cleaned else "unnamed"
+
+
+def normalize_memory_title(value: object) -> str:
+    """统一显式记忆标题：NFC、单行、不静默截断。"""
+
+    title = " ".join(unicodedata.normalize("NFC", str(value or "")).split())
+    if len(title) > MEMORY_TITLE_MAX_CHARS:
+        raise ValueError(
+            f"title 超过 {MEMORY_TITLE_MAX_CHARS} 字符上限"
+        )
+    return title
 
 
 def safe_path(base_dir: str, filename: str) -> Path:

@@ -37,7 +37,7 @@ import math
 import threading
 
 from bucket_manager import _filesystem_turn as _kernel_filesystem_turn
-from utils import parse_bool
+from utils import normalize_memory_title, parse_bool
 from ombrebrain.domain.plan_history import append_plan_change_log as append_plan_change_log
 
 from . import _runtime as rt
@@ -62,6 +62,10 @@ _DEFAULT_MAX_GROW_INPUT_BYTES = 2 * 1024 * 1024
 _DEFAULT_MAX_QUERY_BYTES = 16 * 1024
 _DEFAULT_MAX_METADATA_BYTES = 16 * 1024
 _DEFAULT_MAX_GROW_ITEMS = 100
+_GROW_ITEM_FIELDS = frozenset({
+    "content", "title", "name", "tags", "importance", "domain",
+    "valence", "arousal", "source_ranges",
+})
 
 # --- importance≥9 配额（rule.md §1.0 哲学） ---
 _HIGH_IMP_THRESHOLD = 9                # importance 达到该值算“高重要度”
@@ -347,22 +351,69 @@ def check_grow_items_payload(items: list) -> str | None:
     if item_cap > 0 and len(items) > item_cap:
         return f"grow items 过多（{len(items)} > 上限 {item_cap}）。请分批调用，或调整 config.limits.max_grow_items。"
 
+    from ombrebrain.storage.source_store import normalize_source_ranges
+
     byte_cap = max_grow_input_bytes()
-    if byte_cap <= 0:
-        return None
     total = 0
-    for item in items:
+    for index, item in enumerate(items, start=1):
         if isinstance(item, str):
             value = item
         elif isinstance(item, dict):
-            value = item.get("content", "")
+            unknown = sorted(str(key) for key in item if key not in _GROW_ITEM_FIELDS)
+            if unknown:
+                return f"grow items 第 {index} 项包含未支持字段: {', '.join(unknown)}"
+            value = item.get("content")
+            if not isinstance(value, str):
+                return f"grow items 第 {index} 项 content 必须是字符串。"
+            for field in ("title", "name"):
+                raw_text = item.get(field)
+                if raw_text is not None and not isinstance(raw_text, str):
+                    return f"grow items 第 {index} 项 {field} 必须是字符串。"
+            try:
+                normalize_memory_title(item.get("title"))
+            except ValueError as exc:
+                return f"grow items 第 {index} 项 {exc}"
+            for field in ("tags", "domain"):
+                raw_list = item.get(field)
+                if raw_list is not None and not (
+                    isinstance(raw_list, str)
+                    or (
+                        isinstance(raw_list, list)
+                        and all(isinstance(part, str) for part in raw_list)
+                    )
+                ):
+                    return f"grow items 第 {index} 项 {field} 必须是字符串或字符串列表。"
+            if item.get("importance") is not None:
+                importance = item["importance"]
+                if isinstance(importance, bool) or not isinstance(importance, int):
+                    return f"grow items 第 {index} 项 importance 必须是 1-10 的整数。"
+                if not 1 <= importance <= 10:
+                    return f"grow items 第 {index} 项 importance 必须是 1-10 的整数。"
+            for field in ("valence", "arousal"):
+                raw_number = item.get(field)
+                if raw_number is None:
+                    continue
+                if isinstance(raw_number, bool):
+                    return f"grow items 第 {index} 项 {field} 必须是 0-1 的数字。"
+                try:
+                    number = float(raw_number)
+                except (TypeError, ValueError, OverflowError):
+                    return f"grow items 第 {index} 项 {field} 必须是 0-1 的数字。"
+                if not math.isfinite(number) or not 0 <= number <= 1:
+                    return f"grow items 第 {index} 项 {field} 必须是 0-1 的数字。"
+            try:
+                normalize_source_ranges(item.get("source_ranges"))
+            except ValueError as exc:
+                return f"grow items 第 {index} 项 {exc}"
         else:
-            continue
+            return f"grow items 第 {index} 项必须是字符串或对象。"
+        if not value.strip():
+            return f"grow items 第 {index} 项 content 不能为空，未创建任何桶。"
         try:
-            total += len(str(value or "").encode("utf-8"))
+            total += len(value.encode("utf-8"))
         except Exception:
             return "grow items 包含无法安全序列化的 content。"
-        if total > byte_cap:
+        if byte_cap > 0 and total > byte_cap:
             return f"grow items 正文总量过大（{total / 1024:.1f} KB > 上限 {byte_cap / 1024:.0f} KB）。请分批调用。"
     return None
 
@@ -838,10 +889,10 @@ async def _merge_or_create_inner(
                     )
                     update_kwargs = {
                         "content": merged,
-                        "tags": list(set((metadata.get("tags") or []) + tags)),
+                        "tags": list(dict.fromkeys(tags + (metadata.get("tags") or []))),
                         "importance": merged_importance,
                         "domain": list(
-                            set((metadata.get("domain") or []) + domain)
+                            dict.fromkeys(domain + (metadata.get("domain") or []))
                         ),
                         "valence": merged_valence,
                         "arousal": merged_arousal,

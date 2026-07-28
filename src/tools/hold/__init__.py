@@ -23,7 +23,7 @@ core（普通存入 + 自动合并）。
 
 from typing import Optional
 
-from utils import parse_bool
+from utils import normalize_memory_title, parse_bool
 
 from .. import _runtime as rt
 from .._common import (
@@ -52,7 +52,10 @@ async def dispatch(
     test_data: Optional[bool] = False,
 ) -> str:
     content = "" if content is None else str(content)
-    title = "" if title is None else str(title).strip()
+    try:
+        title = normalize_memory_title(title)
+    except ValueError as exc:
+        return str(exc)
     if tags is None:
         tags = ""
     if importance is None:

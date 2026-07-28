@@ -178,6 +178,16 @@ def test_dashboard_detail_does_not_render_an_editor_for_failed_bucket_fetch():
     assert source.index("if (!res.ok)") < source.index("renderEditForm(")
 
 
+def test_github_restore_surfaces_legacy_source_evidence_warning():
+    source = _dashboard_function("runGithubImport", "_runBackfillSilent")
+
+    assert "d.integrity_warning" in source
+    assert "esc(d.integrity_warning)" in source
+    assert "var(--negative)" in source
+    assert "d.buckets_imported" in source
+    assert "d.sources_imported" in source
+
+
 def test_status_banner_tracks_responsive_sticky_header_height():
     html = DASHBOARD.read_text(encoding="utf-8")
     source = _dashboard_function(
@@ -213,8 +223,16 @@ def test_editor_preserves_special_and_future_bucket_types():
 
 
 def test_editor_submits_metadata_using_storage_field_names():
+    render_source = _dashboard_function("renderEditForm", "syncEditPinConstraints")
     source = _dashboard_function("bucketSaveEdit", "maybeShowOnboarding")
 
+    assert 'id="edit-title"' in render_source
+    assert 'maxlength="120"' in render_source
+    assert "meta.title || fallbackTitle" in render_source
+    assert "data-dirty=\"0\"" in render_source
+    assert "oninput=\"this.dataset.dirty='1'\"" in render_source
+    assert "title: document.getElementById('edit-title').value" not in source
+    assert "if (titleEl && titleEl.dataset.dirty === '1') body.title" in source
     assert "dont_surface: document.getElementById('edit-dont-surface').checked" in source
     assert "why_remembered: document.getElementById('edit-why').value" in source
     assert "if (weightEl) body.weight = parseFloat(weightEl.value) / 100" in source

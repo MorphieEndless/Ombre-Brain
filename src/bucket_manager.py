@@ -315,6 +315,7 @@ from utils import (
     sanitize_name,
     safe_path,
     now_iso,
+    normalize_memory_title,
     parse_bool,
     parse_iso_datetime,
 )
@@ -1425,7 +1426,7 @@ class BucketManager:
         self._validate_bucket_content(content)
         if name:
             name = self._sanitize_text(name)
-        title = self._sanitize_text(title).strip()
+        title = normalize_memory_title(self._sanitize_text(title))
         if source_refs:
             from ombrebrain.storage.source_store import normalize_source_refs
 
@@ -1487,7 +1488,7 @@ class BucketManager:
             "activation_count": 0,
         }
         if title:
-            metadata["title"] = title[:_METADATA_TEXT_LIMITS["title"]]
+            metadata["title"] = title
         if source_refs:
             metadata["source_refs"] = source_refs
         if imported:
@@ -2212,9 +2213,9 @@ class BucketManager:
             # Miss: meaning_append 是追加一条新 meaning（trace 的 meaning_append / hold 每次调用）。
             kwargs["meaning_append"] = self._normalize_meaning_item(kwargs["meaning_append"])
         if "title" in kwargs:
-            kwargs["title"] = self._sanitize_text(kwargs["title"]).strip()[
-                :_METADATA_TEXT_LIMITS["title"]
-            ]
+            kwargs["title"] = normalize_memory_title(
+                self._sanitize_text(kwargs["title"])
+            )
         if "source_refs_append" in kwargs:
             from ombrebrain.storage.source_store import normalize_source_refs
 
@@ -2371,7 +2372,7 @@ class BucketManager:
         # iter 1.7 §G3 在这里加入了 "change_log"——plan 桶的状态/编辑历史 list[dict]，
         # 由 server.py 的 plan() / trace() / /api/plans/{id}/action 维护，bucket_manager 不参与生成。
         for k in ("status", "type", "resolution_reason", "resolved_by",
-                  "related_bucket", "author", "user_name", "title", "letter_date",
+                  "related_bucket", "author", "user_name", "letter_date",
                   "change_log",
                   # iter 1.8 新增字段。除 weight 外全部透传不转换。
                   # weight 在 plan 上才有意义；这里不在这个循环里校验类型，由上层 server.py 保证传入范围。

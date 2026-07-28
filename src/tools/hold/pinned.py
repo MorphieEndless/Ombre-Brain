@@ -22,6 +22,8 @@ permanent 目录，不衰减、不会被合并掉。
 ========================================
 """
 
+from utils import normalize_memory_title
+
 from .. import _runtime as rt
 from .._common import check_pinned_quota, _quota_turn
 
@@ -53,8 +55,10 @@ async def store_pinned(
     final_valence = valence if 0 <= valence <= 1 else (float(_v) if _v is not None else 0.5)
     final_arousal = arousal if 0 <= arousal <= 1 else (float(_a) if _a is not None else 0.3)
     _raw_tags = analysis.get("tags") or []
-    all_tags = list(dict.fromkeys((_raw_tags if isinstance(_raw_tags, list) else []) + extra_tags))
+    model_tags = _raw_tags if isinstance(_raw_tags, list) else []
+    all_tags = list(dict.fromkeys(extra_tags if extra_tags else model_tags))
     suggested_name = analysis.get("suggested_name", "")
+    final_title = title or normalize_memory_title(suggested_name)
 
     # 配额判定 + 落盘必须在同一把锁里：两个并发 hold(pinned=True) 都可能在
     # 对方提交前读到同一个「未满」快照，检查和创建隔着一次 await 就会互相看不见。
@@ -71,7 +75,7 @@ async def store_pinned(
             valence=final_valence,
             arousal=final_arousal,
             name=suggested_name or None,
-            title=title,
+            title=final_title,
             bucket_type="permanent",
             pinned=True,
             why_remembered=why_remembered,

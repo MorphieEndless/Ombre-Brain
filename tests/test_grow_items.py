@@ -142,6 +142,80 @@ async def test_dict_items_preserve_explicit_metadata_and_title(grow_rt):
 
 
 @pytest.mark.asyncio
+async def test_missing_title_and_importance_are_filled_by_analysis(grow_rt):
+    bucket_mgr, _stub = grow_rt
+
+    class MetadataDehydrator(StubDehydrator):
+        async def analyze(self, content):
+            self.analyze_calls += 1
+            return {
+                "domain": ["工作"],
+                "valence": 0.6,
+                "arousal": 0.4,
+                "tags": ["模型补全"],
+                "suggested_name": "模型补齐标题",
+                "importance": 7,
+            }
+
+    dehydrator = MetadataDehydrator()
+    rt.dehydrator = dehydrator
+    await grow_items([{"content": "只给正文，其他元数据由整理者补齐。"}])
+
+    bucket = (await bucket_mgr.list_all(include_archive=False))[0]
+    assert bucket["metadata"]["title"] == "模型补齐标题"
+    assert bucket["metadata"]["importance"] == 7
+    assert bucket["metadata"]["tags"] == ["模型补全"]
+    assert dehydrator.analyze_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_explicit_empty_tags_are_not_refilled_by_model(grow_rt):
+    bucket_mgr, _stub = grow_rt
+    await grow_items([{
+        "content": "人工明确决定不设标签。",
+        "title": "空标签决定",
+        "tags": [],
+    }])
+
+    bucket = (await bucket_mgr.list_all(include_archive=False))[0]
+    assert bucket["metadata"]["tags"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "item, expected",
+    [
+        ({"content": "字段拼错", "titel": "x"}, "未支持字段"),
+        ({"content": 123}, "content 必须是字符串"),
+        ({"content": "越界重要度", "importance": 11}, "importance"),
+        ({"content": "过长标题", "title": "长" * 121}, "120"),
+    ],
+)
+async def test_invalid_structured_item_is_rejected_before_any_write(
+    grow_rt, item, expected
+):
+    bucket_mgr, stub = grow_rt
+    out = await grow_items([item], source_content="这份原文也不应先落盘")
+
+    assert expected in out
+    assert stub.analyze_calls == 0
+    assert await bucket_mgr.list_all(include_archive=False) == []
+    assert not list((Path(bucket_mgr.base_dir) / "_sources").glob("*.source"))
+
+
+@pytest.mark.asyncio
+async def test_source_ranges_without_source_content_are_rejected(grow_rt):
+    bucket_mgr, stub = grow_rt
+    out = await grow_items([
+        {"content": "事件", "title": "标题", "source_ranges": [[1, 1]]}
+    ])
+
+    assert "source_ranges 需要同时提供 content" in out
+    assert stub.analyze_calls == 0
+    assert await bucket_mgr.list_all(include_archive=False) == []
+
+
+@pytest.mark.asyncio
 async def test_invalid_source_range_rejects_batch_before_any_write(grow_rt):
     bucket_mgr, _stub = grow_rt
     out = await grow_items(

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import unicodedata
+from typing import Any
 
-from utils import count_tokens_approx
+from ombrebrain.storage.source_store import normalize_source_refs
+from utils import count_tokens_approx, normalize_memory_title
 
 from .. import _runtime as rt
 from .._common import stored_data_marker
@@ -12,10 +15,108 @@ from .._common import stored_data_marker
 
 _DEFAULT_MAX_TOKENS = 6000
 _MAX_MAX_TOKENS = 20000
+# count_tokens_approx 至少为每个字符计 0.05 token。捕获每 token 20
+# 个字符已足以选出能放入预算的最长前缀，同时把常驻分页缓冲限制在
+# 公开最大预算下约 400 KiB。
+_MAX_CHARS_PER_TOKEN = 20
 
 
 def _normalized_title(value: object) -> str:
-    return unicodedata.normalize("NFC", str(value or "")).strip()
+    try:
+        return normalize_memory_title(value)
+    except ValueError:
+        # 兼容可能早于标题上限而存在的历史桶。
+        return " ".join(unicodedata.normalize("NFC", str(value or "")).split())
+
+
+def _single_line_header_value(value: object) -> str:
+    """防止历史数据中的控制字符伪造响应头。"""
+
+    output: list[str] = []
+    for char in _normalized_title(value):
+        if char == "\\":
+            output.append("\\\\")
+        elif unicodedata.category(char).startswith("C"):
+            output.append(f"\\u{ord(char):04x}")
+        else:
+            output.append(char)
+    return "".join(output)
+
+
+def _collect_evidence_window(
+    source_store: Any,
+    source_refs: list[dict[str, Any]],
+    *,
+    scope: str,
+    cursor: int,
+    capture_limit: int,
+) -> tuple[str, int]:
+    """每次只读一个源，并且只保留当前分页需要的窗口。"""
+
+    page_start = cursor
+    page_end = cursor + capture_limit
+    page_parts: list[str] = []
+    total_chars = 0
+    emitted_chunks = 0
+    seen_full_sources: set[str] = set()
+
+    def append_segment(segment: str) -> None:
+        nonlocal total_chars
+        segment_start = total_chars
+        total_chars += len(segment)
+        overlap_start = max(page_start, segment_start)
+        overlap_end = min(page_end, total_chars)
+        if overlap_start < overlap_end:
+            page_parts.append(
+                segment[overlap_start - segment_start : overlap_end - segment_start]
+            )
+
+    for source_ref in source_refs:
+        ref = source_ref["ref"]
+        if scope == "full_source":
+            if ref in seen_full_sources:
+                continue
+            seen_full_sources.add(ref)
+        elif not source_ref["ranges"]:
+            # 空范围表示“未声明事件摘录”，绝不表示“全文”。
+            continue
+
+        content = source_store.read(ref)
+        if scope == "event":
+            content = source_store.select_ranges(content, source_ref["ranges"])
+        if emitted_chunks:
+            append_segment("\n\n")
+        append_segment(content)
+        emitted_chunks += 1
+
+    return "".join(page_parts), total_chars
+
+
+def _render_page(
+    *,
+    bucket_id: str,
+    title: str,
+    scope: str,
+    cursor: int,
+    body: str,
+    total_chars: int,
+) -> str:
+    end = cursor + len(body)
+    next_cursor = end if end < total_chars else 0
+    header = (
+        f"bucket_id={_single_line_header_value(bucket_id)}\n"
+        f"title={_single_line_header_value(title)}\n"
+        f"scope={scope}\n"
+        f"cursor={cursor}\n"
+        f"next_cursor={next_cursor}\n"
+        f"total_chars={total_chars}\n"
+    )
+    return (
+        header
+        + stored_data_marker(body, provenance=f"source:{bucket_id}")
+        + "\n"
+        + body
+    )
 
 
 async def dispatch(
@@ -49,51 +150,57 @@ async def dispatch(
     if expected_title != actual_title:
         return "标题不匹配，拒绝读取原文。请使用该桶的精确 title。"
 
-    source_refs = metadata.get("source_refs") or []
+    try:
+        source_refs = normalize_source_refs(metadata.get("source_refs") or [])
+    except ValueError:
+        return "该桶的原文证据引用格式无效，拒绝读取。"
     if not source_refs:
         return "该桶没有原文证据引用。"
+    if scope == "event" and not any(item["ranges"] for item in source_refs):
+        return (
+            "该桶未声明事件原文范围，拒绝将整份原文作为事件返回。"
+            "如确需整份原文，请显式使用 scope=full_source。"
+        )
 
-    chunks: list[str] = []
     try:
-        for source_ref in source_refs:
-            ref = str(source_ref.get("ref") or "")
-            content = rt.source_store.read(ref)
-            if scope == "event":
-                content = rt.source_store.select_ranges(
-                    content, source_ref.get("ranges") or []
-                )
-            chunks.append(content)
+        evidence_window, total_chars = await asyncio.to_thread(
+            _collect_evidence_window,
+            rt.source_store,
+            source_refs,
+            scope=scope,
+            cursor=cursor,
+            capture_limit=max_tokens * _MAX_CHARS_PER_TOKEN,
+        )
     except (OSError, UnicodeError, ValueError):
         return "原文证据读取或完整性校验失败。"
-    evidence = "\n\n".join(chunks)
-    if cursor >= len(evidence):
-        return f"原文已读完（cursor={cursor}，总字符={len(evidence)}）。"
+    if cursor >= total_chars:
+        return f"原文已读完（cursor={cursor}，总字符 {total_chars}）。"
 
-    prefix = (
-        f"bucket_id={bucket_id}\ntitle={actual_title}\nscope={scope}\n"
-        f"cursor={cursor}\n"
-    )
-    low, high = 1, len(evidence) - cursor
-    chosen = 1
+    low, high = 0, len(evidence_window)
+    chosen = 0
     while low <= high:
         mid = (low + high) // 2
-        body = evidence[cursor : cursor + mid]
-        candidate = prefix + stored_data_marker(
-            body, provenance=f"source:{bucket_id}"
-        ) + "\n" + body
+        candidate = _render_page(
+            bucket_id=bucket_id,
+            title=actual_title,
+            scope=scope,
+            cursor=cursor,
+            body=evidence_window[:mid],
+            total_chars=total_chars,
+        )
         if count_tokens_approx(candidate) <= max_tokens:
             chosen = mid
             low = mid + 1
         else:
             high = mid - 1
 
-    end = cursor + chosen
-    next_cursor = end if end < len(evidence) else 0
-    header = prefix + f"next_cursor={next_cursor}\ntotal_chars={len(evidence)}\n"
-    body = evidence[cursor:end]
-    return (
-        header
-        + stored_data_marker(body, provenance=f"source:{bucket_id}")
-        + "\n"
-        + body
+    if chosen == 0:
+        return "max_tokens 不足以容纳原文分页头，请提高后重试。"
+    return _render_page(
+        bucket_id=bucket_id,
+        title=actual_title,
+        scope=scope,
+        cursor=cursor,
+        body=evidence_window[:chosen],
+        total_chars=total_chars,
     )

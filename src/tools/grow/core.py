@@ -27,6 +27,8 @@ tools/grow/core.py — grow 长内容主路径（digest + merge）
 import asyncio
 import uuid
 
+from utils import normalize_memory_title
+
 try:
     from errors import PublicToolError
 except ImportError:  # pragma: no cover - 包内导入兜底
@@ -86,6 +88,7 @@ async def grow_core(content: str) -> str:
                 valence=item.get("valence") or 0.5,
                 arousal=item.get("arousal") or 0.3,
                 name=item.get("name", ""),
+                title=normalize_memory_title(item.get("name", "")),
                 source_tool="grow",
                 grow_batch_id=batch_id,
             )
@@ -133,7 +136,7 @@ async def grow_items(items: list, source_content: str = "") -> str:
             s = it.strip()
             item = {"content": s}
         elif isinstance(it, dict):
-            s = str(it.get("content", "")).strip()
+            s = it.get("content", "").strip()
             item = dict(it)
             item["content"] = s
         else:
@@ -142,6 +145,10 @@ async def grow_items(items: list, source_content: str = "") -> str:
             clean.append(item)
     if not clean:
         return "items 为空或都不合法，未创建任何桶。"
+    if not source_content.strip() and any(
+        item.get("source_ranges") not in (None, [], "") for item in clean
+    ):
+        return "source_ranges 需要同时提供 content 作为原文，未创建任何桶。"
 
     source_ref = ""
     if source_content and source_content.strip():
@@ -180,6 +187,7 @@ async def grow_items(items: list, source_content: str = "") -> str:
                 or item.get("domain") is None
                 or item.get("valence") is None
                 or item.get("arousal") is None
+                or item.get("importance") is None
             )
             default_analysis = getattr(rt.dehydrator, "_default_analysis", None)
             meta = default_analysis() if callable(default_analysis) else {
@@ -199,7 +207,7 @@ async def grow_items(items: list, source_content: str = "") -> str:
                         "grow items 打标失败，使用本地默认元数据并原样保存正文: "
                         f"{type(e).__name__}: {e}"
                     )
-            explicit_title = str(item.get("title") or "").strip()
+            explicit_title = normalize_memory_title(item.get("title"))
             explicit_tags = item.get("tags")
             if isinstance(explicit_tags, str):
                 explicit_tags = [t.strip() for t in explicit_tags.split(",") if t.strip()]
@@ -211,7 +219,11 @@ async def grow_items(items: list, source_content: str = "") -> str:
             if not isinstance(explicit_domain, list):
                 explicit_domain = None
             try:
-                importance = max(1, min(10, int(item.get("importance", 5))))
+                importance = int(
+                    item["importance"]
+                    if item.get("importance") is not None
+                    else meta.get("importance", 5)
+                )
             except (TypeError, ValueError, OverflowError):
                 importance = 5
             try:
@@ -228,6 +240,8 @@ async def grow_items(items: list, source_content: str = "") -> str:
                 ranges = item.get("_source_ranges") or []
                 source_refs = [{"ref": source_ref, "ranges": ranges}]
 
+            inferred_title = normalize_memory_title(meta.get("suggested_name", ""))
+            final_title = explicit_title or inferred_title
             result_name, is_merged, embed_warn = await merge_or_create(
                 content=content_str,
                 tags=explicit_tags if explicit_tags is not None else (meta.get("tags") or []),
@@ -235,8 +249,8 @@ async def grow_items(items: list, source_content: str = "") -> str:
                 domain=explicit_domain if explicit_domain is not None else (meta.get("domain") or ["未分类"]),
                 valence=valence,
                 arousal=arousal,
-                name=meta.get("suggested_name", ""),
-                title=explicit_title,
+                name=final_title,
+                title=final_title,
                 source_refs=source_refs,
                 source_tool="grow",
                 grow_batch_id=batch_id,
@@ -261,4 +275,6 @@ async def grow_items(items: list, source_content: str = "") -> str:
         summary += f"\n⚠️ {embed_warnings[0]}"
     if metadata_fallback:
         summary += "\n⚠️ 打标 API 暂不可用：正文已逐字保存，未做任何压缩；元数据暂用本地中性值。"
+        if any(not (item.get("title") or "").strip() for item in clean):
+            summary += " 无标题的桶需先在 Dashboard 设置标题，才能用 source_read 核对原文。"
     return summary

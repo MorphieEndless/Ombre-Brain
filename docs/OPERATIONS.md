@@ -22,7 +22,10 @@ Docker/Zeabur 的持久卷统一挂载 `/app/buckets`，配置路径为 `/app/bu
 
 ## 数据边界
 
-- `buckets/**/*.md` 是记忆真源。写入成功以 Markdown 原子落盘为准。
+- `buckets/**/*.md` 是事件记忆真源。写入成功以 Markdown 原子落盘为准。
+- `_sources/src_<sha256>.source` 是结构化 `grow` 可选生成的不可变原文证据资产；它不参与普通浮现或索引，但不能从事件 Markdown 重新推导，备份时必须与桶共同保存。
+- GitHub 同步会把 `_sources` 原文明文提交到已配置仓库。它不是端到端加密备份；生产上应使用可信私有仓库并审计协作者权限，绝不能把包含私密对话的 path prefix 放进公开仓库。
+- 本地导出的 ZIP 同样是未加密的敏感资产；应加密保管或放入可信存储，并在传输后清理不再需要的临时副本。
 - `embeddings.db`、BM25 缓存和脱水缓存都是可重建的派生数据。
 - `.embedding_outbox.json` 只保存待索引 ID、内容哈希和重试状态，不复制记忆正文。
 - `config.yaml`、`.env`、API Key、OAuth/Tunnel token 不进入本地记忆导出包。
@@ -33,7 +36,9 @@ Docker/Zeabur 的持久卷统一挂载 `/app/buckets`，配置路径为 `/app/bu
 2. 连续 provider 故障会打开全局熔断，避免每条待办都重复撞击同一个故障端点；冷却后自动恢复，也可在 Dashboard 手动补齐。
 3. Obsidian、Git 或手工修改 Markdown 后，BucketManager 会按配置的轮询间隔发现文件集合/mtime/size 变化，刷新内存与 BM25，并只对正文变化重新排队向量。
 4. 本地导出对正在使用的 SQLite 调用 backup API，得到事务一致快照；不会直接复制可能处于 WAL 写入中的数据库文件。
-5. 新导出包含 `backup_manifest.json`，逐文件记录字节数与 SHA-256。恢复预检要求清单与 ZIP 内容完全一致。
+5. v2.10.1 起，新导出会同时包含 `buckets/*.md`、`sources/src_<sha256>.source` 和 `backup_manifest.json`，逐文件记录字节数与 SHA-256。恢复预检要求清单与 ZIP 内容完全一致，并校验证据文件名哈希、UTF-8、大小和路径。
+6. 迁移执行时先安装全部已校验证据，再写入引用它们的桶。v2.10.0 旧包缺证据时仍可恢复事件桶，但界面会明确提示这些原文不可核对，不会伪装成完整证据恢复。
+7. 当前版本创建的新本地/GitHub 备份会交叉检查桶的 `source_refs`；任一引用缺文件或格式非法时整次备份失败。GitHub 恢复先把全部远端 blob 暂存并验证，再安装全部证据，最后才覆盖 Markdown。
 
 清单只能发现残缺或意外篡改，不能证明备份由谁创建。需要来源认证时，应在可信存储或带签名的发布/备份系统中保管 ZIP。
 
@@ -64,9 +69,9 @@ python tools/check_buckets.py --json
 
 1. 在 Dashboard 导出完整记忆包，确认请求成功且文件非空。
 2. 准备一个全新的临时 vault/测试实例，不要直接覆盖唯一的生产目录。
-3. 在迁移页面上传 ZIP。新包应显示“备份清单与 SHA-256 校验通过”；旧包会显示“未验证”。
+3. 在迁移页面上传 ZIP。新包应显示“备份清单与 SHA-256 校验通过”；无清单旧包会显示“未验证”，有原文引用但缺证据的 v2.10.0 包会显示兼容性警告。
 4. 检查 bucket 数、冲突决策和 embedding 模型/维度，再执行导入。
-5. 导入完成后运行 `python tools/check_buckets.py`，并用 `breath(query=...)` 抽查可检索性。
+5. 导入完成后运行 `python tools/check_buckets.py`，并用 `breath_search(query=...)` 抽查可检索性；若测试包含原文证据，再用准确桶 ID + 标题调用一次 `source_read(scope="event")`，确认事件范围可读且未带出范围外文字。
 6. 确认 outbox 待处理数最终回到 0。模型离线时允许保持 pending，但 Markdown 必须完整可读。
 
 导入冲突的语义：

@@ -3345,8 +3345,27 @@ function beginAuthenticatedDashboardSession() {
 }
 
 async function finishDashboardAuthentication() {
+  let sessionReady = false;
+  try {
+    const resp = await fetch('/auth/status', {
+      cache: 'no-store',
+      credentials: 'same-origin'
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      sessionReady = data.authenticated === true;
+    }
+  } catch (_) { /* 统一在下方显示可操作的会话错误。 */ }
+  if (!sessionReady) {
+    invalidateAuthenticatedDashboardSession();
+    document.getElementById('auth-overlay').style.display = 'flex';
+    showAuthError('验证已通过，但浏览器未建立登录会话。请检查 nginx 的 Host、X-Forwarded-Proto 与 Set-Cookie 转发。');
+    return false;
+  }
+  document.getElementById('auth-error').style.display = 'none';
   document.getElementById('auth-overlay').style.display = 'none';
   await beginAuthenticatedDashboardSession();
+  return true;
 }
 
 async function checkAuth() {
@@ -3384,6 +3403,19 @@ function showAuthError(msg) {
   const el = document.getElementById('auth-error');
   el.textContent = msg;
   el.style.display = 'block';
+}
+
+async function readAuthFailure(resp, fallback) {
+  try {
+    const data = await resp.json();
+    const error = data && typeof data.error === 'string' ? data.error : '';
+    if (resp.status === 403 && error === 'Cross-origin request rejected') {
+      return '反向代理来源校验失败（HTTP 403）。请让 nginx 保留 Host、X-Forwarded-Host、X-Forwarded-Proto，并配置 OMBRE_TRUSTED_PROXY_CIDRS。';
+    }
+    return error || fallback || ('登录请求失败（HTTP ' + resp.status + '）');
+  } catch (_) {
+    return '登录请求失败（HTTP ' + resp.status + '）：反向代理未返回 OB 的 JSON 响应，请检查 nginx 是否完整转发 /auth/*。';
+  }
 }
 
 async function doSetup() {
@@ -3440,12 +3472,23 @@ async function doRecover() {
 
 async function doLogin() {
   const pwd = document.getElementById('auth-login-pwd').value;
-  const resp = await fetch('/auth/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({password: pwd}) });
+  let resp;
+  try {
+    resp = await fetch('/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      credentials: 'same-origin',
+      cache: 'no-store',
+      body: JSON.stringify({password: pwd})
+    });
+  } catch (_) {
+    return showAuthError('登录请求未到达 OB，请检查网络以及 nginx 是否完整转发 /auth/*。');
+  }
   if (resp.ok) {
-    await finishDashboardAuthentication();
+    return await finishDashboardAuthentication();
   } else {
-    const d = await resp.json().catch(() => ({}));
-    showAuthError(d.error || '密码错误');
+    showAuthError(await readAuthFailure(resp, '登录失败（HTTP ' + resp.status + '）'));
+    return false;
   }
 }
 

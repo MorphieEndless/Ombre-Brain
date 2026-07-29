@@ -2,6 +2,22 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.10.2
+
+### 修复 / Fixed
+
+- 修复 nginx 等反向代理返回 HTML、空响应或网关错误时，Dashboard 登录页把所有非 JSON 响应误报为“密码错误”的问题。登录页现在保留 OB 返回的明确错误，并分别提示来源校验失败、代理响应异常和网络不可达。
+- 密码验证成功后先通过 `/auth/status` 确认浏览器已保存并回传 `ombre_session`，确认成立后才初始化 Dashboard；若 `Secure`、Host、协议或 `Set-Cookie` 转发导致会话未建立，会停留在登录页并给出对应检查项。
+- 登录请求显式使用同源凭据与禁缓存语义；不会新增 localhost 免密，也不会自动信任 Docker 私网或放宽 `OMBRE_TRUSTED_PROXY_CIDRS`。
+
+### 测试 / Tests
+
+- 增加 Docker 网关来源、可信转发头与环境变量密码的完整登录成功回归，并覆盖非 JSON nginx 错误不再伪装成密码错误、成功响应缺少有效 Cookie 会话时不进入 Dashboard。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与热更新优先读取的 `src/VERSION` 同步更新为 `2.10.2`。
+
 ## 2.10.1
 
 ### 修复 / Fixed

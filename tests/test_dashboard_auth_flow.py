@@ -216,6 +216,136 @@ async function fetch(url) {
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is unavailable")
+def test_login_failure_reports_non_json_proxy_response_instead_of_password_error():
+    auth_source = (
+        _dashboard_section("function showAuthError(msg)", "async function doSetup()")
+        + _dashboard_section("async function doLogin()", "async function doLogout()")
+    )
+    script = r"""
+const elements = new Map([
+  ['auth-login-pwd', {value:'correct-password', textContent:'', style:{}}],
+  ['auth-error', {value:'', textContent:'', style:{}}],
+]);
+const document = {
+  getElementById(id) {
+    if (!elements.has(id)) throw new Error('unexpected element: ' + id);
+    return elements.get(id);
+  },
+};
+async function fetch(url) {
+  if (url !== '/auth/login') throw new Error('unexpected fetch: ' + url);
+  return {
+    ok: false,
+    status: 502,
+    async json() { throw new Error('nginx returned HTML'); },
+  };
+}
+""" + auth_source + r"""
+
+(async function() {
+  await doLogin();
+  const error = elements.get('auth-error');
+  process.stdout.write(JSON.stringify({
+    textContent: error.textContent,
+    display: error.style.display,
+  }));
+})().catch(error => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    completed = subprocess.run(
+        [shutil.which("node"), "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    result = json.loads(completed.stdout)
+
+    assert result == {
+        "textContent": (
+            "登录请求失败（HTTP 502）：反向代理未返回 OB 的 JSON 响应，"
+            "请检查 nginx 是否完整转发 /auth/*。"
+        ),
+        "display": "block",
+    }
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is unavailable")
+def test_login_success_requires_cookie_backed_session_before_dashboard_init():
+    auth_source = _dashboard_section(
+        "var _authenticatedDashboardInitPromise", "async function checkAuth()"
+    ) + _dashboard_section("function showAuthError(msg)", "async function doSetup()")
+    script = r"""
+let _dashboardAuthGeneration = 0;
+let initialized = false;
+function setInterval() { return 1; }
+function clearInterval() {}
+const elements = new Map();
+function element(id) {
+  if (!elements.has(id)) elements.set(id, {value:'', textContent:'', style:{}});
+  return elements.get(id);
+}
+const document = {getElementById: element};
+function invalidateAuthenticatedDashboardSession() {}
+function startAuthenticatedDashboardPolling() {}
+async function loadBuckets() { initialized = true; }
+async function loadStatusBanner() {}
+async function syncRestartRequirement() {}
+async function refreshAnchorCounter() {}
+async function checkEmptyMemoryBanner() {}
+async function loadOwnerBadge() {}
+async function pollHeartbeat() {}
+async function pollCriticalErrors() {}
+async function maybeShowOnboarding() {}
+async function initSelfFab() {}
+async function refreshAuthenticatedActiveView() {}
+async function fetch(url) {
+  if (url !== '/auth/status') throw new Error('unexpected fetch: ' + url);
+  return {
+    ok: true,
+    async json() { return {authenticated:false, setup_needed:false}; },
+  };
+}
+""" + auth_source + r"""
+
+(async function() {
+  const authenticated = await finishDashboardAuthentication();
+  process.stdout.write(JSON.stringify({
+    authenticated,
+    initialized,
+    error: element('auth-error').textContent,
+    errorDisplay: element('auth-error').style.display,
+    overlayDisplay: element('auth-overlay').style.display,
+  }));
+})().catch(error => {
+  console.error(error);
+  process.exit(1);
+});
+"""
+    completed = subprocess.run(
+        [shutil.which("node"), "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    result = json.loads(completed.stdout)
+
+    assert result == {
+        "authenticated": False,
+        "initialized": False,
+        "error": (
+            "验证已通过，但浏览器未建立登录会话。请检查 nginx 的 Host、"
+            "X-Forwarded-Proto 与 Set-Cookie 转发。"
+        ),
+        "errorDisplay": "block",
+        "overlayDisplay": "flex",
+    }
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is unavailable")
 def test_auth_success_runtime_initializes_without_reload_and_is_single_flight():
     auth_source = _dashboard_section(
         "var _dashboardAuthGeneration", "async function changePassword()"
@@ -259,7 +389,17 @@ function clearInterval(id) {
 }
 async function fetch(url) {
   fetchCalls.push(url);
-  if (url === '/auth/status' && pendingAuthStatus) return pendingAuthStatus;
+  if (url === '/auth/status' && pendingAuthStatus) {
+    const response = pendingAuthStatus;
+    pendingAuthStatus = null;
+    return response;
+  }
+  if (url === '/auth/status') {
+    return {
+      ok: true,
+      async json() { return {authenticated:true, setup_needed:false}; },
+    };
+  }
   if (url === '/auth/security-question' && failSecurityQuestion) {
     throw new Error('optional security question is unavailable');
   }

@@ -53,6 +53,45 @@ def test_environment_password_rejects_unicode_without_type_error(monkeypatch):
     assert shared_web._verify_password_for_rotation("错误密码") is None
 
 
+@pytest.mark.asyncio
+async def test_environment_password_login_succeeds_from_trusted_docker_gateway(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("OMBRE_DASHBOARD_PASSWORD", "proxy-secret")
+    monkeypatch.setenv("OMBRE_TRUSTED_PROXY_CIDRS", "172.17.0.1/32")
+    monkeypatch.setitem(shared_web.config, "buckets_dir", str(tmp_path))
+    shared_web._sessions.clear()
+    shared_web._login_failures.clear()
+    shared_web._login_locked_until.clear()
+    shared_web._login_source_lru.clear()
+    shared_web._login_global_attempts.clear()
+    mcp = FakeMCP()
+    auth_web.register(mcp)
+    request = JsonRequest({"password": "proxy-secret"})
+    request.headers = {
+        "host": "ombre.example:18080",
+        "x-forwarded-for": "198.51.100.23",
+        "x-forwarded-host": "ombre.example:18080",
+        "x-forwarded-proto": "https",
+    }
+    request.client = type("Client", (), {"host": "172.17.0.1"})()
+
+    try:
+        response = await mcp.routes[("POST", "/auth/login")](request)
+    finally:
+        shared_web._sessions.clear()
+        shared_web._login_failures.clear()
+        shared_web._login_locked_until.clear()
+        shared_web._login_source_lru.clear()
+        shared_web._login_global_attempts.clear()
+
+    assert response.status_code == 200
+    assert _payload(response) == {"ok": True}
+    cookie = response.headers["set-cookie"]
+    assert "ombre_session=" in cookie
+    assert "Secure" in cookie
+
+
 def test_remote_setup_rejects_unicode_token_without_type_error(monkeypatch):
     monkeypatch.setenv("OMBRE_SETUP_TOKEN", "ascii-secret")
     request = JsonRequest({})

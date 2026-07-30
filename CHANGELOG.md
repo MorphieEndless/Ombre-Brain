@@ -2,6 +2,49 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.15.0
+
+### 新增 / Added
+
+- 在现有 `dream` 增加默认关闭的 `inspiration: bool = False` 参数；只有调用方本轮显式传
+  `True` 才追加 Spark 灵感候选。公开 MCP 仍为 15 个工具，没有新增第 16 个工具，也没有
+  hook、后台任务、grow 或低命中自动触发。
+- 新增 `src/tools/dream/inspiration.py` 只读产品候选层：先按严格 Spark policy 排除归档、
+  删除、墓碑、`dont_surface`、`digested`、anchor、pinned/protected/permanent、私有类型、
+  resolved 与未知状态，再只读本地已落盘 embedding，最多选择三个非随机材料/问题候选。
+- 产品候选提供语义近邻、跨域桥接和条件反转核查三种视角。每条带两个来源 ID、完整正文
+  SHA-256、精确片段跨度、原文片段、待核查共享结构、不对应处和假设；向量相似度与词项
+  重叠只作为选择证据，不合成灵感分、真值分或行动分。
+- 候选固定为 `persistent=false`、`lifetime=response_only`、`retrievable=false`，
+  不具备指令权、工具权或行动权。历史正文继续放入带来源、payload 哈希与命令式语言检测的
+  不可信数据边界，当前模型可以忽略、修改、反驳或显式读取来源。
+
+### 安全与降级 / Safety and Degradation
+
+- Spark 产品路径不调用 embedding/model provider，不接受 owner、vault、路径、query、seed
+  或模型配置，不调用 `touch/touch_many`，不写桶、Ledger、内部 MemoryEvent、缓存、结构
+  projection 或 webhook 正文。
+- embedding 关闭、向量缺失/非法/维度不兼容、没有合格历史材料或无合格非随机配对时返回
+  无候选说明；不回退到普通 search、随机材料或未过滤池。
+- `inspiration=False` 保持原 dream 行为且不读取 Spark 向量；非布尔参数失败关闭。Spark
+  输出继续受 `surfacing.dream_max_tokens` 约束，预算不足时整段省略，不截断安全边界。
+- 本版只在 `testing` 完成产品候选与工程门禁，不宣称结构 Spark 有质量增益。三模型、多
+  seed、人工盲评、确认集与独立复制由后续研究执行；主动拒绝、反思性自主和置信模型未开始。
+
+### 文档、测试与热更新 / Docs, Tests and Hot Update
+
+- 修订 `ADR-0002`，记录所有者对 `testing` 产品候选的明确批准、进入 `main` 前仍需满足的
+  证据门禁，以及默认关闭、无随机、无 provider、无写回和可回滚边界。
+- 同步更新 Claude 提示词和内部工具规格；增加显式 schema、policy-first、默认兼容、只读
+  副作用、prompt injection、预算降级、Docker MCP 工具数与异常参数回归。
+- `src/tools/dream/inspiration.py`、`src/server.py`、`src/tools/dream/output.py` 与
+  `src/VERSION` 均进入 `update_manifest.json` 校验范围，支持 Dashboard 热更新下载校验、
+  依赖不变检查与既有回滚流程。本版没有新增依赖或环境变量。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与热更新优先读取的 `src/VERSION` 同步更新为 `2.15.0`。
+
 ## 2.14.0
 
 ### 新增 / Added

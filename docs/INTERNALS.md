@@ -358,16 +358,30 @@ feel 桶自身：
 
 ### 3.6 `dream` — 做梦自省
 
-签名：`dream(window_hours=48)`（默认 48h 窗口；clamp 到 1~336h）
+签名：`dream(window_hours=48, inspiration=False)`（默认 48h 窗口；clamp 到 1~336h）
 
 - 默认取过去 48 小时内 `created` 或 `last_active` 任一在窗口内的桶（排除 permanent/feel/pinned/protected/plan/letter，以及 digested/dont_surface/anchor）
 - 排序：先按 `last_active` 倒序；候选超过 **40 个**时改按 `decay_engine.calculate_score()` 降序截断到前 40，避免一次涌进来太多撑爆上下文
 - 拼接桶摘要（完整正文，不截断）+ 自省引导 header
 - embedding 启用时附加：连接提示（最相似对，`>0.5`）+ feel 结晶提示（一条 feel 与 ≥2 条其它 feel 相似度 `>0.7` → 建议升级为 pinned）
+- 仅当调用方显式传 `inspiration=True` 时，在正文前部追加最多三个响应态 Spark 材料/问题候选：
+  - policy-first 只允许活动、未解决、普通 `dynamic` 桶；排除归档/删除/墓碑、`dont_surface`、
+    `digested`、anchor、pinned/protected/permanent 和私有类型
+  - 只读本地 `embeddings.db` 已有向量，不调用 embedding provider；选择语义近邻、跨域桥接及
+    条件反转核查材料，不包含随机通道
+  - 每条带两个来源 ID、完整正文 SHA-256、精确片段跨度、待核查共享结构、不对应处和假设；
+    向量相似度仅为选择证据，不合成灵感分、真值分或行动分
+  - 候选 `persistent=false`、`lifetime=response_only`、`retrievable=false`，不调用
+    `touch/touch_many`、不写桶、不记账、不进入 webhook payload；当前模型保留判断权
+  - embedding 关闭、向量不足或无合格非随机配对时失败关闭为空说明，不回退到普通 search、
+    随机材料或未过滤池
 - 末尾追加 `=== 你的 active plans ===` 全量列表
 - 末尾追加 `=== 你的 feel 历史（全量，旧 feel 按 token 预算折叠）===`：按 `surfacing.feel_max_tokens`（默认 6000）做预算，超出的老 feel 折叠为 60 字符单行摘要
 
-(实现细节：用户可手动传更大的 `window_hours`，但软上限 40 仍生效。plan 历史不参与 token 预算全量返回；feel 历史走 token 预算折叠。)
+(实现细节：用户可手动传更大的 `window_hours`，但软上限 40 仍生效。`inspiration=False`
+保持原 dream 输出；参数只接受布尔值且不会自动翻转。Spark 候选和其边界也计入
+`surfacing.dream_max_tokens`，预算不足时整段省略而不破坏边界。plan 历史不参与 token
+预算全量返回；feel 历史走 token 预算折叠。)
 
 ### 3.7 `plan` — 登记待办
 

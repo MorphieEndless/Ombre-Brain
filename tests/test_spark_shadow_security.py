@@ -289,7 +289,7 @@ def test_shadow_package_has_no_product_network_process_or_model_client_imports()
     )
 
 
-def test_shadow_remains_outside_product_mcp_dream_and_docker_surfaces():
+def test_shadow_remains_outside_product_mcp_and_docker_surfaces_after_product_opt_in():
     dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     server = (ROOT / "src" / "server.py").read_text(encoding="utf-8")
@@ -310,6 +310,9 @@ def test_shadow_remains_outside_product_mcp_dream_and_docker_surfaces():
         and node.name == "dream"
     ]
     assert len(dream_functions) == 1
-    assert "inspiration" not in {
+    assert "inspiration" in {
         argument.arg for argument in dream_functions[0].args.args
     }
+    assert "spark_shadow" not in (
+        ROOT / "src" / "tools" / "dream" / "inspiration.py"
+    ).read_text(encoding="utf-8")

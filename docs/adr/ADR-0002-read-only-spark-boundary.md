@@ -8,19 +8,23 @@
 进一步批准 R2 的最小离线 shadow 研究实现。R2 批准只覆盖 harness 自建的一次性
 `test_data` Markdown vault、固定本地确定性 R1 路径和 aggregate-only 输出；它不批准
 shadow 产品运行时入口、真实用户 vault、持久结构签名、任何生产模型调用或用户可见候选。
+同日所有者进一步明确批准：先在 `testing` 完成默认关闭的产品候选、版本和热更新，再进入
+三模型、多 seed、人工盲评、确认集和独立复制。该批准允许真实实例在调用方显式请求时只读
+当前 owner 的 policy-safe 活动桶，但不构成质量门禁通过，也不批准合并到 `main`。
 批准始终附带两项不可放宽的条件：
 
-1. 未来产品化不新增 Spark MCP 工具。只能在另行批准后，由现有 `dream` 的显式
+1. 产品化不新增 Spark MCP 工具。只能由现有 `dream` 的显式
    `inspiration: bool = False` 参数按需触发；默认关闭且不得后台自动运行。
 2. 后续“主动拒绝与反思性自主”研究不得通过 prompt 预设、诱导或要求拒绝。本阶段不实现
    主动拒绝，只能研究分轴的记忆可信度证据与校准置信模型；不是所有记忆都默认受质疑。
    记忆可以影响行为，但不能替当前模型形成态度、作出拒绝或执行行动。
 
-除第一项入口约束外，任何超出本次离线最小 R2 的 shadow、真实 vault、生产模型调用、
-产品化及后续自主性研究仍需另行确认本 ADR 或新写后续 ADR。
+本次新增授权只覆盖 `testing` 的显式、只读、无外部模型调用产品候选。生产模型调用、持久
+结构 projection、自动触发、`main` 发布及后续自主性研究仍需后续证据或另行确认。
 
 对应代码基线为 Ombre Brain `testing` 分支 `42035164b280f1fcc3c51393428d4904942508aa`，
-版本 `2.11.0`。形成草案时参考了桌面文件 `OB灵感研究与优化路线_2026-07-28.md`；
+版本 `2.11.0`；R1/R2/Pilot 已推进至 `2.14.0`，本次 `testing` 产品候选目标版本为
+`2.15.0`。形成草案时参考了桌面文件 `OB灵感研究与优化路线_2026-07-28.md`；
 该文件是非规范研究素材，本 ADR 必须作为可独立审查的完整决策记录，实施不得依赖该外部文件。
 
 ## Governing constraints
@@ -55,7 +59,8 @@ Spark 研究的问题是：在不改变记忆真源、不改变既有浮现语�
 ## Definitions
 
 - **当前张力（tension）**：R1/R2 测试场景显式提供、希望继续分析的问题或矛盾；它不是任务
-  队列，也不自动成为 `plan`。未来产品入口由用户、当前 LLM 还是宿主触发，仍是所有者待决项。
+  队列，也不自动成为 `plan`。产品候选只把本次 dream 窗口内通过严格 Spark policy 的近期
+  普通事件当作比较起点；由人类还是当前 LLM 传入显式布尔参数不改变权限边界。
 - **候选材料（candidate material）**：通过现有可见性边界筛选的历史事件片段及其来源信息。
 - **结构提示（structural cue）**：对角色、关系、约束、转化和结果的可重建、可出错抽取；
   它不是事实或新的记忆对象。
@@ -73,11 +78,11 @@ Spark 研究的问题是：在不改变记忆真源、不改变既有浮现语�
 
 ## Decision
 
-本 ADR 接受以下 R0/R1 边界，并只授权在补充边界内创建 R2 最小离线 shadow；它不授权
-改变产品运行时：
+本 ADR 接受以下 R0/R1/R2/Pilot 边界，并在第 22–30 条补充边界内授权 `testing` 产品候选：
 
-1. Spark 是独立研究面，不挂入 `dream`，不修改 `dream`、普通 `breath`、显式检索、
-   自由联想或任何 hook 的现有行为。
+1. R1/R2/Pilot 继续是独立研究面，不被产品代码直接 import。产品侧只在现有 `dream` 增加
+   默认关闭的 `inspiration` 参数；`False` 保持原行为，普通 `breath`、显式检索、自由联想
+   和所有 hook 均不自动触发或注入 Spark。
 2. R1 只使用 harness 为单次运行创建并拥有的受控临时根目录；pytest 使用 `tmp_path`，CLI
    使用 `TemporaryDirectory` 或同等机制。纯内存/JSON 合成场景不是 OB 桶；只有可选临时-vault
    adapter 创建的桶，才必须在创建时带不可后补的 `test_data` provenance。清理前必须确认
@@ -141,10 +146,10 @@ Spark 研究的问题是：在不改变记忆真源、不改变既有浮现语�
     已授权且通过 Spark policy 的材料。R1 离线 harness 只能依赖注入已验证的
     `SyntheticSnapshot`，或接受经绝对路径解析、`test_data` 标记和临时根目录约束的测试路径。
     Spark 不扩大 `source_read` 权限。
-14. R1 的结果无论正负都必须报告。只有一次预注册、只开启一次的冻结确认集通过，并在此前
-    未触碰的第二保留集、独立场景 seed 或独立模型家族上复制，才允许提出真实数据、模型质量
-    或产品化 shadow。2026-07-30 另行批准的 R2 只验证一次性 test_data vault、清理和
-    aggregate-only 边界，不构成结构 Spark 有效或 R3 可推进的证据。
+14. R1 的结果无论正负都必须报告。所有者允许先在 `testing` 完成无能力主张的显式产品候选，
+    但只有一次预注册、只开启一次的冻结确认集通过，并在此前未触碰的第二保留集、独立场景
+    seed 或独立模型家族上复制，才允许提出结构机制、模型质量、真实帮助度或进入 `main` 的
+    能力主张。R2 只验证一次性 test_data vault、清理和 aggregate-only 边界。
 15. R1 实现固定放在仓库根目录 `tools/spark_r1/`，薄 CLI 放在 `tools/evaluate_spark.py`。
     它只随源码仓库提供，当前不进入产品 `src/`、Docker 镜像、Dashboard 热更新或 MCP 清单。
     这是一项研究隔离门禁，不是产品打包缺陷；未来若要随产品发布，必须另行评审构建、播种、
@@ -154,8 +159,8 @@ Spark 研究的问题是：在不改变记忆真源、不改变既有浮现语�
     对话、grow、dream 调度、低检索命中或后台任务自动改成 `True`。每次仍受最多三个候选、
     policy-first 和响应态生命周期约束，避免无关记忆因默认触发大量进入当前上下文。
 17. R2 固定放在仓库根目录 `tools/spark_shadow/`，薄 CLI 固定为
-    `tools/evaluate_spark_shadow.py`；和 R1 一样受 `.dockerignore` 的 `tools/` 排除，不进入
-    产品镜像、热更新、Dashboard、MCP 清单、`dream` schema 或任何运行时 hook。
+    `tools/evaluate_spark_shadow.py`；和 R1 一样受 `.dockerignore` 的 `tools/` 排除。R2 包
+    本身不进入产品镜像、热更新、Dashboard、MCP 清单或运行时 hook，也不负责修改 dream schema。
 18. R2 公开入口只接受已经过 R1 严格 schema 的 `ParsedScenario` 与两个有界超时；CLI 只接受
     stdin 合成 JSON。二者都不接受 owner、vault/文件/输出路径、配置、回调、工具、generator
     或 evaluator。R2 固定使用 R1 本地确定性模板，不访问网络、第三方 provider 或模型 API。
@@ -173,6 +178,33 @@ Spark 研究的问题是：在不改变记忆真源、不改变既有浮现语�
     `user_visible=false`、`instructions=false`、`may_call_tools=false`、`network_used=false`、
     `product_runtime=false`、`mcp_exposed=false` 和 `dream_schema_changed=false`。它不得写入 OB
     记忆、Ledger、SQLite、向量库、日志、缓存或研究输出文件，也不建立按 ID 读取接口。
+22. `testing` 产品入口固定为现有 `dream(window_hours=48, inspiration=False)`；公开工具总数
+    仍为 15，不注册 `spark`、`inspiration` 或任何第 16 个工具。参数必须是布尔值，默认值
+    永远为 `False`，hook、后台任务、grow、低命中和配置不得替调用方翻转它。
+23. 产品实现固定为 `src/tools/dream/inspiration.py`。它只消费本次 dream 已由当前实例读取的
+    活动桶列表与本地 `embeddings.db` 已有向量；不接受 owner、vault、路径、query、seed、
+    provider 或配置参数，不调用远程 embedding/model provider，也不 import 研究 harness。
+24. 产品 policy 只允许 `type=dynamic`、未 resolved、状态缺失或 `active` 的普通事件，并继续
+    经过 `SurfacePolicyVM` 的 dream 门禁。归档、删除、墓碑、`dont_surface`、`digested`、
+    anchor、pinned、protected、permanent、feel、plan、letter、self、`I`、未知类型或未知状态
+    在任何向量值下都必须先排除。
+25. 产品只提供 `semantic_near`、`cross_domain_bridge` 和 `condition_contrast_probe` 三类
+    选择视角，每次合计最多三个候选。它不包含实验 random；向量关闭、向量不足或没有合格
+    非随机配对时返回无候选说明，不得回退到普通 search、未过滤池或随机材料。
+26. 产品候选只显示材料和验证问题，不生成完整答案。每条都绑定两个来源 ID、完整正文
+    SHA-256、0-based 半开片段跨度、原文片段、明确的“共享结构未验证”、不对应处和待验证
+    假设。向量相似度和词项重叠只标记为选择证据，不合成灵感分、真值分或行动分。
+27. 产品候选固定 `persistent=false`、`lifetime=response_only`、`retrievable=false`、
+    `instructions=false`、`may_call_tools=false`。它不调用 touch/touch_many/create/update/
+    merge/archive/restore/delete，不写 Ledger、内部 MemoryEvent、webhook payload、缓存或
+    结构 projection；错误日志不得包含来源 ID、正文或候选正文。
+28. 所有 Spark payload 必须进入现有不可信数据边界，保留命令式语言检测、来源和完整 payload
+    哈希。记忆正文中的系统声明、工具语法、路径和网络请求始终只是数据；当前模型可以忽略、
+    修改、反驳或显式读取来源，高风险事项不得仅凭类比行动。
+29. 产品候选计入 `surfacing.dream_max_tokens`，优先按完整边界追加；预算不足只可整段省略并
+    给出无回退说明，不得截断边界或悄悄扩大预算。默认关闭路径不得为 Spark 读取任何向量。
+30. `2.15.0` 只表示 `testing` 产品候选的软件实现和工程门禁就绪，不表示三模型、多 seed、
+    人工盲评、确认集或独立复制完成。主动拒绝、反思性自主和记忆置信模型不属于本版本。
 
 ## Architecture boundary
 
@@ -213,22 +245,41 @@ R1 固定本地确定性路径 ──► 函数局部候选
         ▼
 清理并验证临时根不存在后返回
 
+产品 `dream(inspiration=False)` ──► 原 dream 输出，不读取 Spark 向量
+
+产品 `dream(inspiration=True)`
+        │
+        ▼
+本次活动桶列表 ──► 产品 Spark policy-first 严格过滤
+        │
+        ▼
+只读本地已存向量 ──► 最多三个非随机材料/问题候选
+        │
+        ▼
+来源/哈希/跨度/未验证结构/mismatch/假设的数据边界
+        │
+        └──X──► provider / touch / 写回 / 缓存 / 工具 / 行动许可
+
 任何候选 ──X──► 记忆写回 / touch / 恢复 / 工具执行 / 行动许可
 ```
 
-未来产品化时，OB 的最大职责仍只是受 policy 约束地浮现来源可追溯的候选材料和结构提示。
-结构抽取、候选生成和候选评审由 OB、当前调用模型还是独立服务承担尚未决定；无论部署位置
-如何，实验组件都没有记忆真值权或行动权，当前 LLM 始终保留事实核验、取舍和结论权。
+`testing` 产品候选把 OB 的职责限制为：受 policy 约束地浮现来源可追溯的候选材料和验证
+问题。它不声称完成结构抽取或独立评审；共享结构固定标记为待当前模型核查。未来是否加入
+经验证的结构抽取器或独立服务仍需单独决定；无论部署位置如何，实验组件都没有记忆真值权
+或行动权，当前 LLM 始终保留事实核验、取舍和结论权。
 
-现有代码只能作为设计参考，不能直接串接：
+产品接入只能复用明确允许的只读能力：
 
-- `tools.dream.dispatch()` 会启动衰减引擎，且 dream 的候选语义包含 Spark 明确排除的材料。
+- `tools.dream.dispatch()` 的既有 dream 流程会启动衰减引擎；Spark 模块本身不得新增启动、
+  归档或衰减行为。“无副作用”描述的是 Spark 增量路径，不得把整个 dream 错称为零 I/O。
 - `tools.breath.search.surface_search()` 会在命中后调用 `touch_many()`。
 - `tools._runtime.record_v3_tool_event()` 当前未挂载 recorder 时可能无操作，但一旦接入
   `v3_runtime` 会将 payload 持久化为 INTERNAL MemoryEvent；Spark 禁止依赖当前空操作状态，
   也禁止调用该入口。
 - `BucketManager.list_all()` 检测外部编辑时可能触发对账、embedding outbox 和派生事件，
   因此“Spark 不造成语义记忆副作用”不能被错误表述为“整个进程零 I/O”。
+- 产品只允许对 `list_all()` 的本次返回做严格二次 policy 过滤，并调用
+  `EmbeddingEngine.get_embedding()` 读取已存向量；禁止调用会生成查询向量的 provider 路径。
 - Dehydrator 的私有 `_chat()` 属于压缩与合并职责，不是通用灵感模型网关。
 
 ## Invariants
@@ -471,7 +522,8 @@ R1 的 tension 由测试场景显式提供；未来产品由谁触发仍待所�
 
 ## Rejected alternatives
 
-- **把 Spark 加进 `dream`**：会改变受保护的 dream 语义，并可能启动衰减后台任务。
+- **默认或自动把 Spark 加进 `dream`**：会改变每次 dream 语义并挤压当前思考；只批准显式
+  `inspiration=True` 的附加段，`False` 必须保持稳定默认。
 - **复用 `breath_search.surface_search()`**：命中会 touch 记忆，不满足无语义副作用要求。
 - **在默认对话或 hook 中自动注入**：会改变每轮所见内容并挤压当前思考，且无法显式拒绝。
 - **服务端 session Spark Buffer**：当前 MCP 为 stateless HTTP，没有可靠 session 语义；持久化还会
@@ -509,27 +561,29 @@ shadow：每次从零创建测试 vault、只读 round-trip、运行固定本地
 已接受的 40 场景 Pilot 仅位于根目录 `tools/spark_pilot/` 与
 `tools/evaluate_spark_pilot.py`：回滚方式是停止制备/分析 CLI 并隔离未发布研究工件，不涉及
 真实记忆、产品配置或数据迁移。盲评包属于响应态合成研究材料；数值分析只返回无正文聚合。
-未来禁止注册独立 `spark` MCP 工具；获批后的唯一产品入口是现有 `dream` 上默认关闭的显式
-`inspiration` 参数。禁用和回滚必须不涉及删除记忆，也不得改变 dream 默认行为、自由联想、
+禁止注册独立 `spark` MCP 工具；已批准的唯一 `testing` 产品入口是现有 `dream` 上默认关闭
+的显式 `inspiration` 参数。禁用和回滚是让调用方停止传 `True`，或回退对应 `src`/版本工件；
+不得涉及删除记忆，也不得改变 dream 默认行为、自由联想、
 检索、source evidence 或 owner 隔离；关闭后不需要记忆迁移。
 一次跨 owner/不可见来源泄漏、一次记忆或工具副作用、未批准的 provider 政策变化、意外自动
-调用或无法确认来源/模型版本，都必须触发紧急禁用。责任人和响应时限需在产品 shadow/R3
-前确定。
+调用都必须触发紧急禁用。当前路径不调用模型 provider；一旦未来加入 provider，无法确认
+来源/模型版本同样触发禁用。责任人和响应时限需在进入 `main` 前确定。
 
 ## Open questions
 
-以下问题被明确延期，不得在 R1/R2 实现中暗中决定：
+以下问题被明确延期，不得在本次 `testing` 产品候选中暗中决定：
 
-1. 获批后的 `dream(inspiration=True)` 由当前 LLM 还是人类逐次选择，以及如何在不加入后台
-   自动触发的前提下记录该显式意图。
+1. 由人类还是当前 LLM 逐次选择传入 `dream(inspiration=True)`；无论谁选择，都只能通过
+   本次显式参数表达，不新增服务端意图状态或持久记录。
 2. 生产结构提示、候选生成和评审由当前调用模型、独立服务还是可重建 projection 承担。
 3. resolved 普通事件是否可进入产品候选池，以及如何避免恢复或提高可见性。
 4. 是否允许任何真实记忆进入第三方模型，授权、最小化、保留期和审计如何定义。
 5. 调用端能否保留响应；用户保留、修改或拒绝反馈是否收集、保存在哪里、保留多久。
 6. 医疗、法律、金融等高风险场景是否永远只返回材料、`mismatch` 和验证问题。
-7. 任何产品 shadow/R3 的成本、延迟、provider 降级预算、紧急禁用责任人和响应时限。
-8. 产品是否只返回材料，还是允许返回一个明确标注的不确定类比。
-9. 是否需要新的配置开关；如需要，必须先更新 `docs/ENVIRONMENT_VARIABLES.md` 或正式配置文档。
+7. 未来外部结构抽取/评审的成本、延迟、provider 降级预算、紧急禁用责任人和响应时限。
+8. 是否在材料/问题之外允许返回一个明确标注的不确定类比；本版不允许完整答案。
+9. 是否需要新的配置开关；本版没有新增。未来如需要，必须先更新
+   `docs/ENVIRONMENT_VARIABLES.md` 或正式配置文档。
 10. 是否值得继续结构路线；R1/R2 允许得出“没有增益，应停止”的结论。
 ## Tests required
 
@@ -583,8 +637,9 @@ R0 文档必须通过现有 `ADRRequirementsContract` 的标题和八个必答�
    不存在；不得接触真实 `buckets/`。
 5. **aggregate-only**：stdout 和返回对象不含候选、正文、来源/快照标识、数据截止时间、调用 ID
    或模型元数据；只保留字段白名单与固定无权限声明。
-6. **产品隔离**：`tools/` 继续被 Docker 排除，产品镜像不存在 R1/R2 包，公开 MCP 仍恰好 15
-   个工具，`dream` 无 `inspiration` 参数，且 `server.py`、公开工具清单与热更新职责不变。
+6. **研究包隔离**：`tools/` 继续被 Docker 排除，产品镜像不存在 R1/R2 包，公开 MCP 仍恰好
+   15 个工具；R2 自身不注册参数、工具或 hook。产品 `dream` 的显式 `inspiration` 参数由
+   独立 `src/tools/dream/inspiration.py` 承担，不得 import 或复制 R2 临时 vault 职责。
 
 获批的 40 场景 Pilot 还必须增加以下自动化证据：
 
@@ -606,14 +661,33 @@ R0 文档必须通过现有 `ADRRequirementsContract` 的标题和八个必答�
 三模型家族、人工盲评、统计功效和独立保留集属于研究证据，不得写成软件自动化测试已证明。
 pilot 后需先预注册阈值和分析方案，再开启确认集。
 
-任何正式 R1/R2/Pilot 代码进入仓库，都必须按新增功能同步更新 `VERSION`、`src/VERSION`、
+`testing` 产品候选还必须增加以下自动化证据：
+
+1. **显式 schema**：公开 MCP 仍恰好 15 个工具，`dream` 只有 `window_hours` 与
+   `inspiration` 两个可选字段；默认调用不出现 Spark，非布尔 `inspiration` 失败关闭。
+2. **Policy-first**：所有禁止类型/状态即使具有最高向量相似度也不得读取其 embedding 或进入
+   候选；同一实例当前 owner 边界不扩大，不接受 owner/vault/path 参数。
+3. **只读副作用**：默认关闭不读取向量；开启后只能调用 `get_embedding`，并以会抛错的
+   touch/touch_many/create/update/delete/Ledger/event recorder 替身证明没有写路径。
+4. **降级与资源边界**：embedding 关闭、缺失、维度不匹配、非法/零向量、候选不足和总 token
+   预算都稳定降级，不回退到随机、普通 search 或未过滤池；每次最多三个候选。
+5. **来源与注入边界**：来源 ID、SHA-256、精确跨度、未验证结构、mismatch、假设与响应态
+   权限声明齐全；命令式正文仍在不可执行数据边界内，候选不会取得工具权。
+6. **默认兼容与并发**：`inspiration=False` 保持原 dream 行为；双 MCP 客户端并发调用不共享
+   响应态候选、不改变工具数量，错误日志不包含正文或来源 ID。
+7. **发布链**：同步更新双 VERSION、CHANGELOG、正式工具文档与 `update_manifest.json`；
+   运行定向/全量 pytest、Docker no-cache、独立空 `test_data` 卷部署、MCP schema/异常路径、
+   Dashboard 和热更新 manifest/回滚检查。未提供模型 API 凭据不影响本版，因为产品路径禁止
+   provider 调用；三模型质量评测仍必须如实标记未运行。
+
+任何正式 R1/R2/Pilot 或产品候选代码进入仓库，都必须按新增功能同步更新 `VERSION`、`src/VERSION`、
 `CHANGELOG.md`，运行定向测试、全量 `pytest tests/ -x --tb=short -q`、Docker no-cache 构建和
 独立空测试 vault 从零部署。`tools/` 和 `docs/adr/` 当前被构建上下文排除，而 `src/` 会进入镜像；
-本 ADR 已确认 R1/R2/Pilot 位于研究专用 `tools/`，因此 Docker 与部署验证只证明现有产品无回归，
-不能宣称 Spark R1/R2/Pilot 可在容器或 Dashboard 热更新后使用。
-R1/R2/Pilot 未注册公开工具时还必须验证公开 MCP 仍恰好为当前 15 个工具，schema、顺序和诊断不变，
-并禁止修改 `server.py`、`public_tools.py`、`neural_router.py` 及工具数量文档。
+R1/R2/Pilot 仍位于研究专用 `tools/`，产品候选只位于 `src/tools/dream/`。Docker 与部署验证
+可以证明显式产品入口的工程接入，不得宣称研究质量成立。必须验证公开 MCP 仍恰好为当前
+15 个工具、顺序和诊断不变，只有 dream schema 增加默认关闭的布尔参数；
+`public_tools.py`、`neural_router.py` 和工具数量文档不得增加 Spark 工具。
 
-如果以后注册公开工具，还必须额外运行：MCP 工具发现和严格 schema、未知参数、双客户端并发、
-鉴权、受影响工具异常路径和 Dashboard 诊断。所有部署测试只能使用独立测试卷；需要模型 API Key
-的验证必须明确请求测试凭据，不能跳过后宣称通过。
+本次参数变更必须额外运行 MCP 工具发现和严格 schema、未知参数、双客户端并发、鉴权、dream
+异常路径和 Dashboard 诊断。所有部署测试只能使用独立测试卷；未来需要模型 API Key 的质量
+验证必须明确请求测试凭据，不能跳过后宣称通过。

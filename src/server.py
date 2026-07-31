@@ -339,8 +339,8 @@ mcp = FastMCP(
 import web as _web
 import web._shared as _wsh
 
-# 旧版可能已经把本机模式保存成免鉴权。注册 OAuth 路由和 MCP 中间件之前统一
-# 评估真实网络边界；危险组合只收紧当前进程，不改写用户配置，也不让服务退出重启。
+# 注册 OAuth 路由和 MCP 中间件之前统一评估真实网络边界，供启动日志与
+# Dashboard 诊断使用。风险评估不得覆盖明确的 mcp_require_auth 配置。
 _mcp_network_security = enforce_mcp_network_guard(
     config,
     environment=os.environ,

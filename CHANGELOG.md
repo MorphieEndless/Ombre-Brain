@@ -2,6 +2,21 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.11.1
+
+### 修复 / Fixed
+
+- 修复云部署明确设置 `mcp_require_auth: false` 后，启动期网络门禁仍在内存中强制开启鉴权，导致 `/mcp` 返回 401、CC 云 session 报 `MCP error 32003` 的问题。网络边界风险仍会进入诊断与告警，但不再覆盖用户明确选择的 MCP 鉴权开关。
+- Dashboard 将只读综合计算值由“权重分 / Weight”改称“活跃度分 / Activity score”，明确它由 importance、时间、激活次数、唤醒度和解决状态共同计算；`importance` 仍可编辑，综合分不新增人工或模型覆盖入口。
+
+### 测试 / Tests
+
+- 增加非回环云环境下免鉴权配置保持生效的回归，覆盖运行配置、MCP 中间件和 OAuth 路由使用同一关闭鉴权快照。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与热更新优先读取的 `src/VERSION` 同步更新为 `2.11.1`。
+
 ## 2.11.0
 
 ### 新增 / Added

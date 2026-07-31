@@ -115,6 +115,14 @@ def test_dashboard_uses_display_text_for_preview_and_raw_content_for_editor():
     assert "'<div class=\"detail-content\">' + esc(b.content)" not in source
 
 
+def test_dashboard_names_the_calculated_score_as_read_only_activity():
+    source = _dashboard_function("showDetail", "bucketPin")
+
+    assert "活跃度分 / Activity score" in source
+    assert "权重分 / Weight" not in source
+    assert "b.score.toFixed(4)" in source
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node.js is unavailable")
 def test_dashboard_detail_renders_meaning_as_escaped_quote_blocks():
     html = DASHBOARD.read_text(encoding="utf-8")

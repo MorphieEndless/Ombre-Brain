@@ -231,15 +231,17 @@ def enforce_mcp_network_guard(
     environment: Mapping[str, str] | None = None,
     in_docker: bool = False,
 ) -> dict[str, Any]:
-    """在启动期安全收紧旧配置，同时保留 Dashboard 与修复入口。"""
+    """记录免鉴权网络风险，但不覆盖用户明确选择的运行配置。
+
+    ``mcp_require_auth`` 是 MCP 中间件的唯一开关。风险评估仍供启动日志、
+    Dashboard 和部署向导使用，但不能把已保存或环境变量中的 ``false``
+    静默改回 ``true``，否则客户端只会看到与配置相矛盾的 401。
+    """
     decision = assess_mcp_network_safety(
         runtime_config,
         environment=environment,
         in_docker=in_docker,
     )
-    if decision["guard_required"]:
-        runtime_config["mcp_require_auth"] = True
-        decision["guard_active"] = True
     runtime_config[_MCP_NETWORK_SECURITY_KEY] = dict(decision)
     return decision
 

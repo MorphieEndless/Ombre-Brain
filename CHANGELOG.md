@@ -2,6 +2,31 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.13.1
+
+### 修复 / Fixed
+
+- 修复热更新因完整性清单不符而整包中止：`update_manifest.json` 首次入库时是在
+  Windows 工作区生成的，记录的是 CRLF 字节，而 GitHub 源码归档携带的是仓库里的
+  内容，206 个文件里有 170 个大小/哈希对不上，更新在 `frontend/onboarding.html`
+  处中止（清单记 10819 字节，归档里是 10621）。
+- `deploy/gen_update_manifest.py` 改为直接读 Git 仓库存储字节（优先 index，回退
+  HEAD）生成清单，不再读工作区，也不用「文本一律归一为 LF」的启发式——本仓库
+  index 里有 9 个文件存的就是 CRLF、30 个是混合行尾，归一化会把这 39 个反向算错。
+  文件不在 index 也不在 HEAD 时直接报错，不再拿工作区字节顶替。
+- 发布顺序固定为：先 `git add` 代码改动，再生成清单——清单描述的是仓库内容，
+  不是磁盘内容。
+
+### 测试 / Tests
+
+- 新增 `tests/test_update_manifest_repo_bytes.py`：用临时 git 仓库复现
+  「index 存 LF / 工作区 CRLF」与「index 存 CRLF」两种会被算错的形态，
+  并校验仓库现有清单与 HEAD 字节逐条一致。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.13.1`。
+
 ## 2.13.0
 
 ### 新增 / Added

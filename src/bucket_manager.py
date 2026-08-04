@@ -2397,7 +2397,13 @@ class BucketManager:
                   # 表示「最后一次合并是 hold 还是 grow 触发的」。
                   # _pre_anchor_source_tool 是 anchor 时保存的原始 source_tool，
                   # release 时自动恢复；None 表示删除该字段。
-                  "source_tool", "grow_batch_id", "last_merged_by", "_pre_anchor_source_tool"):
+                  "source_tool", "grow_batch_id", "last_merged_by", "_pre_anchor_source_tool",
+                  # I 沉淀机制字段（tools/i/core.py 维护，bucket_manager 不生成也不解读）：
+                  # i_stage        "candidate" | "promoted"，标一条普通记忆是 I 候选
+                  # i_dream_dates  被 dream 见证过的日期列表（按天去重），升级门槛的唯一依据
+                  # i_promoted_to  候选升级后指向的正式 I 桶 ID
+                  # i_from_candidate 正式 I 桶指回它的候选桶 ID
+                  "i_stage", "i_dream_dates", "i_promoted_to", "i_from_candidate"):
             if k in kwargs:
                 if k == "weight" and kwargs[k] is not None:
                     post[k] = _clamp01(kwargs[k], _DEFAULT_VALENCE)

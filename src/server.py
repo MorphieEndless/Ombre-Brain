@@ -1019,12 +1019,18 @@ async def I(
     aspect: Optional[str] = "",
     read: Optional[bool] = False,
     limit: Optional[int] = 20,
+    promote: Optional[str] = "",
 ) -> str:
-    """记录或读取自我认知条目。content=要记录的自我认知内容(空=进入读取模式)。aspect=维度:nature(本质)/values(看重的)/patterns(规律)/limits(局限)/becoming(变化方向)/uncertainty(不确定的)/stance(立场)(可选)。read=True=读取所有已积累条目。limit=返回条数上限(默认 20)。条目不参与普通 breath/dream，SessionStart 时自动附最近 3 条。"""
+    """写下或读取自我认知。I 是沉淀物不是日记：content=一个「我觉得……」，先落成一条普通记忆（候选），会浮现也会衰减，每次 dream 都跟相关记忆摆在一起碰撞。aspect=维度:nature(本质)/values(看重的)/patterns(规律)/limits(局限)/becoming(变化方向)/uncertainty(不确定的)/stance(立场)(可选)。read=True 或全空=读正式条目+待沉淀候选。limit=返回条数上限(默认 20)。promote=候选桶ID，被 3 次不同日期的 dream 见证后才能升级成正式条目（可同时传 content 用提炼后的措辞）。正式条目不参与普通 breath/dream，SessionStart 时自动附最近 3 条。"""
     return await _with_notice(
-        _t_i.dispatch(content=content, aspect=aspect, read=read, limit=limit),
+        _t_i.dispatch(
+            content=content, aspect=aspect, read=read, limit=limit, promote=promote
+        ),
         op="I",
-        args={"content_len": len(content or ""), "aspect": aspect, "read": read, "limit": limit},
+        args={
+            "content_len": len(content or ""), "aspect": aspect, "read": read,
+            "limit": limit, "promote": promote,
+        },
     )
 
 

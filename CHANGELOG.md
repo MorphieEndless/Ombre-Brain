@@ -2,6 +2,28 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.12.0
+
+### 新增 / Added
+
+- 新增开发侧离线 `HN-F1` 候选工具：以严格枚举元数据执行 PAS10 计数档位归一化，并用纯整数 Pareto-DP 对 PAS12 的 `P0/M1/Rtech` 粗分区给出可复核的精确可行、精确不可行或资源不确定结果。
+- 新增候选机器合同、输入成员集合绑定、实现与 schema 哈希绑定、独立 witness 复核，以及 `aggregate-last.v1` 两文件逻辑提交协议。aggregate 仅在最后发布；缺少 aggregate 或两文件结构、共同字段、场景投影、私有运行记录哈希不一致时，不得把结果视为已提交 receipt。
+
+### 安全与边界 / Security & Boundaries
+
+- 除读取自身实现两次以核对运行前后完整性外，工具的业务输入只来自由外部管理员事前建立并证明 ACL／单写者边界的受限目录中的无正文枚举 JSON；它不读取 OB 配置、环境变量、真实 vault、模型输出或网络资源。代码内的路径与文件模式检查只是事故防护，不证明现实 ACL、owner、不可变性或跨文件事务。源码位于 Docker 构建上下文排除的 `tools/`，不新增 MCP、Dashboard 或线上运行入口。
+- 当前实现只是未冻结的 PAS10 候选归一化器与 PAS12 候选数学核，不计算 PAS01–PAS14 治理状态，不执行 donor 联系、真实数据实验、PAS13 公开投影或 PAS14 授权。正式 PAS 哈希与批准状态不能由候选输出替代。
+- `max_seconds` 是归一化与 LB/UB 共用的协作式单调时钟预算；检查到超时只返回资源错误与数学不确定。它不是硬 wall-clock 隔离，正式运行仍需外部 watchdog、内存/CPU 限制与冻结的恢复规则。
+
+### 测试 / Tests
+
+- 增加计数档位、nonresponse、资格/处置、frame/implementation/schema 绑定、严格 JSON、输出 pair 一致性、CLI 泄漏与受限路径回归。
+- 增加独立 `4^N` 小规格穷举对照、固定 44 人边界、M1 cap、零目标、Pareto 剪枝、早停、witness 篡改与资源上限 fail-closed 回归。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与热更新优先读取的 `src/VERSION` 同步更新为 `2.12.0`。
+
 ## 2.11.1
 
 ### 修复 / Fixed

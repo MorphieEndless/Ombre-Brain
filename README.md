@@ -341,27 +341,27 @@ claude mcp add ombre-brain --transport http https://ombre.example.com/mcp
 
 适合：OB 与自有前端 / GPT / GLM / 自定义脚本运行在**同一设备**，客户端又不支持 OAuth 或自定义 Token 请求头。
 
-默认情况下，HTTP(S) `/mcp` 会**强制 OAuth 2.1**（这是 Claude.ai 网页版的要求）。第三方客户端不实现 OAuth 时，优先使用下方“静态 Token 鉴权”；只有端口明确限制在本机回环时才关闭鉴权：
+默认情况下，HTTP(S) `/mcp` 会**强制 OAuth 2.1**（这是 Claude.ai 网页版的要求）。第三方客户端不实现 OAuth 时，优先使用下方“静态 Token 鉴权”；确认网络边界安全后也可明确关闭鉴权：
 
 ```bash
 # 裸机 / Python：写入 .env，或在 bash 中 export 后再启动服务
 export OMBRE_BIND_HOST=127.0.0.1
 export OMBRE_MCP_REQUIRE_AUTH=false
 
-# config.yaml（仍需配合上面的回环监听）
+# config.yaml
 mcp_require_auth: false
 ```
 
-裸机修改后需**重启服务**。官方 Docker Compose 默认把宿主端口绑定到 `127.0.0.1`，并把 `OMBRE_BIND_ADDRESS` 传入容器供安全门禁核验。
+修改后需**重启服务**。官方 Docker Compose 默认把宿主端口绑定到 `127.0.0.1`，并把 `OMBRE_BIND_ADDRESS` 传入容器供风险诊断。
 
-2.8.12 之前已关闭鉴权的旧 Docker 实例若只热更新代码，旧 Compose 不会自动获得这个新增声明，因此会安全回退为鉴权并出现 `401`。OAuth/静态 Token 用户无需处理；受影响用户需重新下载同版本 Compose 并重建容器（持久记忆卷不受影响）：
+2.8.12–2.11.0 在非回环或无法确认的云环境中会把明确的 `false` 在内存中强制改回鉴权，表现为配置已关闭但 `/mcp` 仍返回 `401`、部分客户端报告 `MCP error 32003`。升级到 2.11.1+ 并重启即可；持久记忆卷不受影响：
 
 ```bash
 curl -O https://raw.githubusercontent.com/P0luz/Ombre-Brain/main/deploy/docker-compose.user.yml
 docker compose -f docker-compose.user.yml up -d --force-recreate
 ```
 
-> ⚠️ **安全门禁**：关闭鉴权后，任何能访问 `/mcp` 的人都能读写全部记忆。非回环地址（包括局域网/NAS 的 `0.0.0.0`）或无法确认 Docker 宿主绑定时，OB 会在启动期只对当前进程强制恢复鉴权，并拒绝 Dashboard / 向导保存该危险组合；原配置文件不会被改写。已有可信外部鉴权边界的高级部署可显式设置 `OMBRE_ALLOW_INSECURE_MCP=true`，但这会接受匿名访问到达 OB 后的全部风险。外部独立隧道可能把回环端口转发到公网，OB 无法自动识别，仍应使用 OAuth 或静态 Token；内置 Tunnel 默认阻止免鉴权启动，仅上述显式高风险豁免会放行并记录严重告警。
+> ⚠️ **风险提示**：关闭鉴权后，任何能访问 `/mcp` 的人都能读写全部记忆。OB 会在启动日志和 Dashboard 中持续报告非回环/未知边界风险，但 2.11.1 起不再暗中覆盖明确的 `mcp_require_auth: false`。Dashboard / 向导保存此危险组合、以及内置 Tunnel 免鉴权启动，仍要求显式设置 `OMBRE_ALLOW_INSECURE_MCP=true`；外部独立隧道可能把回环端口转发到公网，OB 无法自动识别，仍应优先使用 OAuth 或静态 Token。
 
 ---
 

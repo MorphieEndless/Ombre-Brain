@@ -4939,7 +4939,7 @@ async function showDetail(id) {
         '<div class="field"><label>唤醒度 / Arousal</label>A' + safeArousal.toFixed(2) + '</div>' +
         '<div class="field"><label>模型视角 / Model view</label>' + (safeModelValence != null ? 'V' + safeModelValence.toFixed(2) : '—') + '</div>' +
         '<div class="field"><label>重要度 / Importance</label>' + safeImportance + '/10</div>' +
-        '<div class="field"><label>权重分 / Weight</label>' + (b.score != null ? b.score.toFixed(4) : '—') + '</div>' +
+        '<div class="field"><label>活跃度分 / Activity score</label>' + (b.score != null ? b.score.toFixed(4) : '—') + '</div>' +
         '<div class="field"><label>激活次数 / Activations</label>' + safeActivationCount + '</div>' +
         '<div class="field"><label>已解决 / Resolved</label>' + (meta.resolved ? _SV.ok : '—') + '</div>' +
         '<div class="field"><label>已消化 / Digested</label>' + (meta.digested ? _SV.ok : '—') + '</div>' +

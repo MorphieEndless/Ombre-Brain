@@ -184,7 +184,7 @@ def test_explicit_override_is_reported_but_does_not_trigger_guard() -> None:
     assert mcp_network_safety_issue(decision) == ""
 
 
-def test_startup_guard_forces_auth_in_memory_and_preserves_diagnostic_snapshot() -> None:
+def test_startup_network_check_preserves_explicit_open_access_and_diagnostics() -> None:
     runtime = {"transport": "streamable-http", "mcp_require_auth": False}
 
     decision = enforce_mcp_network_guard(
@@ -192,8 +192,9 @@ def test_startup_guard_forces_auth_in_memory_and_preserves_diagnostic_snapshot()
         environment={"OMBRE_BIND_HOST": "0.0.0.0"},
     )
 
-    assert runtime["mcp_require_auth"] is True
-    assert decision["guard_active"] is True
+    assert runtime["mcp_require_auth"] is False
+    assert decision["guard_required"] is True
+    assert decision["guard_active"] is False
     assert runtime["_mcp_network_security"] == decision
 
     report = effective_configuration_report(
@@ -202,8 +203,9 @@ def test_startup_guard_forces_auth_in_memory_and_preserves_diagnostic_snapshot()
         environment={"OMBRE_BIND_HOST": "0.0.0.0"},
     )
     assert report["saved"]["mcp_require_auth"] is False
-    assert report["effective"]["mcp_require_auth"] is True
-    assert report["mcp_network_security"]["guard_active"] is True
+    assert report["effective"]["mcp_require_auth"] is False
+    assert report["mcp_network_security"]["guard_required"] is True
+    assert report["mcp_network_security"]["guard_active"] is False
     assert report["restart_required"] is False
 
     repaired_report = effective_configuration_report(
@@ -212,9 +214,9 @@ def test_startup_guard_forces_auth_in_memory_and_preserves_diagnostic_snapshot()
         environment={"OMBRE_BIND_HOST": "0.0.0.0"},
     )
     assert repaired_report["saved"]["mcp_require_auth"] is True
-    assert repaired_report["effective"]["mcp_require_auth"] is True
+    assert repaired_report["effective"]["mcp_require_auth"] is False
     assert repaired_report["mcp_network_security"]["guard_active"] is False
-    assert repaired_report["restart_required"] is False
+    assert repaired_report["restart_required"] is True
 
     platform_managed_report = effective_configuration_report(
         runtime,
@@ -225,8 +227,8 @@ def test_startup_guard_forces_auth_in_memory_and_preserves_diagnostic_snapshot()
         },
     )
     assert platform_managed_report["saved"]["mcp_require_auth"] is True
-    assert platform_managed_report["effective"]["mcp_require_auth"] is True
-    assert platform_managed_report["mcp_network_security"]["guard_active"] is True
+    assert platform_managed_report["effective"]["mcp_require_auth"] is False
+    assert platform_managed_report["mcp_network_security"]["guard_active"] is False
     assert platform_managed_report["mcp_network_security"]["auth_environment_override"] is True
     assert platform_managed_report["overrides"] == [{
         "env": "OMBRE_MCP_REQUIRE_AUTH",
@@ -236,7 +238,7 @@ def test_startup_guard_forces_auth_in_memory_and_preserves_diagnostic_snapshot()
     assert platform_managed_report["restart_required"] is False
 
 
-def test_guarded_config_drives_mcp_middleware_and_oauth_from_one_snapshot(
+def test_explicit_open_config_drives_mcp_middleware_and_oauth_from_one_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime = {
@@ -250,8 +252,8 @@ def test_guarded_config_drives_mcp_middleware_and_oauth_from_one_snapshot(
     )
     monkeypatch.setattr(oauth.sh, "config", runtime)
 
-    assert HTTPRuntimeSettings.from_config(runtime).auth_required is True
-    assert oauth._oauth_required_from_config() is True
+    assert HTTPRuntimeSettings.from_config(runtime).auth_required is False
+    assert oauth._oauth_required_from_config() is False
 
 
 def test_system_diagnostics_directs_platform_managed_guard_to_the_platform() -> None:

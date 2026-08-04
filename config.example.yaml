@@ -26,13 +26,12 @@ log_level: "INFO"
 # --- MCP remote auth / MCP 远程鉴权开关 ---
 # true  (默认): HTTP(S) /mcp 必须鉴权；具体使用 OAuth、静态 Token 或共存模式由下项选择。
 # false: 完全跳过 OAuth，仅允许配合已确认的本机回环网络边界使用。
-# 第三方客户端不支持 OAuth 时优先选择下面的静态 Token 模式；局域网/NAS 也必须鉴权。
-# 裸机免鉴权需同时设置 OMBRE_BIND_HOST=127.0.0.1；官方 Docker Compose 会声明宿主绑定。
-# 非回环或未知边界会在启动期被安全门禁强制恢复鉴权，Dashboard/向导也会拒绝保存。
+# 第三方客户端不支持 OAuth 时优先选择下面的静态 Token 模式。
+# false 会按用户明确配置生效；非回环/未知边界会产生高风险诊断，但不会被静默改回 true。
+# Dashboard/向导保存非回环免鉴权配置仍要求显式风险确认。
 # true (default): require auth on HTTP(S) /mcp; select OAuth or static-token mode below.
-# false: skip OAuth only on a confirmed loopback-only boundary. Prefer static-token mode for
-#        third-party clients and all LAN/NAS access. Bare-metal no-auth also requires
-#        OMBRE_BIND_HOST=127.0.0.1; unsafe or unknown boundaries are forced back to auth at startup.
+# false: skip MCP auth after restart. Prefer static-token mode for LAN/NAS/public access;
+#        open access lets every caller reaching /mcp read and write the memory vault.
 mcp_require_auth: true
 
 # --- MCP auth mode / MCP 鉴权模式（仅 mcp_require_auth: true 时生效）---

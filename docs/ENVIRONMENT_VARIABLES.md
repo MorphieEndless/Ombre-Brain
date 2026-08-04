@@ -38,7 +38,7 @@
 - `OMBRE_MCP_REQUIRE_AUTH`：是否要求 MCP 鉴权。
 - `OMBRE_MCP_AUTH_MODE`：`oauth`、`token` 或 `hybrid`。`hybrid` 保留 OAuth 动态注册，同时让 `Authorization: Bearer` 也接受预置静态 Token；关闭鉴权仍由 `OMBRE_MCP_REQUIRE_AUTH=false` 控制。
 - `OMBRE_MCP_TOKEN`：静态 Token / OAuth + 静态 Token 共存模式的预置密钥。
-- `OMBRE_ALLOW_INSECURE_MCP`：高风险逃生阀。仅显式设为 `true` 时，才允许在非回环或无法确认的网络边界关闭 MCP 鉴权；默认关闭，不应在普通、NAS 或公网部署中设置。
+- `OMBRE_ALLOW_INSECURE_MCP`：Dashboard / 部署向导保存非回环免鉴权组合、以及内置 Tunnel 免鉴权启动时的高风险确认。直接设置 `OMBRE_MCP_REQUIRE_AUTH=false` 会按明确配置生效；该变量不再是启动期暗中改写鉴权开关的条件。
 - `OMBRE_DASHBOARD_PASSWORD`：Dashboard 密码。
 - `OMBRE_DASHBOARD_SESSION_DAYS`：Dashboard 登录会话天数。
 - `OMBRE_TRUSTED_PROXY_CIDRS`：直接连接 OB 的最后一跳可信反向代理 CIDR；不是公网客户端 IP 或域名，禁止使用 `0.0.0.0/0`。官方 Compose 模板会从 `.env` 透传该值，修改后需要重新创建容器。

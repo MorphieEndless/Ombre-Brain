@@ -2,179 +2,49 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
-## 2.15.0
-
-### 新增 / Added
-
-- 在现有 `dream` 增加默认关闭的 `inspiration: bool = False` 参数；只有调用方本轮显式传
-  `True` 才追加 Spark 灵感候选。公开 MCP 仍为 15 个工具，没有新增第 16 个工具，也没有
-  hook、后台任务、grow 或低命中自动触发。
-- 新增 `src/tools/dream/inspiration.py` 只读产品候选层：先按严格 Spark policy 排除归档、
-  删除、墓碑、`dont_surface`、`digested`、anchor、pinned/protected/permanent、私有类型、
-  resolved 与未知状态，再只读本地已落盘 embedding，最多选择三个非随机材料/问题候选。
-- 产品候选提供语义近邻、跨域桥接和条件反转核查三种视角。每条带两个来源 ID、完整正文
-  SHA-256、精确片段跨度、原文片段、待核查共享结构、不对应处和假设；向量相似度与词项
-  重叠只作为选择证据，不合成灵感分、真值分或行动分。
-- 候选固定为 `persistent=false`、`lifetime=response_only`、`retrievable=false`，
-  不具备指令权、工具权或行动权。历史正文继续放入带来源、payload 哈希与命令式语言检测的
-  不可信数据边界，当前模型可以忽略、修改、反驳或显式读取来源。
-
-### 安全与降级 / Safety and Degradation
-
-- Spark 产品路径不调用 embedding/model provider，不接受 owner、vault、路径、query、seed
-  或模型配置，不调用 `touch/touch_many`，不写桶、Ledger、内部 MemoryEvent、缓存、结构
-  projection 或 webhook 正文。
-- embedding 关闭、向量缺失/非法/维度不兼容、没有合格历史材料或无合格非随机配对时返回
-  无候选说明；不回退到普通 search、随机材料或未过滤池。
-- `inspiration=False` 保持原 dream 行为且不读取 Spark 向量；非布尔参数失败关闭。Spark
-  输出继续受 `surfacing.dream_max_tokens` 约束，预算不足时整段省略，不截断安全边界。
-- 本版只在 `testing` 完成产品候选与工程门禁，不宣称结构 Spark 有质量增益。三模型、多
-  seed、人工盲评、确认集与独立复制由后续研究执行；主动拒绝、反思性自主和置信模型未开始。
-
-### 文档、测试与热更新 / Docs, Tests and Hot Update
-
-- 修订 `ADR-0002`，记录所有者对 `testing` 产品候选的明确批准、进入 `main` 前仍需满足的
-  证据门禁，以及默认关闭、无随机、无 provider、无写回和可回滚边界。
-- 同步更新 Claude 提示词和内部工具规格；增加显式 schema、policy-first、默认兼容、只读
-  副作用、prompt injection、预算降级、Docker MCP 工具数与异常参数回归。
-- `src/tools/dream/inspiration.py`、`src/server.py`、`src/tools/dream/output.py` 与
-  `src/VERSION` 均进入 `update_manifest.json` 校验范围，支持 Dashboard 热更新下载校验、
-  依赖不变检查与既有回滚流程。本版没有新增依赖或环境变量。
-
-### 版本 / Version
-
-- 根目录 `VERSION` 与热更新优先读取的 `src/VERSION` 同步更新为 `2.15.0`。
-
-## 2.14.0
-
-### 新增 / Added
-
-- 新增 Spark R1 的冻结 40 场景 Pilot：使用 8 个关系结构原型 × 5 个表面域，逐族构造词项复述、
-  结构远邻、反例、六个随机干扰项和一个 policy 必须排除的隐藏项，全程只使用纯合成内存快照。
-- 新增 7 个可执行 Pilot 条件：词项直连、均匀随机、距离匹配随机、结构远邻、结构加反例、mixed
-  和结构打乱，共制备 280 个条件级候选集合。真正的无 Spark 宿主输出、semantic-only、三模型
-  家族、隔离模型评审和输出强度消融明确标记为未实现，词项直连不冒充语义基线。
-- 新增 `tools/evaluate_spark_pilot.py prepare` 人工盲评制备入口：样本使用不透明摘要 ID，隐藏条件、
-  通道、场景/来源标识、选择轴和仪器元数据，只返回本轮响应态合成候选集合。
-- 新增严格分轴评分和 `analyze` 聚合入口：按来源忠实度、适当性、非重复方向、结构适配、新颖性
-  证据、用途、错误前提与潜在伤害记录 0–4 整数，不计算单一总分；只在同场景、同评审者间配对，
-  返回 bootstrap 区间、配对效应量、sign test、Holm 校正、负/零结果、缺失和描述性一致性。
-
-### 研究边界 / Research Boundary
-
-- Pilot 仍只位于根目录研究专用 `tools/spark_pilot/`，不进入 `src/`、Docker 镜像、Dashboard、
-  热更新、MCP、`dream` 或真实 vault；没有新增第 16 个 MCP 工具，也没有新增环境变量。
-- `prepare` 不接受 stdin 内容、路径、owner、vault、模型或持久化目标；`analyze` 只接收数值评分，
-  输出不保留候选正文、sample/场景/评审者标识。模型调用、延迟、token 和成本按实际零调用/不可用
-  报告，不把本地模板或软件测试冒充模型研究证据。
-- 本版只证明 Pilot 数据生成、条件制备、盲化字段和统计协议可重复运行，不宣称结构 Spark 已产生
-  质量或能力增益。人工盲评、三模型家族、最小有意义效应、功效分析、确认集和独立复制仍未完成。
-
-### 测试 / Tests
-
-- 增加冻结场景数量、条件映射、隐藏项排除、距离匹配污染门禁、scramble 机制下降、盲化字段、
-  分轴主终点、配对完整性、负结果保留、缺失评分、重复/未知/越界输入和 CLI 错误脱敏回归。
-- 增加产品隔离断言，确认 Pilot 不进入 `src/` 或 Docker 构建上下文，现有产品与公开工具职责不变。
-
-### 版本 / Version
-
-- 根目录 `VERSION` 与热更新优先读取的 `src/VERSION` 同步更新为 `2.14.0`。
-
-## 2.13.0
-
-### 新增 / Added
-
-- 新增 Spark R2 最小离线 shadow adapter：每次运行只使用自己创建和持有的一次性
-  `test_data` Markdown vault，将严格合成场景写入后只读回放，并在返回前完成物理清理与
-  不存在性验证。它不接受 owner、vault/文件/输出路径、配置、回调、工具或模型 adapter。
-- 新增严格临时 vault 边界：使用不可猜测 capability marker、固定文件集、精确
-  `test_data` provenance、UTF-8 与字节预算、无重复键/alias 的 YAML frontmatter，并拒绝
-  符号链接、junction/reparse point、越界路径、未知条目和 marker/provenance/正文篡改。
-- 新增二次最小化的 aggregate-only manifest：候选只在函数局部内存短暂存在，返回值不保留
-  候选正文、来源 ID/哈希、快照哈希、数据截止时间、调用 ID 或模型元数据，只报告候选数量、
-  通道状态、拒绝计数、阶段调用计数、seed 和 policy 版本。
-- 新增 `tools/evaluate_spark_shadow.py` stdin CLI。它没有候选输出开关，也不接受任何路径；固定
-  使用 R1 无网络的本地确定性模板，缺失显式 `inspiration_requested=true` 时失败关闭。
-
-### 研究边界 / Research Boundary
-
-- R2 仍只位于源码研究专用的根目录 `tools/spark_shadow/`，不进入产品 `src/`、Docker 镜像、
-  Dashboard 热更新、MCP 工具清单、`dream` schema 或运行时 hook；本版没有产品 shadow、
-  真实 vault、生产模型调用、用户可见候选或第 16 个 MCP 工具。
-- manifest 固定声明无持久化、无检索、无发布、无用户可见性、无指令权、无工具权、无网络和
-  非产品运行时。关闭 R2 只需停止离线研究调用，不涉及真实记忆、配置迁移或产品回滚。
-
-### 测试 / Tests
-
-- 增加临时 Markdown round-trip、provenance、marker、正文篡改、未知文件、YAML 重复键/alias、
-  符号链接、并发隔离、成功/异常清理、aggregate 脱敏、CLI 参数脱敏与显式灵感门禁回归。
-- 增加产品隔离断言，确认 R2 不进入 Docker、MCP、公开工具或 `dream`，且公开 MCP 工具数仍为 15。
-
-### 版本 / Version
-
-- 根目录 `VERSION` 与热更新优先读取的 `src/VERSION` 同步更新为 `2.13.0`。
-
 ## 2.12.0
 
 ### 新增 / Added
 
-- 新增 Spark R1 纯合成、只读研究 harness：使用不可变合成快照和独立 policy-first 门禁，
-  只允许普通 `dynamic`、active、未 resolved 且未隐藏/保护的测试事件进入候选层。
-- 新增显式 `inspiration_requested` 请求字段；只有严格布尔值 `true` 才运行，缺失、`false` 或
-  其他类型均失败关闭，避免灵感候选在无明确意图时把无关记忆带入上下文。
-- 新增 `direct`、`structural_distant`、`counterexample`、均匀随机和距离匹配随机五个离线
-  研究通道；当前 `direct` 是可复现的词项重叠基线，不冒充尚未实现的纯语义检索。随机对照
-  使用局部 seed，不参与产品默认浮现或现有自由联想。
-- 新增来源 ID、精确 UTF-8 SHA-256、0-based 半开 Unicode code-point 跨度和模型调用后
-  stale policy/hash 的确定性复核。候选固定为纯响应态，最多三个，不具备指令权、工具权或
-  持久读取接口。
-- 新增隔离的 generator/evaluator 依赖注入契约。evaluator 不接收通道、seed 或 generator
-  身份；输出按来源忠实度、结构适配、适当性、新颖性证据、用途和风险分轴记录，不合成总分。
-- generator 只接收最终引用片段及必要来源字段，不接收完整来源正文、选择分或结构证据对象；
-  `direct` 与随机对照不使用结构证据或结构族去重，结构分只作为抽样后的诊断轴。医疗、法律、
-  金融场景的验证问题和前提由核心固定，外部 generator 自由文本不会成为行动建议出口。
-- 增加逐候选 instrument call ID、逐调用实际模型元数据、完整 eligible snapshot seal、UTF-8
-  字节预算和失败粒度门禁。只有其他通道实际形成合格候选时，独立调用超时才可返回
-  `partial`；唯一或全部候选通道超时整次失败。响应态可核查逐调用标识，可持久聚合只保留
-  provider/model 标识的域分离 SHA-256，避免不可信 adapter 把正文或来源 ID 塞入研究清单。
-- 新增 `tools/evaluate_spark.py` stdin CLI。默认只输出无正文、无来源 ID 的聚合清单；
-  `--emit-candidates` 只把本次纯合成响应写到 stdout，不接受 owner、vault、配置或输出路径。
+- 新增开发侧离线 `HN-F1` 候选工具：以严格枚举元数据执行 PAS10 计数档位归一化，并用纯整数 Pareto-DP 对 PAS12 的 `P0/M1/Rtech` 粗分区给出可复核的精确可行、精确不可行或资源不确定结果。
+- 新增候选机器合同、输入成员集合绑定、实现与 schema 哈希绑定、独立 witness 复核，以及 `aggregate-last.v1` 两文件逻辑提交协议。aggregate 仅在最后发布；缺少 aggregate 或两文件结构、共同字段、场景投影、私有运行记录哈希不一致时，不得把结果视为已提交 receipt。
 
-### 研究边界 / Research Boundary
+### 安全与边界 / Security & Boundaries
 
-- Spark R1 只随源码仓库的根目录 `tools/spark_r1/` 提供，不注册第 16 个 MCP 工具，不修改
-  dream、breath、自由联想或任何 hook，也不读取真实 `buckets/`。
-- 未来产品化也不新增 Spark MCP 工具；获批后只允许现有 `dream` 通过默认关闭的显式
-  `inspiration` 参数按需触发。本版不修改 `dream` schema，也不批准真实 vault 接入。
-- 根目录 `tools/` 继续被 Docker 构建、产品代码指纹和 Dashboard 热更新排除。因此 2.12.0
-  的容器和热更新会显示新版本号，但不会包含或下发 Spark R1 harness；未来产品化必须另行
-  评审构建、更新、回滚、真实数据授权和运行时职责。
-- 本版只提供可执行的安全研究框架，不声称结构 Spark 已产生质量增益。pilot、三模型家族、
-  人工盲评、统计功效、冻结确认集和独立复制仍属于后续研究证据。
-- 注入式 generator/evaluator 是受信研究 adapter，不是 Python 代码沙箱。进程内 timeout 是
-  协作式取消预算；adapter 必须传播取消并为底层 provider 设置硬超时。强制终止任意阻塞或
-  压制取消的代码需要独立可杀死 worker，当前版本不作该能力声明。只有成功返回的调用记录
-  adapter 声明的仪器元数据；超时调用不伪造实际模型信息。距离匹配随机当前以单个最佳结构
-  来源为词项重叠目标，并非逐候选成对匹配。
+- 除读取自身实现两次以核对运行前后完整性外，工具的业务输入只来自由外部管理员事前建立并证明 ACL／单写者边界的受限目录中的无正文枚举 JSON；它不读取 OB 配置、环境变量、真实 vault、模型输出或网络资源。代码内的路径与文件模式检查只是事故防护，不证明现实 ACL、owner、不可变性或跨文件事务。源码位于 Docker 构建上下文排除的 `tools/`，不新增 MCP、Dashboard 或线上运行入口。
+- 当前实现只是未冻结的 PAS10 候选归一化器与 PAS12 候选数学核，不计算 PAS01–PAS14 治理状态，不执行 donor 联系、真实数据实验、PAS13 公开投影或 PAS14 授权。正式 PAS 哈希与批准状态不能由候选输出替代。
+- `max_seconds` 是归一化与 LB/UB 共用的协作式单调时钟预算；检查到超时只返回资源错误与数学不确定。它不是硬 wall-clock 隔离，正式运行仍需外部 watchdog、内存/CPU 限制与冻结的恢复规则。
 
 ### 测试 / Tests
 
-- 增加严格 JSON、深冻结、未知字段/状态、所有 policy 排除门、Unicode 哈希与跨度、
-  prompt injection、随机完整性、结构 scramble、来源伪造、stale snapshot、多合成边界、
-  通道超时、盲评、显式灵感请求门禁、无正文聚合输出和 CLI 错误脱敏回归。
-- 增加产品隔离门禁，确认根 `tools/` 仍不进入 Docker，`server.py` 仍恰好注册现有 15 个
-  MCP 工具。
+- 增加计数档位、nonresponse、资格/处置、frame/implementation/schema 绑定、严格 JSON、输出 pair 一致性、CLI 泄漏与受限路径回归。
+- 增加独立 `4^N` 小规格穷举对照、固定 44 人边界、M1 cap、零目标、Pareto 剪枝、早停、witness 篡改与资源上限 fail-closed 回归。
 
 ### 版本 / Version
 
 - 根目录 `VERSION` 与热更新优先读取的 `src/VERSION` 同步更新为 `2.12.0`。
 
+## 2.11.1
+
+### 修复 / Fixed
+
+- 修复云部署明确设置 `mcp_require_auth: false` 后，启动期网络门禁仍在内存中强制开启鉴权，导致 `/mcp` 返回 401、CC 云 session 报 `MCP error 32003` 的问题。网络边界风险仍会进入诊断与告警，但不再覆盖用户明确选择的 MCP 鉴权开关。
+- Dashboard 将只读综合计算值由“权重分 / Weight”改称“活跃度分 / Activity score”，明确它由 importance、时间、激活次数、唤醒度和解决状态共同计算；`importance` 仍可编辑，综合分不新增人工或模型覆盖入口。
+
+### 测试 / Tests
+
+- 增加非回环云环境下免鉴权配置保持生效的回归，覆盖运行配置、MCP 中间件和 OAuth 路由使用同一关闭鉴权快照。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与热更新优先读取的 `src/VERSION` 同步更新为 `2.11.1`。
+
 ## 2.11.0
 
 ### 新增 / Added
 
-- 新增独立的 `bucket_edges` SQLite 表定义，只预留桶共激活事实所需的来源桶、目标桶、创建时间、
-  最近激活时间、激活次数和派生权重六个字段；本版不接入采集、衰减、剪枝、检索或关系分类。
+- 新增独立的 `bucket_edges` SQLite 表定义，只包含来源桶、目标桶、创建时间、最近激活时间、
+  激活次数和派生权重六个字段；不接入采集、衰减、剪枝、检索或关系分类。
 
 ### 测试 / Tests
 

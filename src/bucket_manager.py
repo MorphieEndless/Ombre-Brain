@@ -1398,6 +1398,7 @@ class BucketManager:
         defer_derived_index: bool = False,
         imported: bool = False,
         source_refs: Any = None,
+        event_actor: str = "system",
     ) -> str:
         """
         Create a new memory bucket, return bucket ID.
@@ -1507,10 +1508,11 @@ class BucketManager:
             metadata["type"] = "permanent"
 
         # --- iter 2.0: 来源工具与 grow 批次 ---
-        # source_tool 留空 = 调用方未声明（兼容老逻辑），不写 frontmatter。
+        # 今后所有记忆必须声明来源。旧调用方未传时统一标为 direct，避免
+        # footprint 只说“创建”却无法让模型判断这条记忆从哪里来。
         # grow_batch_id 仅 grow 路径会传，hold/feel 不会有这个字段。
-        if source_tool:
-            metadata["source_tool"] = str(source_tool).strip()[:_SOURCE_TOOL_MAX]
+        declared_source = str(source_tool or "direct").strip()[:_SOURCE_TOOL_MAX]
+        metadata["source_tool"] = declared_source or "direct"
         if grow_batch_id:
             metadata["grow_batch_id"] = str(grow_batch_id).strip()[:_GROW_BATCH_ID_MAX]
 
@@ -1703,6 +1705,7 @@ class BucketManager:
             str(metadata.get("type") or bucket_type),
             linked_content,
             metadata,
+            {"event_actor": str(event_actor or "system").strip().lower()},
         )
 
         return bucket_id
@@ -2005,6 +2008,7 @@ class BucketManager:
         old_str: str,
         new_str: str,
         append_plan_history: bool = False,
+        event_actor: str = "system",
         **kwargs,
     ) -> dict[str, Any]:
         """Atomically replace one unique literal fragment in a bucket body.
@@ -2089,6 +2093,7 @@ class BucketManager:
                 committed = await self._update_locked(
                     bucket_id,
                     _derived_state_out=derived_state,
+                    event_actor=event_actor,
                     **updates,
                 )
             except ValueError as exc:
@@ -2123,6 +2128,7 @@ class BucketManager:
         *,
         allow_embedding_fallback: bool = False,
         bump_active: bool = False,
+        event_actor: str = "system",
         **kwargs,
     ) -> bool:
         """
@@ -2142,6 +2148,7 @@ class BucketManager:
                 bucket_id,
                 allow_embedding_fallback=allow_embedding_fallback,
                 bump_active=bump_active,
+                event_actor=event_actor,
                 _derived_state_out=derived_state,
                 **kwargs,
             )
@@ -2161,6 +2168,7 @@ class BucketManager:
         _derived_state_out: dict[str, Any],
         allow_embedding_fallback: bool = False,
         bump_active: bool = False,
+        event_actor: str = "system",
         **kwargs,
     ) -> bool:
         file_path = self._find_bucket_file(bucket_id)
@@ -2505,7 +2513,10 @@ class BucketManager:
             str(post.get("type") or "dynamic"),
             post.content or "",
             dict(post.metadata),
-            {"changed_fields": sorted(str(k) for k in kwargs.keys())},
+            {
+                "changed_fields": sorted(str(k) for k in kwargs.keys()),
+                "event_actor": str(event_actor or "system").strip().lower(),
+            },
         )
 
         return True

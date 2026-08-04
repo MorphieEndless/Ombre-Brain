@@ -1039,6 +1039,7 @@ async def _merge_or_create_inner(
             title=title,
             why_remembered=why_remembered,
             source_tool=source_tool,
+            event_actor="llm",
             grow_batch_id=grow_batch_id,
             meaning=meaning,
             media=media,

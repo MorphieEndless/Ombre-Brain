@@ -994,9 +994,12 @@ def test_cli_rejects_obvious_desktop_sync_and_git_roots(tmp_path):
 def test_limited_reader_and_output_pair_fail_closed(monkeypatch, tmp_path):
     oversized = tmp_path / "oversized.json"
     oversized.write_bytes(b"12345")
-    monkeypatch.setattr(checker, "MAX_INPUT_BYTES", 4)
-    with pytest.raises(checker.PasCheckerError, match="INPUT_TOO_LARGE"):
-        checker._read_limited_file(oversized)
+    # 只在 limited-reader 断言内缩小上限；后面的合法 output pair 仍需按
+    # 生产上限构造，否则 helper 自己会被残留的 4-byte 上限误伤。
+    with monkeypatch.context() as reader_patch:
+        reader_patch.setattr(checker, "MAX_INPUT_BYTES", 4)
+        with pytest.raises(checker.PasCheckerError, match="INPUT_TOO_LARGE"):
+            checker._read_limited_file(oversized)
 
     private_path = tmp_path / "private.json"
     aggregate_path = tmp_path / "aggregate.json"

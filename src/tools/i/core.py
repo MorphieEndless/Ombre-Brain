@@ -82,6 +82,7 @@ async def _write_i(content: str, aspect: str) -> str:
             why_remembered="",
             weight=0.8,
             source_tool="I",
+            event_actor="llm",
         )
     except Exception as e:
         return f"写入失败: {e}"

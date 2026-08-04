@@ -2,6 +2,22 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.12.1
+
+### 修复 / Fixed
+
+- 解钉现在必须在同一次 LLM `trace` 或 Dashboard 请求中明确给出 `importance=1..10`，并原子落盘为动态桶；不再让解除核心后的记忆沿用 999 分短路或依赖第二次补写。
+- 新记忆统一声明 `source_tool`，内部 append-only Footprint 记录创建来源以及钉选/解钉操作者（用户、LLM 或系统）；足迹供召回时的 LLM 判断，不新增 Dashboard 编辑入口，也不替代桶与 ledger 真源。
+- 标准记忆 JSON（`name/content/domain/valence/arousal/tags/importance`）改为确定性直导，不再先发 LLM 请求；预检明确显示 0 次 API 调用，逐项校验失败会指出条目与原因，无 LLM 配置时也可导入。
+
+### 测试 / Tests
+
+- 增加 Footprint 来源与操作者、LLM/Dashboard 解钉原子 importance、结构化 JSON 离线直导、无 LLM 预检及逐项错误反馈回归。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与热更新优先读取的 `src/VERSION` 同步更新为 `2.12.1`。
+
 ## 2.12.0
 
 ### 新增 / Added

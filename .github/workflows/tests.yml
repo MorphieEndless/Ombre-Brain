@@ -85,7 +85,10 @@ jobs:
         # 有「实际关系名」，"ai"/"assistant"/"claude" 等通用占位会被 tools/plan/core.py
         # 的 _is_actual_relation_name 判定为不合法而拒绝创建（这是设计如此的准入门槛，
         # 不是 bug）——不给这个变量，test_letter_time_lock_write_read_and_owner_unlock_in_real_container
-        # 会在这道拒绝上失败。
+        # 会在这道拒绝上失败。用 "周家明"：单测里（test_letter_time_lock.py、
+        # test_breath_hook_security.py 等）早已用它做 AI_NAME 测试夹具，
+        # test_web_api_docker_integration.py 也硬编码断言 writer_name == "周家明"，
+        # 换别的名字这条集成测试会跟着失败。
         run: |
           docker network create ob-ci-net
           docker volume create ob-ci-data
@@ -103,7 +106,7 @@ jobs:
             -e OMBRE_MCP_REQUIRE_AUTH=false \
             -e OMBRE_BIND_ADDRESS=127.0.0.1 \
             -e OMBRE_SETUP_TOKEN=docker-audit-setup-token \
-            -e AI_NAME=OB-CI-Tester \
+            -e AI_NAME=周家明 \
             ombre-brain-ci:local
           for attempt in $(seq 1 60); do
             curl --fail --silent http://127.0.0.1:18084/health && break

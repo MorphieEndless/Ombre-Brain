@@ -59,8 +59,12 @@ def test_dashboard_offers_one_way_legacy_letter_conversion_to_ai_ownership():
 
     assert "l.lock_upgrade_available" in dashboard
     assert "convertLegacyLetter(this.dataset.letterId)" in dashboard
-    assert "JSON.stringify({convert_to_lockable: true})" in dashboard
+    assert "const body = {convert_to_lockable: true};" in dashboard
     assert "锁控制权将永久交给当前 AI" in dashboard
+    # AI_NAME 未配置时后端拒绝转换；Dashboard 当场弹窗填名字重试一次，
+    # 不强迫用户先跳去别处改配置。
+    assert "无法转换历史 Letter" in dashboard
+    assert "body.ai_name = aiName" in dashboard
 
 
 @pytest.mark.asyncio

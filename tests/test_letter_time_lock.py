@@ -629,3 +629,43 @@ async def test_historical_conversion_is_one_way_and_requires_actual_ai_name(
     current = await bucket_mgr.get(historical_id)
     assert current["metadata"]["locked_by"] == "ai"
     assert current["metadata"]["writer_name"] == "周家明"
+
+
+@pytest.mark.asyncio
+async def test_historical_conversion_accepts_request_scoped_ai_name_override(
+    bucket_mgr, monkeypatch
+):
+    """AI_NAME 未配置时，Dashboard 弹窗当场填的名字能直接完成这一次转换。"""
+    historical_id = await bucket_mgr.create(
+        content="historical", bucket_type="letter", domain=["letter"]
+    )
+    monkeypatch.setattr(letters.sh, "_require_auth", lambda request: None)
+    monkeypatch.setattr(letters.sh, "_read_json_object", lambda request: request.json())
+    monkeypatch.setattr(letters.sh, "bucket_mgr", bucket_mgr)
+    mcp = FakeMCP()
+    letters.register(mcp)
+    patch = mcp.routes[("PATCH", "/api/letter/{letter_id}")]
+
+    monkeypatch.delenv("AI_NAME", raising=False)
+    rejected = await patch(JsonRequest({"convert_to_lockable": True}, historical_id))
+    assert rejected.status_code == 400
+
+    converted = await patch(JsonRequest({
+        "convert_to_lockable": True,
+        "ai_name": "周家明",
+    }, historical_id))
+    assert converted.status_code == 200
+    current = await bucket_mgr.get(historical_id)
+    assert current["metadata"]["locked_by"] == "ai"
+    assert current["metadata"]["writer_name"] == "周家明"
+
+    # 通用占位名（"ai" 等）不算实际关系名，请求覆盖同样要经过这道检查，
+    # 不能靠传参绕过。
+    other_id = await bucket_mgr.create(
+        content="historical-2", bucket_type="letter", domain=["letter"]
+    )
+    generic_name_rejected = await patch(JsonRequest({
+        "convert_to_lockable": True,
+        "ai_name": "assistant",
+    }, other_id))
+    assert generic_name_rejected.status_code == 400

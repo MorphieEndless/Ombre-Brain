@@ -9504,14 +9504,31 @@ async function convertLegacyLetter(id) {
   const l = _lettersCache.find(x => x.id === id);
   if (!l || !l.lock_upgrade_available) { alert('这封信不需要转换 / Conversion unavailable'); return; }
   if (!confirm('转换后，这封历史 Letter 的锁控制权将永久交给当前 AI。\n\n正文、标题和创建时间不会改变；当前仍保持公开。确认继续？')) return;
+  await _submitConvertLegacyLetter(id, '');
+}
+
+// AI_NAME 未配置时后端会拒绝转换（需要一个「实际关系名」才能确定锁的归属，
+// 见 web/letters.py 的 convert_to_lockable 分支）。这里不改那道检查，只是让
+// 用户能当场填一个名字重试——只用于这一次转换请求，不写入全局配置。
+async function _submitConvertLegacyLetter(id, aiName) {
   try {
+    const body = {convert_to_lockable: true};
+    if (aiName) body.ai_name = aiName;
     const r = await fetch(BASE + '/api/letter/' + encodeURIComponent(id), {
       method: 'PATCH', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({convert_to_lockable: true}),
+      body: JSON.stringify(body),
     });
     const d = await r.json();
-    if (d.ok) { alert('已转换为新版 Letter，锁控制权已交给当前 AI。'); loadLetters(); }
-    else { alert(d.error || '转换失败'); }
+    if (d.ok) { alert('已转换为新版 Letter，锁控制权已交给当前 AI。'); loadLetters(); return; }
+    if (!aiName && r.status === 400 && (d.error || '').indexOf('无法转换历史 Letter') === 0) {
+      const typed = (prompt(
+        '当前未配置 AI_NAME，无法确定这封信锁的实际归属名。\n\n'
+        + '请输入这次转换要用的实际关系名（仅用于这一次转换，不会修改全局配置）：'
+      ) || '').trim();
+      if (typed) { await _submitConvertLegacyLetter(id, typed); return; }
+      return;
+    }
+    alert(d.error || '转换失败');
   } catch (e) { alert(e.message); }
 }
 

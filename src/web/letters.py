@@ -262,8 +262,12 @@ def register(mcp) -> None:
                 return JSONResponse({
                     "error": "只有当前公开且从未建立可信锁所有权的历史 Letter 可以转换"
                 }, status_code=409)
+            # ai_name：本次转换请求显式传入优先（Dashboard 在 AI_NAME 未配置时会
+            # 弹窗让用户当场填一个，只用于这一次转换，不改全局配置），否则回退
+            # 环境变量 AI_NAME——与 letter_write 创建带锁 Letter 的取值顺序一致。
+            explicit_ai_name = str(body.get("ai_name") or "").strip()
             ai_writer_name = resolve_writer_name(
-                "ai", author="", ai_name=get_ai_name()
+                "ai", author="", ai_name=explicit_ai_name or get_ai_name()
             )
             if not ai_writer_name:
                 return JSONResponse({

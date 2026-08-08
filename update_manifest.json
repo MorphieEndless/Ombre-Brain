@@ -7,8 +7,8 @@
     },
     {
       "path": "frontend/dashboard.html",
-      "sha256": "3408dd877c6d9156558a2b6d74f1521413ba3a80bcac592467246b9557ab784f",
-      "size": 521877
+      "sha256": "222c0f5d672988cab7816e28173b75b80bc98238fa240e4b3a8e28207ed42984",
+      "size": 522815
     },
     {
       "path": "frontend/favicon.svg",
@@ -32,7 +32,7 @@
     },
     {
       "path": "src/VERSION",
-      "sha256": "c90c3058290761eb1f40ef36a2febaa5a8933a3f473d817f6803f6069def3050",
+      "sha256": "6a5953413ab0b83ab7c6c3f080df322580d42cc33524f5857533ca01f3da6312",
       "size": 7
     },
     {
@@ -972,8 +972,8 @@
     },
     {
       "path": "src/web/letters.py",
-      "sha256": "0b62e36d65d550a010458f8e8ea1b81d9dbb6a1c70a92d71b32a21695148da50",
-      "size": 18916
+      "sha256": "931e2e6bcadb2408fe3c82b7434ca81edab9ba2e2441390bfd1f80e02a70be59",
+      "size": 19320
     },
     {
       "path": "src/web/meta.py",
@@ -1032,5 +1032,5 @@
     }
   ],
   "rollout_strategy": "single-node",
-  "version": "2.15.0"
+  "version": "2.16.0"
 }

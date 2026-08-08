@@ -2,6 +2,28 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.16.0
+
+### 新增 / Added
+
+- 转换历史 Letter（`convert_to_lockable`）在 `AI_NAME` 未配置、拿不到"实际关系名"
+  时不再只是报错终止：Dashboard 弹窗当场填一个名字即可重试完成这一次转换，仅
+  作用于这一次请求，不写入全局配置。后端 `/api/letter/{id}` PATCH 新增可选
+  `ai_name` 字段，取值仍要经过 `_is_actual_relation_name` 校验——"ai" / "assistant"
+  等通用占位依旧会被拒绝，这道准入门槛本身没有削弱。
+
+### 测试 / Tests
+
+- 新增 `test_historical_conversion_accepts_request_scoped_ai_name_override`：
+  验证 `AI_NAME` 未配置时请求体传入实际关系名可以完成转换，且传通用占位名
+  仍会被拒绝。
+- 更新 `test_dashboard_offers_one_way_legacy_letter_conversion_to_ai_ownership`
+  匹配新的请求体构造方式与弹窗文案。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.16.0`。
+
 ## 2.15.0
 
 ### 安全 / Security

@@ -2,6 +2,30 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.16.1
+
+### 修复 / Fixed
+
+- 云服务器/远程部署首次打开 Dashboard 设置密码时，`/auth/setup` 一直是"仅本机可
+  设置"（防止部署窗口期被人抢先设成他人的密码），但页面不会提前说明，用户填完
+  密码点提交才被拒绝，报错还是英文原文，体验上跟 `rule.md` 第 6 条"安全复杂性
+  应由系统承担，不能转嫁给用户"正好相反。
+- 首次设置表单现在会在检测到当前不是从 `localhost`/`127.0.0.1` 访问时提前显示
+  中文提示，说明要去服务器上设 `OMBRE_DASHBOARD_PASSWORD` 或 `OMBRE_SETUP_TOKEN`；
+  即便这个前端启发式判断漏判，提交失败后的报错也会换成同样的中文说明（真正生效
+  的判定仍在服务端 `web/auth.py` 的 `_setup_request_allowed`，前端只是提前预警）。
+- 新增环境变量 `OMBRE_SETUP_TOKEN` 的文档（此前只存在于代码里，`docs/ENVIRONMENT_VARIABLES.md`
+  和 README 都没提，普通用户无从得知这条远程补救路径）。
+
+### 测试 / Tests
+
+- 新增 `test_setup_form_warns_only_when_not_on_a_loopback_host`、
+  `test_setup_failure_explains_the_local_only_restriction`。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.16.1`。
+
 ## 2.16.0
 
 ### 新增 / Added

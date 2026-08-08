@@ -3177,6 +3177,10 @@
     <!-- Setup form -->
     <div id="auth-setup-form" style="display:none;">
       <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px;">首次使用，请设置访问密码 / First time here — please set an access password</p>
+      <div id="auth-setup-remote-warning" style="display:none;text-align:left;font-size:12px;line-height:1.7;color:var(--warning,#d29922);background:rgba(210,153,34,0.12);border:1px solid rgba(210,153,34,0.4);border-radius:10px;padding:10px 12px;margin-bottom:14px;">
+        ⚠️ 检测到你不是从本机（localhost/127.0.0.1）访问的——首次设置密码的接口只信任本机连接，这里填了提交大概率会被服务端拒绝。<br>
+        请改为 SSH 登录服务器，在 <code>.env</code> 里设置 <code>OMBRE_DASHBOARD_PASSWORD</code> 后重启服务；或设置 <code>OMBRE_SETUP_TOKEN</code> 后用 <code>curl</code> 带 <code>X-Ombre-Setup-Token</code> 头远程调用一次 <code>/auth/setup</code>。
+      </div>
       <input type="password" id="auth-setup-pwd" placeholder="设置密码（至少6位）/ Password (6+ chars)" style="display:block;width:100%;padding:10px 16px;border:1px solid var(--border);border-radius:10px;background:var(--surface-solid);color:var(--text);font-size:14px;margin-bottom:10px;" />
       <input type="password" id="auth-setup-pwd2" placeholder="确认密码 / Confirm password" style="display:block;width:100%;padding:10px 16px;border:1px solid var(--border);border-radius:10px;background:var(--surface-solid);color:var(--text);font-size:14px;margin-bottom:12px;" onkeydown="if(event.key==='Enter')doSetup()" />
       <details style="margin-bottom:16px;text-align:left;">
@@ -3375,6 +3379,15 @@ async function finishDashboardAuthentication() {
   return true;
 }
 
+// 只是浏览器地址栏的启发式判断，不是权威校验——服务端 auth.py 的
+// _setup_request_allowed 才是真正说了算的那道门（还要求没有代理转发头）。
+// 这里命中不了本机也提前提示，省得用户填完密码提交才被拒绝。
+function _isLikelyLoopbackHost() {
+  var h = (window.location.hostname || '').toLowerCase();
+  if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]') return true;
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
+}
+
 async function checkAuth() {
   var requestedGeneration = _dashboardAuthGeneration;
   try {
@@ -3388,6 +3401,8 @@ async function checkAuth() {
       document.getElementById('auth-login-form').style.display = 'none';
       document.getElementById('auth-recovery-form').style.display = 'none';
       document.getElementById('auth-overlay').style.display = 'flex';
+      var remoteWarn = document.getElementById('auth-setup-remote-warning');
+      if (remoteWarn) remoteWarn.style.display = _isLikelyLoopbackHost() ? 'none' : 'block';
       return false;
     } else if (data.authenticated) {
       document.getElementById('auth-overlay').style.display = 'none';
@@ -3419,6 +3434,11 @@ async function readAuthFailure(resp, fallback) {
     if (resp.status === 403 && error === 'Cross-origin request rejected') {
       return '反向代理来源校验失败（HTTP 403）。请让 nginx 保留 Host、X-Forwarded-Host、X-Forwarded-Proto，并配置 OMBRE_TRUSTED_PROXY_CIDRS。';
     }
+    if (resp.status === 403 && error.indexOf('local-only') !== -1) {
+      return '首次设置密码只信任本机连接（HTTP 403）。请 SSH 登录服务器，在 .env 里设置 '
+        + 'OMBRE_DASHBOARD_PASSWORD 后重启服务；或设置 OMBRE_SETUP_TOKEN 后用 curl 带 '
+        + 'X-Ombre-Setup-Token 头远程调用一次 /auth/setup。';
+    }
     return error || fallback || ('登录请求失败（HTTP ' + resp.status + '）');
   } catch (_) {
     return '登录请求失败（HTTP ' + resp.status + '）：反向代理未返回 OB 的 JSON 响应，请检查 nginx 是否完整转发 /auth/*。';
@@ -3432,8 +3452,7 @@ async function doSetup() {
   if (p1 !== p2) return showAuthError('两次密码不一致');
   const resp = await fetch('/auth/setup', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({password: p1}) });
   if (!resp.ok) {
-    const d = await resp.json().catch(() => ({}));
-    return showAuthError(d.error || '设置失败');
+    return showAuthError(await readAuthFailure(resp, '设置失败'));
   }
   // 可选：同时保存安全问题
   const q = (document.getElementById('auth-setup-q')?.value || '').trim();

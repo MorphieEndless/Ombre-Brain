@@ -897,6 +897,7 @@ async def test_mcp_exception_secrets_never_reach_response_persistence_or_logs(
         "pulse",
         "plan",
         "letter_write",
+        "letter_lock_update",
         "letter_read",
         "I",
     ),

@@ -8,6 +8,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+import yaml
 from starlette.responses import StreamingResponse
 
 import web._shared as sh
@@ -380,9 +381,11 @@ async def test_legacy_runtime_without_lock_updates_when_installed_versions_match
 
 
 @pytest.mark.asyncio
-async def test_changed_release_lock_with_pip_disabled_rolls_back_everything(
+async def test_changed_release_lock_with_pip_disabled_rejects_before_touching_disk(
     monkeypatch, tmp_path
 ):
+    """依赖变化又不让装 pip 时，检查提前到备份/写盘之前，压根不该碰任何文件——
+    不是「写完再回滚」。"""
     repo = tmp_path / "repo"
     (repo / "src").mkdir(parents=True)
     (repo / "frontend").mkdir()
@@ -434,6 +437,8 @@ async def test_changed_release_lock_with_pip_disabled_rolls_back_everything(
     assert (repo / "requirements.lock.txt").read_text(encoding="utf-8") == "package==1\n"
     assert restarted.is_set() is False
     assert not meta._UPDATE_JOB_LOCK.locked()
+    # 拒绝发生在备份步骤之前：不该有 _prev 回滚点被创建过。
+    assert not (repo / "_prev").exists()
 
 
 @pytest.mark.asyncio
@@ -631,3 +636,62 @@ async def test_asgi_send_failure_releases_unstarted_stream(monkeypatch):
     next_reservation = meta._UpdateJobReservation()
     assert next_reservation.acquire()
     next_reservation.release()
+
+
+class _JsonRequest:
+    def __init__(self, body):
+        self._body = body
+
+    async def json(self):
+        return self._body
+
+
+@pytest.mark.asyncio
+async def test_update_settings_endpoint_persists_and_takes_effect_immediately(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(sh, "_require_auth", lambda _request: None)
+    monkeypatch.setattr(sh, "config", {"update": {"channel": "branch"}})
+    monkeypatch.setattr(sh, "version", "2.16.1")
+    monkeypatch.setenv("OMBRE_CONFIG_PATH", str(tmp_path / "config.yaml"))
+    monkeypatch.delenv("OMBRE_UPDATE_ALLOW_PIP", raising=False)
+    mcp = _MCP()
+    meta.register(mcp)
+    settings_handler = mcp.routes[("POST", "/api/update-settings")]
+    info_handler = mcp.routes[("GET", "/api/update-info")]
+
+    before = json.loads((await info_handler(object())).body)
+    assert before["update_allow_pip_install"] is False
+    assert meta._pip_install_allowed() is False
+
+    saved = json.loads(
+        (await settings_handler(_JsonRequest({"allow_pip_install": True}))).body
+    )
+    assert saved == {"ok": True, "allow_pip_install": True}
+
+    # 立即在运行态生效，不需要重启。
+    assert meta._pip_install_allowed() is True
+    after = json.loads((await info_handler(object())).body)
+    assert after["update_allow_pip_install"] is True
+
+    # 真的落盘了，不是只改了内存。
+    on_disk = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    assert on_disk["update"]["allow_pip_install"] is True
+
+    off = json.loads(
+        (await settings_handler(_JsonRequest({"allow_pip_install": False}))).body
+    )
+    assert off == {"ok": True, "allow_pip_install": False}
+    assert meta._pip_install_allowed() is False
+
+
+@pytest.mark.asyncio
+async def test_update_settings_endpoint_rejects_missing_field(monkeypatch):
+    monkeypatch.setattr(sh, "_require_auth", lambda _request: None)
+    monkeypatch.setattr(sh, "config", {})
+    mcp = _MCP()
+    meta.register(mcp)
+    handler = mcp.routes[("POST", "/api/update-settings")]
+
+    response = await handler(_JsonRequest({}))
+    assert response.status_code == 400

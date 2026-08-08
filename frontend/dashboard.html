@@ -2349,6 +2349,16 @@
           </span>
           <!-- 热更新持久性提示（用户反馈 #1）：Docker 下如实说明「已持久化 / 重建后会失效」 -->
           <div id="ver-persist-note" style="display:none;margin-top:10px;font-size:12px;line-height:1.5;border-radius:8px;padding:9px 12px;"></div>
+          <!-- 依赖变化时是否自动 pip install（安全加固 #2 默认关闭；这里只是把已有的
+               config.update.allow_pip_install 暴露成可点的开关，不改默认值）。 -->
+          <div style="margin-top:10px;font-size:11px;color:var(--text-dim);line-height:1.6;">
+            <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:var(--text);">
+              <input type="checkbox" id="update-allow-pip" onchange="toggleUpdateAllowPip(this.checked)" />
+              热更新遇到依赖变化时自动安装（<code>pip install</code>）
+            </label>
+            <div style="margin-top:2px;">默认关闭：自动装依赖会把"谁能点热更新"放大成任意 PyPI 包的执行面。只在你信任更新来源、又不想每次依赖变化都手动重建镜像时打开；关闭时遇到依赖变化会直接拒绝更新，不改动任何文件。</div>
+            <div id="update-allow-pip-msg" style="min-height:14px;margin-top:2px;"></div>
+          </div>
         </div>
 
         <!-- 更新进度日志 -->
@@ -7555,6 +7565,8 @@ loadVersionBadge();
     }
 
     var info = await loadDeployInfo();
+    var allowPipBox = document.getElementById('update-allow-pip');
+    if (allowPipBox) allowPipBox.checked = !!info.update_allow_pip_install;
     var deployEl = document.getElementById('ver-deploy-info');
     if (deployEl) {
       deployEl.textContent = [
@@ -7605,6 +7617,33 @@ loadVersionBadge();
     }
     el.style.display = '';
   }
+
+  window.toggleUpdateAllowPip = async function(checked) {
+    var box = document.getElementById('update-allow-pip');
+    var msg = document.getElementById('update-allow-pip-msg');
+    if (msg) { msg.style.color = 'var(--text-dim)'; msg.textContent = '保存中…'; }
+    try {
+      var r = await authFetch('/api/update-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allow_pip_install: checked }),
+      });
+      var d = r ? await r.json() : {};
+      if (d.ok) {
+        if (_deployInfo) _deployInfo.update_allow_pip_install = d.allow_pip_install;
+        if (msg) {
+          msg.style.color = 'var(--positive)';
+          msg.textContent = d.allow_pip_install ? '已开启，立即生效，无需重启。' : '已关闭。';
+        }
+      } else {
+        if (box) box.checked = !checked;
+        if (msg) { msg.style.color = 'var(--negative)'; msg.textContent = d.error || '保存失败'; }
+      }
+    } catch (e) {
+      if (box) box.checked = !checked;
+      if (msg) { msg.style.color = 'var(--negative)'; msg.textContent = e.message; }
+    }
+  };
 
   window.doHotUpdate = async function() {
     var btn = document.getElementById('btn-hot-update');

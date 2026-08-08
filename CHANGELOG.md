@@ -2,6 +2,42 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.16.2
+
+### 新增 / Added
+
+- Dashboard「热更新」面板新增「热更新遇到依赖变化时自动安装」开关，等效于设置
+  `OMBRE_UPDATE_ALLOW_PIP=1`（写 `config.yaml` 的 `update.allow_pip_install`，
+  立即生效不需要重启）。此前这个能力只存在于代码和环境变量里，只能 SSH 改
+  `.env` 重启才能碰到；这次改动只是把已有开关暴露成能点的 UI，**默认值没有
+  变**——安全加固 #2（自动 pip 会把"谁能点热更新"放大成任意 PyPI 包的执行面）
+  仍然默认关闭，需要部署者自己清醒地打开。
+
+### 修复 / Fixed
+
+- 热更新遇到「依赖清单变化 + 自动 pip 关闭」时，检查提前到下载/解析完更新包
+  之后、真正备份 `_prev` 和覆盖 `src/`、`frontend/` 之前。此前会先建回滚点、
+  写完文件才发现装不了依赖，再整体回滚——多做一轮磁盘 I/O，报错文案也不准确
+  （"已回滚"，其实这次没有任何文件被改动过）。现在直接在写文件前拒绝，报错
+  也改成「未改动任何文件」，并在文案里指向新加的 Dashboard 开关。
+
+### 测试 / Tests
+
+- 新增 `test_update_settings_endpoint_persists_and_takes_effect_immediately`、
+  `test_update_settings_endpoint_rejects_missing_field`。
+- `test_changed_release_lock_with_pip_disabled_rolls_back_everything` 更名为
+  `..._rejects_before_touching_disk`，补充断言确认 `_prev` 回滚点全程没有被
+  创建过。
+
+### 文档 / Docs
+
+- `docs/ENVIRONMENT_VARIABLES.md`、`docs/OPERATIONS.md` 说明 `OMBRE_UPDATE_ALLOW_PIP`
+  与新 Dashboard 开关是同一件事的两种配置方式，以及"提前拒绝"这个行为变化。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.16.2`。
+
 ## 2.16.1
 
 ### 修复 / Fixed

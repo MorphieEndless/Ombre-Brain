@@ -32,7 +32,7 @@
     },
     {
       "path": "src/VERSION",
-      "sha256": "bc22b99a7fc3951d950bc9b116f003a08c141d8397951f3f6b94fed929aa5abd",
+      "sha256": "808341fc237d64c03d2f7869f6fb65a70d651c2f7c0d6407b925656cc14e210a",
       "size": 7
     },
     {
@@ -47,13 +47,13 @@
     },
     {
       "path": "src/decay_engine.py",
-      "sha256": "e9e3192da64902e91c41634d3e308f7231e7b981e13a7135fd29c95e22183222",
-      "size": 22291
+      "sha256": "2571e786e98bc8014c95237da5044648df107bf66e1c864b98e36a91bb19ca92",
+      "size": 22554
     },
     {
       "path": "src/dehydrator.py",
-      "sha256": "9c0f3503eaf196605064625021bde8007601a168760fc28c619387b8094b30b4",
-      "size": 54392
+      "sha256": "ca3af5a0fee8ae9e9e4775fc6018413a9a1601a507f5425fe162412f8b02316c",
+      "size": 54979
     },
     {
       "path": "src/embedding_engine.py",
@@ -812,8 +812,8 @@
     },
     {
       "path": "src/tools/breath/surface.py",
-      "sha256": "9b19c0c71f132b746ccdf0ff6888cc0451a93697524fd59c1cec9ec17ee48cf5",
-      "size": 16654
+      "sha256": "0326336fb9403c2fa346ac2745c7bf89a3fa0435f154f9f142802dffef87a255",
+      "size": 16679
     },
     {
       "path": "src/tools/dream/__init__.py",
@@ -842,8 +842,8 @@
     },
     {
       "path": "src/tools/grow/__init__.py",
-      "sha256": "ca84fe37bde52410f28f73ff489d48d4091577b868144b8bfca35f1754ca849d",
-      "size": 1849
+      "sha256": "ef44d0559eb5ebe279b74ba342d421d1d9b370d10da28ba2eaa884d1b7338f39",
+      "size": 5328
     },
     {
       "path": "src/tools/grow/core.py",
@@ -942,8 +942,8 @@
     },
     {
       "path": "src/web/config_api.py",
-      "sha256": "505d40a30b9bb67337ffa6c9ae5b3b1b25c4da7460773247bf775abe3afd8a69",
-      "size": 71418
+      "sha256": "fd46420646670e03f215137e80972e1ed82a37bd716c25340c7f87609b5409a0",
+      "size": 71663
     },
     {
       "path": "src/web/dashboard.py",
@@ -1032,5 +1032,5 @@
     }
   ],
   "rollout_strategy": "single-node",
-  "version": "2.13.1"
+  "version": "2.13.3"
 }

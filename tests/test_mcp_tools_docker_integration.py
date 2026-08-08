@@ -124,7 +124,7 @@ EXPECTED_TOOL_PROPERTIES = {
     "plan": {"content", "status", "related_bucket", "weight", "why_remembered"},
     "letter_write": {"author", "content", "user_name", "title", "date", "ai_name"},
     "letter_read": {"query", "limit", "author", "date_from", "date_to"},
-    "I": {"content", "aspect", "read", "limit"},
+    "I": {"content", "aspect", "read", "limit", "promote"},
     "dream": {"window_hours", "inspiration"},
 }
 
@@ -724,12 +724,14 @@ def test_letter_tools_preserve_and_filter_custom_author(mcp_client):
     assert author in result
 
 
-def test_I_writes_and_reads_self_description(mcp_client):
+def test_I_writes_and_reads_pending_self_description(mcp_client):
     marker = _marker("self")
     written = mcp_client.call("I", {"content": marker, "aspect": "values"})
     assert _bucket_id(written)
+    assert "这还只是一个念头，不是自我认知" in written
+
     read_back = mcp_client.call("I", {"read": True, "limit": 20})
-    assert "=== 我的自我认知" in read_back
+    assert "=== 正在沉淀的「我觉得」" in read_back
     assert marker in read_back
 
 

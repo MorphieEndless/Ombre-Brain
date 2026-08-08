@@ -1,6 +1,9 @@
 import asyncio
 import json
+import shutil
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
@@ -1203,3 +1206,53 @@ def test_build_http_app_rejects_stdio_transport():
             token_validator=lambda *_args, **_kwargs: False,
             lifecycle=RuntimeLifecycle(logger=RecordingLogger()),
         )
+
+
+@pytest.mark.asyncio
+async def test_stdio_mcp_server_resets_existing_boot_marker_after_successful_handshake(
+    tmp_path,
+):
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    runtime_root = tmp_path / "runtime"
+    shutil.copytree(Path(__file__).resolve().parents[1] / "src", runtime_root / "src")
+    shutil.copy(Path(__file__).resolve().parents[1] / "VERSION", runtime_root / "VERSION")
+
+    buckets_dir = tmp_path / "buckets"
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        json.dumps(
+            {
+                "transport": "stdio",
+                "buckets_dir": str(buckets_dir),
+                "embedding": {"enabled": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+    marker = runtime_root / ".boot_fails"
+    marker.write_text("1\n", encoding="utf-8")
+
+    server = StdioServerParameters(
+        command=sys.executable,
+        args=[str(runtime_root / "src" / "server.py")],
+        cwd=runtime_root,
+        env={
+            "OMBRE_CONFIG_PATH": str(config_path),
+            "OMBRE_BUCKETS_DIR": str(buckets_dir),
+            "OMBRE_LOG_DIR": str(tmp_path / "logs"),
+            "PYTHONPYCACHEPREFIX": str(tmp_path / "pycache"),
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONUTF8": "1",
+        },
+    )
+
+    async with stdio_client(server) as (read_stream, write_stream):
+        async with ClientSession(read_stream, write_stream) as session:
+            initialized = await session.initialize()
+            listed = await session.list_tools()
+
+    assert initialized.protocolVersion
+    assert [tool.name for tool in listed.tools] == list(EXPECTED_PUBLIC_MCP_TOOLS)
+    assert marker.read_text(encoding="utf-8") == "0"

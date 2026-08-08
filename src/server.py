@@ -32,6 +32,7 @@ import sys
 import logging
 import asyncio
 import time
+from contextlib import asynccontextmanager
 from typing import Optional, Awaitable
 import httpx
 
@@ -321,12 +322,31 @@ _gh_auto_interval: int = int(_gh_cfg.get("auto_interval_minutes") or 0)
 # 远程 Streamable HTTP 固定返回单个 JSON-RPC 对象，并且不要求客户端在
 # initialize 后保存/回传 Mcp-Session-Id。Kelivo 等会静默吞掉 tools/list 异常的
 # 客户端因此不会再出现“已连接但 0 工具”。stdio 与 legacy SSE 不受这两项影响。
+
+_stdio_runtime_lifecycle = None
+
+
+@asynccontextmanager
+async def _stdio_lifespan(_server):
+    lifecycle = _stdio_runtime_lifecycle
+    if lifecycle is None:
+        yield {}
+        return
+
+    await lifecycle.start()
+    try:
+        yield {}
+    finally:
+        await lifecycle.stop()
+
+
 mcp = FastMCP(
     "Ombre Brain",
     host=_BIND_HOST,
     port=OMBRE_PORT,
     json_response=True,
     stateless_http=True,
+    lifespan=_stdio_lifespan if config.get("transport", "stdio") == "stdio" else None,
 )
 
 
@@ -1284,5 +1304,13 @@ if __name__ == "__main__":
             proxy_headers=False,
         )
     else:
-        # stdio：16 个工具已直接注册在唯一 mcp 实例上，这里直接运行即可。
+        # stdio：16 个工具已直接注册在唯一 mcp 实例上；启动成功边界由
+        # FastMCP public lifespan 触发，复用 RuntimeLifecycle 的 boot marker 语义。
+        _stdio_runtime_lifecycle = RuntimeLifecycle(
+            logger=logger,
+            boot_marker_path=os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                ".boot_fails",
+            ),
+        )
         mcp.run(transport=transport)

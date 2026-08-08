@@ -81,6 +81,11 @@ jobs:
         run: python -m pytest tests/test_llm_quality.py -v --asyncio-mode=auto
 
       - name: Start isolated Docker MCP stack
+        # AI_NAME 必须给一个非泛化值：letter_write 创建带锁 Letter 时要求写信人
+        # 有「实际关系名」，"ai"/"assistant"/"claude" 等通用占位会被 tools/plan/core.py
+        # 的 _is_actual_relation_name 判定为不合法而拒绝创建（这是设计如此的准入门槛，
+        # 不是 bug）——不给这个变量，test_letter_time_lock_write_read_and_owner_unlock_in_real_container
+        # 会在这道拒绝上失败。
         run: |
           docker network create ob-ci-net
           docker volume create ob-ci-data
@@ -98,6 +103,7 @@ jobs:
             -e OMBRE_MCP_REQUIRE_AUTH=false \
             -e OMBRE_BIND_ADDRESS=127.0.0.1 \
             -e OMBRE_SETUP_TOKEN=docker-audit-setup-token \
+            -e AI_NAME=OB-CI-Tester \
             ombre-brain-ci:local
           for attempt in $(seq 1 60); do
             curl --fail --silent http://127.0.0.1:18084/health && break

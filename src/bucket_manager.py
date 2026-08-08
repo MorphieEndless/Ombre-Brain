@@ -426,6 +426,7 @@ _METADATA_TEXT_LIMITS = {
     "lock_type": 16,
     "unlock_date": 64,
     "locked_by": 16,
+    "lock_owner_source": 32,
     "writer_name": 120,
     "why_remembered": _WHY_REMEMBERED_MAX,
     "triggered_by": _TRIGGERED_BY_MAX,
@@ -2401,7 +2402,7 @@ class BucketManager:
         # 由 server.py 的 plan() / trace() / /api/plans/{id}/action 维护，bucket_manager 不参与生成。
         for k in ("status", "type", "resolution_reason", "resolved_by",
                   "related_bucket", "author", "user_name", "letter_date",
-                  "lock_type", "unlock_date", "locked_by", "writer_name",
+                  "lock_type", "unlock_date", "locked_by", "lock_owner_source", "writer_name",
                   "change_log",
                   # iter 1.8 新增字段。除 weight 外全部透传不转换。
                   # weight 在 plan 上才有意义；这里不在这个循环里校验类型，由上层 server.py 保证传入范围。

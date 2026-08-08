@@ -9306,6 +9306,7 @@ function _renderLetter(l) {
     <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;font-size:11px;">
       ${!l.locked ? `<button data-letter-id="${escAttr(l.id)}" onclick="editLetter(this.dataset.letterId)" title="编辑" style="padding:4px 9px;background:transparent;border:1px solid var(--border);color:var(--text-dim);border-radius:2px;cursor:pointer;display:inline-flex;align-items:center;"><i data-lucide="pencil" style="width:13px;height:13px;"></i></button>` : ''}
       ${l.lock_owner ? `<button data-letter-id="${escAttr(l.id)}" onclick="manageLetterLock(this.dataset.letterId)" title="修改锁状态" style="padding:4px 9px;background:transparent;border:1px solid var(--border);color:var(--text-dim);border-radius:2px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="lock-keyhole" style="width:13px;height:13px;"></i> 锁</button>` : ''}
+      ${l.lock_upgrade_available ? `<button data-letter-id="${escAttr(l.id)}" onclick="convertLegacyLetter(this.dataset.letterId)" title="转换为 AI 可管理锁的新格式" style="padding:4px 9px;background:transparent;border:1px solid var(--border);color:var(--text-dim);border-radius:2px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;"><i data-lucide="refresh-cw" style="width:13px;height:13px;"></i> 转换</button>` : ''}
       <button data-letter-id="${escAttr(l.id)}" onclick="deleteLetter(this.dataset.letterId)" title="删除" style="padding:4px 9px;background:transparent;border:1px solid var(--border);color:var(--accent);border-radius:2px;cursor:pointer;display:inline-flex;align-items:center;"><i data-lucide="trash-2" style="width:13px;height:13px;"></i></button>
     </div>
   </article>`;
@@ -9494,6 +9495,21 @@ function refreshAuthenticatedActiveView() {
   if (!target) target = document.querySelector('.tab.active');
   if (target) return activateDashboardTab(target);
   return Promise.resolve([]);
+}
+
+async function convertLegacyLetter(id) {
+  const l = _lettersCache.find(x => x.id === id);
+  if (!l || !l.lock_upgrade_available) { alert('这封信不需要转换 / Conversion unavailable'); return; }
+  if (!confirm('转换后，这封历史 Letter 的锁控制权将永久交给当前 AI。\n\n正文、标题和创建时间不会改变；当前仍保持公开。确认继续？')) return;
+  try {
+    const r = await fetch(BASE + '/api/letter/' + encodeURIComponent(id), {
+      method: 'PATCH', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({convert_to_lockable: true}),
+    });
+    const d = await r.json();
+    if (d.ok) { alert('已转换为新版 Letter，锁控制权已交给当前 AI。'); loadLetters(); }
+    else { alert(d.error || '转换失败'); }
+  } catch (e) { alert(e.message); }
 }
 
 function toggleLetterUnlockInput() {

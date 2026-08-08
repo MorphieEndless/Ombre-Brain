@@ -157,6 +157,10 @@ def safe_letter_metadata(bucket: dict, caller_side: str | None) -> dict:
         "unlock_date": state["unlock_date"],
         "locked": state["locked"],
         "lock_owner": state["owner"],
+        "lock_upgrade_available": (
+            state["locked_by"] is None
+            and state["stored_lock_type"] == "none"
+        ),
     }
     if not state["locked"]:
         payload["title"] = meta.get("title", "") or meta.get("name", "")
@@ -389,10 +393,20 @@ async def letter_lock_update(
         return "历史无锁 Letter 没有锁所有者，不能通过锁管理入口补设锁。请新写一封带锁 Letter。"
     if not state["owner"]:
         return "只有创建这把锁的一方可以修改 Letter 锁状态。"
-    claimed_side = author_side((bucket.get("metadata") or {}).get("author"))
-    if normalized_lock != "none" and claimed_side and claimed_side != caller_side:
+    meta = bucket.get("metadata") or {}
+    claimed_side = author_side(meta.get("author"))
+    legacy_ai_conversion = (
+        meta.get("lock_owner_source") == "legacy_ai_conversion"
+        and state["locked_by"] == "ai"
+    )
+    if (
+        normalized_lock != "none"
+        and claimed_side
+        and claimed_side != caller_side
+        and not legacy_ai_conversion
+    ):
         return "无法上锁：这封无锁 Letter 的署名方向与当前可信入口不一致；代存信不能事后转换为锁信。"
-    writer_name = str((bucket.get("metadata") or {}).get("writer_name") or "").strip()
+    writer_name = str(meta.get("writer_name") or "").strip()
     if normalized_lock != "none" and not _is_actual_relation_name(writer_name):
         return "无法上锁：这封 Letter 创建时没有记录实际关系名，请新写一封带锁 Letter。"
     updates = {

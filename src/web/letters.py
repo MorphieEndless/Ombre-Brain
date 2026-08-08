@@ -237,16 +237,63 @@ def register(mcp) -> None:
 
         content_fields = {"content", "title", "author", "user_name", "date"}
         lock_fields = {"lock_type", "unlock_date"}
+        conversion_fields = {"convert_to_lockable"}
         has_content_edit = bool(content_fields.intersection(body))
         has_lock_edit = bool(lock_fields.intersection(body))
-        if has_content_edit and has_lock_edit:
+        has_conversion = bool(conversion_fields.intersection(body))
+        if sum((has_content_edit, has_lock_edit, has_conversion)) > 1:
             return JSONResponse({
-                "error": "正文编辑与锁管理必须分开提交"
+                "error": "正文编辑、锁管理与历史格式转换必须分开提交"
             }, status_code=400)
-        if not has_content_edit and not has_lock_edit:
+        if not has_content_edit and not has_lock_edit and not has_conversion:
             return JSONResponse({"error": "nothing to update"}, status_code=400)
 
         state = letter_lock_state(bucket, "human")
+        if has_conversion:
+            if body.get("convert_to_lockable") is not True:
+                return JSONResponse({
+                    "error": "convert_to_lockable must be true"
+                }, status_code=400)
+            if state["locked_by"]:
+                return JSONResponse({
+                    "error": "这封 Letter 已有可信锁所有者，不能重新分配"
+                }, status_code=409)
+            if state["stored_lock_type"] != "none":
+                return JSONResponse({
+                    "error": "只有当前公开且从未建立可信锁所有权的历史 Letter 可以转换"
+                }, status_code=409)
+            ai_writer_name = resolve_writer_name(
+                "ai", author="", ai_name=get_ai_name()
+            )
+            if not ai_writer_name:
+                return JSONResponse({
+                    "error": (
+                        "无法转换历史 Letter：未能从现有 AI_NAME 取得当前 AI 的实际关系名。"
+                        "请先完善现有名称配置。"
+                    )
+                }, status_code=400)
+            try:
+                ok = await sh.bucket_mgr.update(
+                    letter_id,
+                    locked_by="ai",
+                    lock_owner_source="legacy_ai_conversion",
+                    writer_name=ai_writer_name,
+                    lock_type="none",
+                    unlock_date=None,
+                )
+                if not ok:
+                    return JSONResponse({"error": "conversion failed"}, status_code=500)
+                return JSONResponse({
+                    "ok": True,
+                    "id": letter_id,
+                    "converted": True,
+                    "lock_type": "none",
+                    "locked_by": "ai",
+                    "writer_name": ai_writer_name,
+                })
+            except Exception as e:
+                return JSONResponse({"error": str(e)}, status_code=500)
+
         if has_content_edit:
             # The Dashboard keeps its historical editing behavior.  The only
             # additional boundary is that an incoming, still-locked Letter

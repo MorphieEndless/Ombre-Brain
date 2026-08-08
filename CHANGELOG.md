@@ -18,6 +18,7 @@
 - 不新增必填环境变量，不修改 OAuth、Token、Docker Compose 或 multi-owner 配置。
 - 时间锁是应用层关系边界，不是磁盘加密；拥有 vault 或宿主机文件权限的人仍能读取 Markdown 原文。
 - 保留 Dashboard 原有 Letter 原稿编辑：历史/无锁 Letter 和锁拥有者自己的锁信可编辑；原稿编辑与锁管理必须分开请求，来信方未解锁内容不可读写，编辑后正常刷新搜索索引。
+- 历史公开 Letter 可在 Dashboard 按需转换为新版格式；转换不改原稿、不根据 `author` 推断身份，锁控制权固定交给当前 AI，并补写现有配置中的实际 AI 关系名。
 
 ### 版本 / Version
 

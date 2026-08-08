@@ -401,3 +401,231 @@ async def test_locked_owner_edit_refreshes_embedding_and_other_side_sees_it_only
     assert unlocked.status_code == 200
     visible = await letter_read(query="fresh aurora phrase", limit=10)
     assert "fresh aurora phrase" in visible
+
+
+@pytest.mark.asyncio
+async def test_ai_owner_can_relock_public_letter_through_multiple_cycles(
+    bucket_mgr, monkeypatch
+):
+    monkeypatch.setenv("AI_NAME", "周家明")
+    install_runtime(bucket_mgr)
+    letter_id = created_id(await letter_write(
+        author="ai", content="repeatable public letter", lock_type="none"
+    ))
+    original = await bucket_mgr.get(letter_id)
+    assert original["metadata"]["locked_by"] == "ai"
+    assert original["metadata"]["writer_name"] == "周家明"
+
+    future = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+    transitions = [
+        ("timed", future),
+        ("none", ""),
+        ("timed", future),
+        ("none", ""),
+        ("permanent", ""),
+        ("none", ""),
+        ("permanent", ""),
+        ("none", ""),
+        ("timed", future),
+    ]
+    for lock_type, unlock_date in transitions:
+        result = json.loads(await letter_lock_update(letter_id, lock_type, unlock_date))
+        assert result["updated"] is True
+        current = await bucket_mgr.get(letter_id)
+        assert current["metadata"]["locked_by"] == "ai"
+        assert current["metadata"]["writer_name"] == "周家明"
+
+
+@pytest.mark.asyncio
+async def test_expired_timed_letter_keeps_owner_and_can_be_locked_again(
+    bucket_mgr, monkeypatch
+):
+    monkeypatch.setenv("AI_NAME", "周家明")
+    install_runtime(bucket_mgr)
+    letter_id = await bucket_mgr.create(
+        content="expired then relocked", bucket_type="letter", domain=["letter"]
+    )
+    await bucket_mgr.update(
+        letter_id,
+        author="周家明",
+        writer_name="周家明",
+        lock_type="timed",
+        unlock_date="2020-01-01T00:00:00+08:00",
+        locked_by="ai",
+    )
+
+    assert "expired then relocked" in await letter_read(limit=10)
+    expired = await bucket_mgr.get(letter_id)
+    assert expired["metadata"]["lock_type"] == "none"
+    assert expired["metadata"]["locked_by"] == "ai"
+    assert expired["metadata"]["writer_name"] == "周家明"
+
+    future = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+    relocked = json.loads(await letter_lock_update(letter_id, "timed", future))
+    assert relocked["updated"] is True
+    current = await bucket_mgr.get(letter_id)
+    assert current["metadata"]["lock_type"] == "timed"
+    assert current["metadata"]["locked_by"] == "ai"
+
+
+@pytest.mark.asyncio
+async def test_other_side_cannot_relock_now_public_letter(bucket_mgr):
+    install_runtime(bucket_mgr)
+    letter_id = await bucket_mgr.create(
+        content="public but still human owned", bucket_type="letter", domain=["letter"]
+    )
+    await bucket_mgr.update(
+        letter_id,
+        author="user",
+        writer_name="江乔生",
+        lock_type="none",
+        unlock_date=None,
+        locked_by="human",
+    )
+
+    result = await letter_lock_update(letter_id, "permanent", caller_side="ai")
+    assert "只有" in result
+    current = await bucket_mgr.get(letter_id)
+    assert current["metadata"]["lock_type"] == "none"
+    assert current["metadata"]["locked_by"] == "human"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_owner_can_relock_public_letter_but_not_ai_owned_public_letter(
+    bucket_mgr, monkeypatch
+):
+    monkeypatch.setattr(letters.sh, "_require_auth", lambda request: None)
+    monkeypatch.setattr(letters.sh, "_read_json_object", lambda request: request.json())
+    monkeypatch.setattr(letters.sh, "bucket_mgr", bucket_mgr)
+    mcp = FakeMCP()
+    letters.register(mcp)
+    create = mcp.routes[("POST", "/api/letter")]
+    patch = mcp.routes[("PATCH", "/api/letter/{letter_id}")]
+    list_letters = mcp.routes[("GET", "/api/letters")]
+
+    created = await create(JsonRequest({
+        "author": "user",
+        "user_name": "江乔生",
+        "content": "dashboard public owner letter",
+        "lock_type": "none",
+    }))
+    human_id = json.loads(created.body)["id"]
+    human_item = next(
+        item for item in json.loads((await list_letters(JsonRequest({}))).body)["letters"]
+        if item["id"] == human_id
+    )
+    assert human_item["lock_type"] == "none"
+    assert human_item["lock_owner"] is True
+    assert (await patch(JsonRequest({"lock_type": "permanent"}, human_id))).status_code == 200
+    human_bucket = await bucket_mgr.get(human_id)
+    assert human_bucket["metadata"]["locked_by"] == "human"
+
+    ai_id = await bucket_mgr.create(
+        content="AI public owner letter", bucket_type="letter", domain=["letter"]
+    )
+    await bucket_mgr.update(
+        ai_id,
+        author="周家明",
+        writer_name="周家明",
+        lock_type="none",
+        locked_by="ai",
+    )
+    ai_item = next(
+        item for item in json.loads((await list_letters(JsonRequest({}))).body)["letters"]
+        if item["id"] == ai_id
+    )
+    assert ai_item["locked"] is False
+    assert ai_item["lock_owner"] is False
+    assert (await patch(JsonRequest({"lock_type": "permanent"}, ai_id))).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_dashboard_converts_historical_letter_to_ai_owned_lockable_format(
+    bucket_mgr, monkeypatch
+):
+    monkeypatch.setenv("AI_NAME", "周家明")
+    historical_id = await bucket_mgr.create(
+        content="unchanged historical content",
+        bucket_type="letter",
+        domain=["letter"],
+    )
+    await bucket_mgr.update(
+        historical_id,
+        author="user",
+        title="unchanged historical title",
+        letter_date="2024-01-02",
+    )
+    original = await bucket_mgr.get(historical_id)
+    monkeypatch.setattr(letters.sh, "_require_auth", lambda request: None)
+    monkeypatch.setattr(letters.sh, "_read_json_object", lambda request: request.json())
+    monkeypatch.setattr(letters.sh, "bucket_mgr", bucket_mgr)
+    mcp = FakeMCP()
+    letters.register(mcp)
+    list_letters = mcp.routes[("GET", "/api/letters")]
+    patch = mcp.routes[("PATCH", "/api/letter/{letter_id}")]
+
+    before = next(
+        item for item in json.loads((await list_letters(JsonRequest({}))).body)["letters"]
+        if item["id"] == historical_id
+    )
+    assert before["lock_upgrade_available"] is True
+    assert before["lock_owner"] is False
+
+    mixed = await patch(JsonRequest({
+        "convert_to_lockable": True,
+        "lock_type": "permanent",
+    }, historical_id))
+    assert mixed.status_code == 400
+
+    converted = await patch(JsonRequest({"convert_to_lockable": True}, historical_id))
+    assert converted.status_code == 200
+    current = await bucket_mgr.get(historical_id)
+    assert current["metadata"]["locked_by"] == "ai"
+    assert current["metadata"]["lock_owner_source"] == "legacy_ai_conversion"
+    assert current["metadata"]["writer_name"] == "周家明"
+    assert current["metadata"]["lock_type"] == "none"
+    assert current["metadata"].get("unlock_date") is None
+    assert current["content"] == original["content"]
+    for field in ("author", "title", "letter_date", "created"):
+        assert current["metadata"].get(field) == original["metadata"].get(field)
+
+    after = next(
+        item for item in json.loads((await list_letters(JsonRequest({}))).body)["letters"]
+        if item["id"] == historical_id
+    )
+    assert after["lock_upgrade_available"] is False
+    assert after["lock_owner"] is False
+    assert (await patch(JsonRequest({"lock_type": "permanent"}, historical_id))).status_code == 403
+
+    install_runtime(bucket_mgr)
+    relocked = json.loads(await letter_lock_update(historical_id, "permanent"))
+    assert relocked["updated"] is True
+    assert (await bucket_mgr.get(historical_id))["metadata"]["locked_by"] == "ai"
+
+
+@pytest.mark.asyncio
+async def test_historical_conversion_is_one_way_and_requires_actual_ai_name(
+    bucket_mgr, monkeypatch
+):
+    historical_id = await bucket_mgr.create(
+        content="historical", bucket_type="letter", domain=["letter"]
+    )
+    monkeypatch.setattr(letters.sh, "_require_auth", lambda request: None)
+    monkeypatch.setattr(letters.sh, "_read_json_object", lambda request: request.json())
+    monkeypatch.setattr(letters.sh, "bucket_mgr", bucket_mgr)
+    mcp = FakeMCP()
+    letters.register(mcp)
+    patch = mcp.routes[("PATCH", "/api/letter/{letter_id}")]
+
+    monkeypatch.delenv("AI_NAME", raising=False)
+    rejected = await patch(JsonRequest({"convert_to_lockable": True}, historical_id))
+    assert rejected.status_code == 400
+    assert not (await bucket_mgr.get(historical_id))["metadata"].get("locked_by")
+
+    monkeypatch.setenv("AI_NAME", "周家明")
+    assert (await patch(JsonRequest({"convert_to_lockable": True}, historical_id))).status_code == 200
+    repeated = await patch(JsonRequest({"convert_to_lockable": True}, historical_id))
+    assert repeated.status_code == 409
+    current = await bucket_mgr.get(historical_id)
+    assert current["metadata"]["locked_by"] == "ai"
+    assert current["metadata"]["writer_name"] == "周家明"

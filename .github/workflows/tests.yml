@@ -89,6 +89,11 @@ jobs:
         # test_breath_hook_security.py 等）早已用它做 AI_NAME 测试夹具，
         # test_web_api_docker_integration.py 也硬编码断言 writer_name == "周家明"，
         # 换别的名字这条集成测试会跟着失败。
+        #
+        # OMBRE_HOOK_ALLOW_PUBLIC=1：test_web_api_docker_integration.py 专门验证
+        # 「显式打开 public 模式后 /breath-hook 允许匿名访问」这条路径（见
+        # web/hooks.py _is_hook_request_authorized）。容器是仅 127.0.0.1 可达、
+        # 用完即删的 CI 隔离实例，开这个不影响任何真实部署的默认鉴权。
         run: |
           docker network create ob-ci-net
           docker volume create ob-ci-data
@@ -107,6 +112,7 @@ jobs:
             -e OMBRE_BIND_ADDRESS=127.0.0.1 \
             -e OMBRE_SETUP_TOKEN=docker-audit-setup-token \
             -e AI_NAME=周家明 \
+            -e OMBRE_HOOK_ALLOW_PUBLIC=1 \
             ombre-brain-ci:local
           for attempt in $(seq 1 60); do
             curl --fail --silent http://127.0.0.1:18084/health && break

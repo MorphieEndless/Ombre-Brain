@@ -187,7 +187,7 @@ async def test_hook_token_uses_ai_view_and_locked_human_letter_is_notice_only(mo
             type="letter",
             author="user",
             title=title,
-            writer_name="江乔生",
+            writer_name="李四",
             lock_type="permanent",
             unlock_date="9999-12-31",
             locked_by="human",
@@ -196,7 +196,7 @@ async def test_hook_token_uses_ai_view_and_locked_human_letter_is_notice_only(mo
     response = await _handler(monkeypatch, buckets, _EchoDehydrator())(_Request())
     text = response.body.decode("utf-8")
 
-    assert "江乔生给你留了一封永久锁信" in text
+    assert "李四给你留了一封永久锁信" in text
     assert "当前不可查看" in text
     assert secret not in text
     assert title not in text
@@ -204,16 +204,16 @@ async def test_hook_token_uses_ai_view_and_locked_human_letter_is_notice_only(mo
 
 @pytest.mark.asyncio
 async def test_dashboard_cookie_hook_uses_human_view_for_ai_locked_letter(monkeypatch):
-    monkeypatch.setenv("AI_NAME", "周家明")
+    monkeypatch.setenv("AI_NAME", "张三")
     monkeypatch.setattr(hooks.sh, "_is_authenticated", lambda request: True)
     buckets = [
         _bucket(
             "ai-locked",
             "secret from other side",
             type="letter",
-            author="周家明",
+            author="张三",
             title="hidden title",
-            writer_name="周家明",
+            writer_name="张三",
             lock_type="timed",
             unlock_date="2030-08-12T20:00:00+08:00",
             locked_by="ai",
@@ -222,7 +222,7 @@ async def test_dashboard_cookie_hook_uses_human_view_for_ai_locked_letter(monkey
     response = await _handler(monkeypatch, buckets, _EchoDehydrator())(_Request(token=""))
     text = response.body.decode("utf-8")
 
-    assert "周家明给你留了一封带锁的信" in text
+    assert "张三给你留了一封带锁的信" in text
     assert "2030-08-12 20:00" in text
     assert "secret from other side" not in text
     assert "hidden title" not in text
@@ -230,15 +230,15 @@ async def test_dashboard_cookie_hook_uses_human_view_for_ai_locked_letter(monkey
 
 @pytest.mark.asyncio
 async def test_hook_lock_owner_gets_full_letter_with_actual_name_not_generic_side(monkeypatch):
-    monkeypatch.setenv("AI_NAME", "周家明")
+    monkeypatch.setenv("AI_NAME", "张三")
     buckets = [
         _bucket(
             "ai-own-lock",
             "owner visible locked body",
             type="letter",
-            author="周家明",
+            author="张三",
             title="owner visible title",
-            writer_name="周家明",
+            writer_name="张三",
             lock_type="permanent",
             unlock_date="9999-12-31",
             locked_by="ai",
@@ -248,7 +248,7 @@ async def test_hook_lock_owner_gets_full_letter_with_actual_name_not_generic_sid
     text = response.body.decode("utf-8")
     assert "owner visible locked body" in text
     assert "owner visible title" in text
-    assert "[周家明]" in text
+    assert "[张三]" in text
     assert "你→user" not in text
     assert "给你留" not in text
 
@@ -262,7 +262,7 @@ async def test_newer_open_letter_does_not_hide_older_incoming_lock_notice(monkey
             type="letter",
             author="user",
             title="older hidden title",
-            writer_name="江乔生",
+            writer_name="李四",
             lock_type="permanent",
             unlock_date="9999-12-31",
             locked_by="human",
@@ -279,7 +279,7 @@ async def test_newer_open_letter_does_not_hide_older_incoming_lock_notice(monkey
     response = await _handler(monkeypatch, buckets, _EchoDehydrator())(_Request())
     text = response.body.decode("utf-8")
     assert "newer ordinary letter" in text
-    assert "江乔生给你留了一封永久锁信" in text
+    assert "李四给你留了一封永久锁信" in text
     assert "older hidden body" not in text
     assert "older hidden title" not in text
 
@@ -293,7 +293,7 @@ async def test_multiple_incoming_locks_are_safely_summarized(monkeypatch):
             type="letter",
             author="user",
             title=f"hidden title {index}",
-            writer_name="江乔生",
+            writer_name="李四",
             lock_type="permanent",
             unlock_date="9999-12-31",
             locked_by="human",
@@ -303,7 +303,7 @@ async def test_multiple_incoming_locks_are_safely_summarized(monkeypatch):
     ]
     response = await _handler(monkeypatch, buckets, _EchoDehydrator())(_Request())
     text = response.body.decode("utf-8")
-    assert "江乔生给你留了 2 封仍未解锁的信" in text
+    assert "李四给你留了 2 封仍未解锁的信" in text
     assert "hidden body" not in text
     assert "hidden title" not in text
 
@@ -316,7 +316,7 @@ async def test_expired_timed_letter_is_not_counted_as_still_locked(monkeypatch):
             "expired letter is visible",
             type="letter",
             author="user",
-            writer_name="江乔生",
+            writer_name="李四",
             lock_type="timed",
             unlock_date="2020-01-01T00:00:00+08:00",
             locked_by="human",
@@ -339,7 +339,7 @@ async def test_public_hook_never_receives_locked_letter_content_or_notice(monkey
             "public must not see this",
             type="letter",
             author="user",
-            writer_name="江乔生",
+            writer_name="李四",
             lock_type="permanent",
             unlock_date="9999-12-31",
             locked_by="human",
@@ -350,7 +350,7 @@ async def test_public_hook_never_receives_locked_letter_content_or_notice(monkey
     text = response.body.decode("utf-8")
 
     assert "public must not see this" not in text
-    assert "江乔生给你留" not in text
+    assert "李四给你留" not in text
     # Existing public-hook behavior for unlocked historical Letters remains.
     assert "public historical open letter" in text
 

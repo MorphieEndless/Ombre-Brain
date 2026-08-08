@@ -16,12 +16,17 @@
   文件不在 index 也不在 HEAD 时直接报错，不再拿工作区字节顶替。
 - 发布顺序固定为：先 `git add` 代码改动，再生成清单——清单描述的是仓库内容，
   不是磁盘内容。
+- 修复 STDIO transport 成功启动后 `.boot_fails` 未重置：HTTP/SSE 通过
+  `RuntimeLifecycle` 在成功启动后清零，STDIO 原先直接调用 `mcp.run()` 缺少对应
+  lifecycle；现改为在 FastMCP public lifespan 成功进入时复用现有 boot marker reset 语义。
 
 ### 测试 / Tests
 
 - 新增 `tests/test_update_manifest_repo_bytes.py`：用临时 git 仓库复现
   「index 存 LF / 工作区 CRLF」与「index 存 CRLF」两种会被算错的形态，
   并校验仓库现有清单与 HEAD 字节逐条一致。
+- 新增真实 STDIO MCP 子进程回归：完成 `initialize` 与 `tools/list`（15 个工具）后，
+  验证 `.boot_fails` 从 1 重置为 0。
 
 ### 版本 / Version
 

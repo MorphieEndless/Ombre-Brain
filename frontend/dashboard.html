@@ -2915,14 +2915,12 @@
         <div style="font-weight:600;font-size:13px;margin-bottom:8px;">传输模式 · MCP Transport</div>
         <div id="transport-btns" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
           <button type="button" class="transport-btn" data-transport="streamable-http" onclick="switchTransport('streamable-http')" style="padding:7px 14px;font-size:12px;border:1px solid var(--border);background:none;border-radius:8px;cursor:pointer;font-family:inherit;color:var(--text);">Streamable HTTP</button>
-          <button type="button" class="transport-btn" data-transport="sse" onclick="switchTransport('sse')" style="padding:7px 14px;font-size:12px;border:1px solid var(--border);background:none;border-radius:8px;cursor:pointer;font-family:inherit;color:var(--text);">Legacy SSE</button>
           <button type="button" class="transport-btn" data-transport="stdio" onclick="switchTransport('stdio')" style="padding:7px 14px;font-size:12px;border:1px solid var(--border);background:none;border-radius:8px;cursor:pointer;font-family:inherit;color:var(--text);">stdio</button>
           <span id="transport-msg" style="margin-left:6px;font-size:11px;"></span>
         </div>
         <div style="margin-top:8px;font-size:11px;color:var(--text-light);line-height:1.7;">
           切换会写入 config.yaml + .env 并<b>自动重启服务</b>（约 10-30 秒）后生效。
           <b>Streamable HTTP</b>：Claude.ai 网页版 / Claude Code 远程（推荐默认）。
-          <b>Legacy SSE</b>：旧版 SSE 客户端兼容。
           <b style="color:var(--negative);">stdio</b>：⚠️ 仅本地 stdin/stdout MCP，切换后 <b>Dashboard 与所有 HTTP 服务会消失，且无法再从网页切回</b>（需在服务器改 config.yaml / 环境变量恢复）。
         </div>
       </div>

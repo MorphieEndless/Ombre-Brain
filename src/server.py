@@ -312,7 +312,7 @@ _gh_auto_interval: int = int(_gh_cfg.get("auto_interval_minutes") or 0)
 
 
 # --- Create MCP server instance / 创建 MCP 服务器实例 ---
-# host="0.0.0.0" so Docker container's SSE is externally reachable
+# host="0.0.0.0" so Docker container's HTTP endpoint is externally reachable
 # stdio mode ignores host (no network)
 #
 # iter 2.2 后对外只有单连接器 /mcp。当前 16 个工具全部直接注册到
@@ -321,7 +321,7 @@ _gh_auto_interval: int = int(_gh_cfg.get("auto_interval_minutes") or 0)
 #
 # 远程 Streamable HTTP 固定返回单个 JSON-RPC 对象，并且不要求客户端在
 # initialize 后保存/回传 Mcp-Session-Id。Kelivo 等会静默吞掉 tools/list 异常的
-# 客户端因此不会再出现“已连接但 0 工具”。stdio 与 legacy SSE 不受这两项影响。
+# 客户端因此不会再出现“已连接但 0 工具”。stdio 不受这两项影响。
 
 _stdio_runtime_lifecycle = None
 
@@ -1176,7 +1176,7 @@ if __name__ == "__main__":
         build_http_app,
     )
 
-    if transport in ("sse", "streamable-http"):
+    if transport == "streamable-http":
         import uvicorn
         from web import ollama_local as _ollama_local
 
@@ -1275,7 +1275,7 @@ if __name__ == "__main__":
             logger.info(f"Listening on :{OMBRE_PORT} (bare-metal / 裸机默认 18001)")
         # 明确打印「客户端该怎么连」——给 Operit / 安卓 / 自建前端等非技术用户排障用。
         # 一眼能看清 endpoint 路径、鉴权开关；本机桥接务必用 127.0.0.1（见上方保活注释）。
-        _endpoint_path = "/sse" if transport == "sse" else "/mcp"
+        _endpoint_path = "/mcp"
         logger.info(
             "MCP endpoint ready | transport=%s | 本机连接 URL: http://127.0.0.1:%s%s "
             "（远程走你的域名/隧道，末尾同样是 %s）| 鉴权: %s",
@@ -1303,7 +1303,7 @@ if __name__ == "__main__":
             port=OMBRE_PORT,
             proxy_headers=False,
         )
-    else:
+    elif transport == "stdio":
         # stdio：16 个工具已直接注册在唯一 mcp 实例上；启动成功边界由
         # FastMCP public lifespan 触发，复用 RuntimeLifecycle 的 boot marker 语义。
         _stdio_runtime_lifecycle = RuntimeLifecycle(
@@ -1314,3 +1314,14 @@ if __name__ == "__main__":
             ),
         )
         mcp.run(transport=transport)
+    else:
+        # 2026-08-09 起 legacy SSE transport 已下线。这里必须显式拒绝、不能落到
+        # mcp.run(transport=transport) ——FastMCP 自带的 "sse" 字面量仍然合法，会
+        # 绕过 build_http_app 里的鉴权/CORS/CSRF/限流中间件，直接起一个不受 Ombre
+        # Brain 安全闸门保护的裸 SSE 服务，等于悄悄开一个没有认证的记忆读写口子。
+        logger.error(
+            f"不支持的 transport：{transport!r}。合法值仅 streamable-http、stdio；"
+            "legacy SSE 传输已下线，请改用 streamable-http 并更新 config.yaml / "
+            "OMBRE_TRANSPORT。"
+        )
+        raise SystemExit(1)

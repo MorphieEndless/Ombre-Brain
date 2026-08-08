@@ -1396,7 +1396,7 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `transport` | `stdio` | `stdio` / `sse` / `streamable-http` |
+| `transport` | `stdio` | `stdio` / `streamable-http`（legacy SSE 已于 2026-08-09 下线） |
 | `log_level` | `INFO` | 日志级别 |
 | `buckets_dir` | `./buckets` | 记忆桶目录 |
 | `merge_threshold` | `75` | 合并相似度阈值 (0~100) |
@@ -1450,7 +1450,7 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 | `OMBRE_EMBED_MODEL` | `gemini-embedding-001` | 覆盖 `embedding.model` |
 | `OMBRE_EMBED_BACKEND` | （已废弃） | 旧的本地后端选择（bge-small-zh/bge-m3 sentence-transformers）已移除；现在统一走 `api` 后端，本地离线靠 `OMBRE_EMBED_BASE_URL` 指向 Ollama 边车 + 填本地模型名 |
 | `OMBRE_TRANSPORT` | `stdio` | 覆盖 `transport` |
-| `OMBRE_PORT` | `8000` | HTTP/SSE 监听端口 |
+| `OMBRE_PORT` | `8000` | HTTP 监听端口 |
 | `OMBRE_BUCKETS_DIR` | `./buckets` | 覆盖 `buckets_dir`（Docker volume 必设） |
 | `OMBRE_VAULT_DIR` | — | `OMBRE_BUCKETS_DIR` 未设时的 fallback（二者同义，`OMBRE_BUCKETS_DIR` 优先） |
 | `OMBRE_HOOK_URL` | — | Webhook 推送地址；空则不推送 |

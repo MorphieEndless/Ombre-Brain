@@ -7,8 +7,8 @@
     },
     {
       "path": "frontend/dashboard.html",
-      "sha256": "0a4d5ef77286ef86404f02f7f72e6107f36d3c634d8de57f68dc389a1dd0765e",
-      "size": 522226
+      "sha256": "3408dd877c6d9156558a2b6d74f1521413ba3a80bcac592467246b9557ab784f",
+      "size": 521877
     },
     {
       "path": "frontend/favicon.svg",
@@ -27,12 +27,12 @@
     },
     {
       "path": "frontend/onboarding.html",
-      "sha256": "00d62b1a75708db6ea0c6ad7f929811b7f37b2db2583c8ad5ea5ca61725ef856",
-      "size": 10621
+      "sha256": "421dac5d9c4a7fd5093296891b092115a8f4e172deabf3212ad3a9700f5c32e9",
+      "size": 10589
     },
     {
       "path": "src/VERSION",
-      "sha256": "ff61287e4919f74fad1f4a26d45b21b89a89d96e17475420859dde6a84d90f2b",
+      "sha256": "c90c3058290761eb1f40ef36a2febaa5a8933a3f473d817f6803f6069def3050",
       "size": 7
     },
     {
@@ -692,8 +692,8 @@
     },
     {
       "path": "src/ombrebrain/security/deployment_profile.py",
-      "sha256": "5981f24b71bbc592e48944b7388dbc313e961dbae158a0cbd66327ee2ced8121",
-      "size": 20252
+      "sha256": "bed6051dd7c11a78971a2dd4d51d1f59ef2a9f9692ff48e96f6d913d8c92d976",
+      "size": 20232
     },
     {
       "path": "src/ombrebrain/security/public_origin.py",
@@ -747,13 +747,13 @@
     },
     {
       "path": "src/server.py",
-      "sha256": "daf173562c9736d9f531852f655142ca884643cd166f59ac5d5c835cadf6b84b",
-      "size": 61376
+      "sha256": "79b16a7f0f9b7e5f9894df02f8092e3cab0d0a7f5be825be6535851e88ab07b4",
+      "size": 62611
     },
     {
       "path": "src/server_app.py",
-      "sha256": "f6e29121c56c1680bbe52abd3aa60c46acff343bd9fa377e6116b52e23f76d7e",
-      "size": 29176
+      "sha256": "c54487b2eefc345f578f3077244374dd0220b36d7b6e794ffb819df581bb4601",
+      "size": 28889
     },
     {
       "path": "src/tools/__init__.py",
@@ -917,8 +917,8 @@
     },
     {
       "path": "src/utils.py",
-      "sha256": "0eb41b1588e3d7aae330efe30bb85dbe6b5bf2757482123095a5b2c7b3df75ae",
-      "size": 46827
+      "sha256": "90ec4426abbd5bcfb00bb67d22fc9e7cdb1cce9f5510cf3fcb12d242a28bff79",
+      "size": 47427
     },
     {
       "path": "src/web/__init__.py",
@@ -942,8 +942,8 @@
     },
     {
       "path": "src/web/config_api.py",
-      "sha256": "fd46420646670e03f215137e80972e1ed82a37bd716c25340c7f87609b5409a0",
-      "size": 71663
+      "sha256": "444fc070ba5fea4081a3291641cdafb3aac255a7a97e3e57c7c1108fa35ba20a",
+      "size": 71697
     },
     {
       "path": "src/web/dashboard.py",
@@ -1032,5 +1032,5 @@
     }
   ],
   "rollout_strategy": "single-node",
-  "version": "2.14.2"
+  "version": "2.15.0"
 }

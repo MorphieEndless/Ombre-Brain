@@ -2,6 +2,42 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.15.0
+
+### 安全 / Security
+
+- 修复 `cryptography==49.0.0` 的已知漏洞 PYSEC-2026-3552（无同版本修复，只能升级到
+  `50.0.0`）。CI 的 `pip-audit` 检查自 2026-08-04 起持续报红：`.github/workflows/tests.yml`
+  锁文件校验固定的包索引快照日期（`UV_EXCLUDE_NEWER`）早于 `cryptography 50.0.0`
+  发布日（2026-07-31），锁文件永远重新解析回 `49.0.0`。快照推进到 `2026-08-01`，
+  重新生成 `requirements.lock.txt` / `requirements-dev.lock.txt`。
+
+### 破坏性变更 / Breaking
+
+- 移除 legacy SSE MCP 传输（`transport: sse`，`/sse` `/messages` 路由）。现在只支持
+  `stdio` 与 `streamable-http`；已废弃客户端请改连 `/mcp`。Dashboard「传输模式」
+  与首次部署向导的 `sse` 选项一并移除。未识别的 `transport` 取值（含 `sse`）现在
+  会在启动期显式报错退出，不会再落到 FastMCP 自带、不受本项目鉴权/CORS/CSRF/
+  限流中间件保护的 `mcp.run(transport="sse")`。
+- 上面的快照推进连带把 `mcp` 1.28.1→1.29.0、`openai` 2.45.0→2.52.0、`uvicorn`
+  0.51.0→0.52.0 等包一起升级，`requirements.lock.txt` 内容随之改变。仍在运行
+  v2.8.4 之前旧逻辑、且这次之前从未升级过的部署实例，热更新时可能无法再走旧的
+  legacy 依赖回退路径，需要手动升级一次；这是经过评估后接受的破坏性变更，不再
+  为其设计兼容迁移。
+
+### 测试 / Tests
+
+- `tests/test_server_app.py`：移除依赖 legacy SSE 官方客户端连接的回归，改为验证
+  `build_http_app` 对 `"sse"` 显式抛错。
+- `tests/test_secure_onboarding.py`：网络传输安全矩阵不再覆盖 `sse`；用 `stdio`
+  替换测试里原本用 `sse` 占位的「已保存但未生效」示例值。
+- `tests/test_update_source_gate.py`：`requirements.lock.txt` 基线哈希推进到新内容，
+  说明这次是经评估后接受的破坏性变更。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.15.0`。
+
 ## 2.14.2
 
 ### 修复 / Fixed

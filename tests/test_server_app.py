@@ -288,86 +288,20 @@ async def test_kelivo_compatible_stateless_json_handshake_lists_all_tools():
                 assert all(isinstance(tool.get("inputSchema"), dict) for tool in tools)
 
 
-@pytest.mark.asyncio
-async def test_legacy_sse_official_client_lists_all_tools():
-    """Streamable HTTP 的兼容改动不能破坏旧版 SSE 发现路径。"""
+def test_legacy_sse_transport_is_rejected():
+    """2026-08-09 起 legacy SSE 传输下线：build_http_app 必须明确拒绝，不能悄悄放行。"""
 
-    import socket
-
-    import uvicorn
-    from mcp import ClientSession
-    from mcp.client.sse import sse_client
-
-    import server
-
-    app = build_http_app(
-        server.mcp,
-        "sse",
-        settings=HTTPRuntimeSettings(
-            auth_required=False,
-            max_request_bytes=DEFAULT_MAX_MCP_REQUEST_BYTES,
-        ),
-        token_validator=lambda *_args, **_kwargs: False,
-        lifecycle=RuntimeLifecycle(logger=RecordingLogger()),
-    )
-    requests = []
-
-    async def recording_app(scope, receive, send):
-        if scope["type"] == "http":
-            requests.append((scope["method"], scope["path"]))
-        await app(scope, receive, send)
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(("127.0.0.1", 0))
-    sock.listen()
-    port = sock.getsockname()[1]
-    uvicorn_server = uvicorn.Server(
-        uvicorn.Config(
-            recording_app,
-            log_level="warning",
-            lifespan="on",
-            timeout_graceful_shutdown=1,
+    with pytest.raises(ValueError, match="sse"):
+        build_http_app(
+            object(),
+            "sse",
+            settings=HTTPRuntimeSettings(
+                auth_required=False,
+                max_request_bytes=DEFAULT_MAX_MCP_REQUEST_BYTES,
+            ),
+            token_validator=lambda *_args, **_kwargs: False,
+            lifecycle=RuntimeLifecycle(logger=RecordingLogger()),
         )
-    )
-    server_task = asyncio.create_task(uvicorn_server.serve(sockets=[sock]))
-
-    async def wait_until_started():
-        while not uvicorn_server.started:
-            if server_task.done():
-                await server_task
-            await asyncio.sleep(0.01)
-
-    try:
-        await asyncio.wait_for(wait_until_started(), timeout=10)
-        async with sse_client(
-            f"http://127.0.0.1:{port}/sse",
-            timeout=5,
-            sse_read_timeout=10,
-        ) as (read_stream, write_stream):
-            async with ClientSession(read_stream, write_stream) as session:
-                initialized = await asyncio.wait_for(
-                    session.initialize(),
-                    timeout=10,
-                )
-                listed = await asyncio.wait_for(
-                    session.list_tools(),
-                    timeout=10,
-                )
-
-        assert initialized.protocolVersion
-        assert [tool.name for tool in listed.tools] == list(
-            EXPECTED_PUBLIC_MCP_TOOLS
-        )
-        assert ("GET", "/sse") in requests
-        assert any(
-            method == "POST" and path.rstrip("/") == "/messages"
-            for method, path in requests
-        )
-    finally:
-        uvicorn_server.should_exit = True
-        await asyncio.wait_for(server_task, timeout=10)
-        sock.close()
 
 
 @pytest.mark.asyncio
@@ -1091,13 +1025,9 @@ async def test_runtime_lifespan_composes_with_parent_lifespan():
     ]
 
 
-@pytest.mark.parametrize("transport", ["streamable-http", "sse"])
-def test_build_http_app_uses_same_managed_stack_for_both_http_transports(transport):
+def test_build_http_app_uses_the_managed_stack():
     class FakeMCP:
         def streamable_http_app(self):
-            return Starlette()
-
-        def sse_app(self):
             return Starlette()
 
     lifecycle = RuntimeLifecycle(logger=RecordingLogger())
@@ -1109,7 +1039,7 @@ def test_build_http_app_uses_same_managed_stack_for_both_http_transports(transpo
 
     app = build_http_app(
         FakeMCP(),
-        transport,
+        "streamable-http",
         settings=settings,
         token_validator=lambda *_args, **_kwargs: False,
         lifecycle=lifecycle,
@@ -1123,10 +1053,8 @@ def test_build_http_app_uses_same_managed_stack_for_both_http_transports(transpo
         "ManagementRequestBodyLimitMiddleware",
         "MCPAuthMiddleware",
         "NgrokHeaderMiddleware",
+        "MCPJSONAcceptShim",
     }
-    assert ("MCPJSONAcceptShim" in middleware_names) is (
-        transport == "streamable-http"
-    )
     csrf_middleware = next(
         item
         for item in app.user_middleware

@@ -2,6 +2,24 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.16.5
+
+### 修复 / Fixed
+
+- 修复 Issue #83 所述 breath 与 dream 返回值中安全元数据逐桶重复、挤占大量
+  上下文预算的问题。Dream 与 SessionStart breath-hook 现在共用紧凑的 OBM2
+  数据信封，普通 breath 也改用同一短标记；固定安全语义每次响应只声明一次。
+- 紧凑协议继续为每块保留独立内容边界、字符数、完整 SHA-256、来源、展示角色、
+  原文/截断状态和命令式文本风险标记；记忆正文仍逐字返回，块内伪造的 system、
+  tool 或边界文本仍只能作为历史数据处理。
+- 完整 SHA-256 改用等价的无填充 base64url 表达。270 字样例的单块信封开销
+  在 Dream 中约减少 50%，在 breath-hook 中约减少四成，普通 breath 的逐桶
+  标记约减少一半，同时继续计入原有 token 硬预算。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.16.5`。
+
 ## 2.16.4
 
 ### 修复 / Fixed

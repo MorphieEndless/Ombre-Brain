@@ -5,11 +5,13 @@ from unittest.mock import MagicMock
 import pytest
 
 import tools._runtime as rt
+from tools._common import memory_data_protocol_header
 from tools.breath import dispatch
 from tools.breath._verbatim import render_stored_bucket
 from tools.breath.importance import surface_by_importance
 from tools.breath.search import surface_search
 from tools.breath.surface import surface_default
+from utils import count_tokens_approx
 
 
 class ExplodingDehydrator:
@@ -308,7 +310,10 @@ async def test_default_surface_skips_random_oversized_candidate_and_keeps_later_
     _, high_cost = render_stored_bucket(
         high, "[权重:9.00] [bucket_id:high]", "👣 Footprint：暂时无法读取"
     )
-    rt.config["surfacing"]["breath_max_tokens"] = top_cost + high_cost
+    protocol_cost = count_tokens_approx(f"{memory_data_protocol_header()}\n") + 1
+    rt.config["surfacing"]["breath_max_tokens"] = (
+        protocol_cost + top_cost + high_cost
+    )
 
     output = await dispatch()
 

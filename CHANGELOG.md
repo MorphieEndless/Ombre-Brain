@@ -2,6 +2,27 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.16.8
+
+### 修复 / Fixed
+
+- 修复 Issue #84 中历史 Letter 异常进入归档区后，Dashboard 仍能看到记录、
+  但 `letter_read` 无法读取的问题。新增登录后维护接口：GET 只读扫描，POST
+  仅恢复明确提交的候选 ID；不会在启动或日常读取时自动扫描、恢复归档数据。
+- 历史 Letter 恢复会在同一桶租约内重新确认唯一物理真源、强 Letter 标记及
+  非删除终态，再原子改回 `letter` 并移入 `letters/history/`。正文、作者、
+  原时间与锁字段保持不变；弱线索、墓碑、保护态和路径碰撞均拒绝处理。
+- 修复 Issue #85 中 `grow(items=[...])` 无法保存 `why_remembered` 的问题。
+  人工逐条理由会先做字符串、500 字符和批量元数据预算校验，首次新建即可保存；
+  合并时只补旧空值，不清除也不覆盖已有理由。
+- `grow(content=...)` 的长文 digest 与短内容专用打标都会生成候选理由，但首次
+  新建不盲目写入；仅后续 grow 再次确认命中同一具体事件时原子补入旧空值。
+  自动理由严格依据原文，且原文中的 system、ignore、tool 等文字只按数据处理。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.16.8`。
+
 ## 2.16.7
 
 ### 修复 / Fixed

@@ -92,7 +92,8 @@ async def test_grow_shortpath_explains_hold_style_single_memory(monkeypatch):
             pass
 
     class FakeDehydrator:
-        async def analyze(self, _content):
+        async def analyze(self, _content, *, include_why=False):
+            assert include_why is True
             return {
                 "importance": 5,
                 "tags": ["短句"],
@@ -100,9 +101,13 @@ async def test_grow_shortpath_explains_hold_style_single_memory(monkeypatch):
                 "valence": 0.5,
                 "arousal": 0.3,
                 "suggested_name": "短内容",
+                "why_remembered": "这条会影响我后续的判断。",
             }
 
-    async def fake_merge_or_create(**_kwargs):
+    captured = {}
+
+    async def fake_merge_or_create(**kwargs):
+        captured.update(kwargs)
         return "bucket-1", False, ""
 
     async def fake_background(*_args, **_kwargs):
@@ -122,6 +127,10 @@ async def test_grow_shortpath_explains_hold_style_single_memory(monkeypatch):
     result = await shortpath.grow_shortpath("短句")
 
     assert "短内容已按 hold 路径保存为单条记忆" in result
+    assert captured.get("why_remembered", "") == ""
+    assert captured["merge_why_remembered"] == (
+        "这条会影响我后续的判断。"
+    )
 
 
 @pytest.mark.asyncio

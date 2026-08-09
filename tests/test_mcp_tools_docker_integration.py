@@ -561,6 +561,39 @@ def test_grow_items_succeeds_without_compression_provider(mcp_client):
     assert f"{marker}-two" in recalled
 
 
+def test_grow_items_accepts_why_remembered_contract(mcp_client):
+    # 这里只锁定 MCP 传输与运行时接受嵌套字段；持久化由单元测试直接读取 metadata 验证。
+    marker = _marker("grow-items-why")
+    reason = _marker("why-reason")
+    result = mcp_client.call(
+        "grow",
+        {"items": [{
+            "title": "grow why contract",
+            "content": marker,
+            "why_remembered": reason,
+        }]},
+    )
+    assert "新1" in result
+
+    recalled = mcp_client.call(
+        "breath_search", {"query": marker, "max_results": 5}
+    )
+    assert marker in recalled
+
+
+def test_grow_items_rejects_oversized_why_remembered_contract(mcp_client):
+    marker = _marker("grow-items-why-too-long")
+    result = mcp_client.call(
+        "grow",
+        {"items": [{
+            "content": marker,
+            "why_remembered": "值" * 501,
+        }]},
+    )
+
+    assert "grow items 第 1 项 why_remembered 不能超过 500 个字符" in result
+
+
 def test_grow_long_content_obeys_configured_provider_contract(mcp_client):
     marker = _marker("grow")
     content = f"{marker} " + "long integration memory " * 8

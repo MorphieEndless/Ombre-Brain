@@ -401,6 +401,17 @@ _EDITABLE_BUCKET_TYPES = frozenset(
     {"dynamic", "permanent", "feel", "plan", "letter", "i", "self"}
 )
 _PLAN_STATUSES = frozenset({"active", "resolved", "abandoned"})
+_ARCHIVED_LETTER_TERMINAL_VALUE_FIELDS = (
+    "deleted_at",
+    "tombstoned_at",
+    "erasure_mode",
+    "erased_at",
+)
+_ARCHIVED_LETTER_TERMINAL_BOOL_FIELDS = (
+    "tombstone",
+    "deleted",
+    "physical_erasure",
+)
 
 # --- 字段截断长度（避免 frontmatter 肨胀）---
 _SOURCE_TOOL_MAX = 32
@@ -2829,6 +2840,217 @@ class BucketManager:
             meaning_changed=meaning_changed,
         )
         return result
+
+    @staticmethod
+    def _path_is_within(file_path: str, directory: str) -> bool:
+        """按解析后的绝对路径判断文件是否真实位于指定托管目录。"""
+        normalized_path = os.path.normcase(os.path.realpath(file_path))
+        normalized_directory = os.path.normcase(os.path.realpath(directory))
+        try:
+            return (
+                os.path.commonpath((normalized_path, normalized_directory))
+                == normalized_directory
+            )
+        except ValueError:
+            return False
+
+    def _physical_bucket_sources(self, bucket_id: str) -> tuple[list[tuple[str, Any]], bool]:
+        """绕过路径缓存，枚举同一 ID 的全部 Markdown 物理真源。
+
+        维护迁移不能信任早先扫描得到的路径，也不能使用只返回首个命中的
+        ``_find_bucket_file``。调用方须在 ``_bucket_turn`` 内调用本方法。
+        文件名明显属于目标 ID 却无法解析时，第二个返回值为 True，要求迁移
+        保守停止，避免把潜在重复真源忽略掉。
+        """
+        sources: list[tuple[str, Any]] = []
+        unreadable_candidate = False
+        directories = list(self._active_dirs) + [self.archive_dir]
+        for _root, filename, file_path in self._iter_md_files(directories):
+            stem = filename[:-3]
+            filename_matches = stem == bucket_id or stem.endswith(f"_{bucket_id}")
+            try:
+                post = frontmatter.load(file_path)
+            except Exception:
+                if filename_matches:
+                    unreadable_candidate = True
+                continue
+            stored_id = str(post.get("id") or (stem if filename_matches else "")).strip()
+            if stored_id == bucket_id:
+                sources.append((file_path, post))
+        return sources, unreadable_candidate
+
+    @staticmethod
+    def _has_strong_letter_marker(post: Any) -> bool:
+        """仅接受写信入口持久化的强来源标记，domain=letter 不足以授权。"""
+        if str(post.get("source_tool") or "").strip().casefold() == "letter":
+            return True
+        tags = post.get("tags") or []
+        if isinstance(tags, str):
+            tags = [part.strip() for part in tags.split(",")]
+        if not isinstance(tags, (list, tuple, set)):
+            return False
+        return any(str(tag).strip().casefold() == "__letter__" for tag in tags)
+
+    @staticmethod
+    def _has_ambiguous_letter_marker(post: Any) -> bool:
+        """识别仅有弱 Letter 线索的历史桶，供报告人工判断。"""
+        domains = post.get("domain") or []
+        if isinstance(domains, str):
+            domains = [domains]
+        if not isinstance(domains, (list, tuple, set)):
+            return False
+        return any(str(domain).strip().casefold() == "letter" for domain in domains)
+
+    @staticmethod
+    def _archived_letter_rejection(post: Any) -> str:
+        """返回专用迁移的拒绝原因；空串代表可继续校验物理位置。"""
+        if any(post.get(field) for field in _ARCHIVED_LETTER_TERMINAL_VALUE_FIELDS):
+            return "terminal_state"
+        if any(
+            parse_bool(post.get(field), default=False)
+            for field in _ARCHIVED_LETTER_TERMINAL_BOOL_FIELDS
+        ):
+            return "terminal_state"
+        if str(post.get("status") or "").strip().casefold() in {
+            "deleted",
+            "tombstone",
+            "erased",
+        }:
+            return "terminal_state"
+        if any(
+            parse_bool(post.get(field), default=False)
+            for field in ("pinned", "protected", "anchor")
+        ):
+            return "protected_state"
+        if not BucketManager._has_strong_letter_marker(post):
+            if BucketManager._has_ambiguous_letter_marker(post):
+                return "ambiguous_letter_marker"
+            return "not_letter"
+        return ""
+
+    async def recover_archived_letter(self, bucket_id: str) -> dict:
+        """把误归档的历史 Letter 原子迁回 Letter 存储树。
+
+        这是一次性兼容迁移原语，不是普通归档恢复：它只接受 archive 中
+        ``type=archived`` 且带 ``source_tool=letter`` 或 ``__letter__`` 的唯一
+        物理真源。删除终态与 pinned/protected/anchor 状态一律拒绝；正文、
+        时间、作者和时间锁字段原样保留，且不会刷新 ``last_active``。
+        """
+        normalized_id = str(bucket_id or "").strip()
+        if not normalized_id:
+            return {"ok": False, "id": "", "reason": "invalid_id"}
+
+        derived_state: dict[str, Any] | None = None
+        async with self._bucket_turn(normalized_id):
+            sources, unreadable_candidate = self._physical_bucket_sources(normalized_id)
+            if unreadable_candidate:
+                return {
+                    "ok": False,
+                    "id": normalized_id,
+                    "reason": "unreadable_source",
+                }
+            if not sources:
+                return {"ok": False, "id": normalized_id, "reason": "not_found"}
+            if len(sources) != 1:
+                return {
+                    "ok": False,
+                    "id": normalized_id,
+                    "reason": "duplicate_source",
+                }
+
+            file_path, post = sources[0]
+            rejection = self._archived_letter_rejection(post)
+            if rejection:
+                return {"ok": False, "id": normalized_id, "reason": rejection}
+
+            stored_type = str(post.get("type") or "").strip().casefold()
+            stored_in_archive = self._path_is_within(file_path, self.archive_dir)
+            if not stored_in_archive:
+                canonical_history = os.path.join(self.letter_dir, "history")
+                if (
+                    stored_type == "letter"
+                    and os.path.normcase(os.path.realpath(os.path.dirname(file_path)))
+                    == os.path.normcase(os.path.realpath(canonical_history))
+                ):
+                    return {
+                        "ok": True,
+                        "id": normalized_id,
+                        "reason": "already_restored",
+                    }
+                return {
+                    "ok": False,
+                    "id": normalized_id,
+                    "reason": "not_archived",
+                }
+            if stored_type != "archived":
+                return {
+                    "ok": False,
+                    "id": normalized_id,
+                    "reason": "invalid_archived_type",
+                }
+
+            # 仅改回 Letter 类型；其余 frontmatter 与正文必须保持原值。
+            post["type"] = "letter"
+            try:
+                target_path = self._bucket_target_path(
+                    file_path,
+                    "letter",
+                    post.get("domain") or ["letter"],
+                )
+                committed_path = self._commit_bucket_update(
+                    file_path,
+                    target_path,
+                    frontmatter.dumps(post),
+                )
+            except (OSError, ValueError) as exc:
+                logger.error(
+                    "Failed to recover archived Letter / 历史 Letter 恢复失败: %s: %s",
+                    normalized_id,
+                    exc,
+                )
+                return {
+                    "ok": False,
+                    "id": normalized_id,
+                    "reason": "commit_failed",
+                }
+
+            self._invalidate_bm25()
+            self._record_v3_bucket_event(
+                "restore",
+                normalized_id,
+                "letter",
+                post.content or "",
+                dict(post.metadata),
+            )
+            self._record_ledger_event(
+                "TraceRestored",
+                normalized_id,
+                "letter",
+                post.content or "",
+                dict(post.metadata),
+                {"event_actor": "maintenance", "compatibility": "archived_letter"},
+            )
+            logger.info(
+                "Recovered archived Letter / 已恢复历史 Letter: %s -> %s",
+                normalized_id,
+                committed_path,
+            )
+            derived_state = {
+                "bucket_id": normalized_id,
+                "content": post.content or "",
+                "meaning": post.get("meaning") or [],
+                "queue_content": True,
+                "queue_meaning": bool(post.get("meaning")),
+            }
+
+        assert derived_state is not None
+        self._queue_captured_derived_state(derived_state)
+        await self._index_after_update(
+            normalized_id,
+            content_changed=True,
+            meaning_changed=bool(derived_state["meaning"]),
+        )
+        return {"ok": True, "id": normalized_id, "reason": "restored"}
 
     async def _delete_locked(self, bucket_id: str) -> bool:
         file_path = self._find_bucket_file(bucket_id)

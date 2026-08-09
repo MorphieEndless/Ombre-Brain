@@ -32,7 +32,7 @@
     },
     {
       "path": "src/VERSION",
-      "sha256": "4eb8ce1d7a87017787bbe4d3b9b05a0fd34af96cc034a62a85c885db630c19e2",
+      "sha256": "910a3f2ad7f7d4e95649f77c71bfdb895ec002f3c2c34bf9fbdc0a38d0839ad3",
       "size": 7
     },
     {
@@ -42,8 +42,8 @@
     },
     {
       "path": "src/bucket_manager.py",
-      "sha256": "5b12941bfbc46b471526984b1ec814dc0a36ad8e21fc88a7cfa6023e194dcfca",
-      "size": 174564
+      "sha256": "d1304c8df5392e7ea866ccc1ffb7e9172e006410e9fd2f3a2cfa47deb9a90ad6",
+      "size": 183671
     },
     {
       "path": "src/decay_engine.py",
@@ -52,8 +52,8 @@
     },
     {
       "path": "src/dehydrator.py",
-      "sha256": "ca3af5a0fee8ae9e9e4775fc6018413a9a1601a507f5425fe162412f8b02316c",
-      "size": 54979
+      "sha256": "9983903681d04ab867a1155567da7bcd28fcb9c20d4968d4a84c8d186be18f78",
+      "size": 56872
     },
     {
       "path": "src/embedding_engine.py",
@@ -747,8 +747,8 @@
     },
     {
       "path": "src/server.py",
-      "sha256": "083c95f25f4993fa67ab9e450785f67d22fa4c511ec7a7424fb10620f6b6bda5",
-      "size": 63025
+      "sha256": "7eb17950e1e044aa0b7af8d3d948f8fd57ca220b4654011f1828f7d843a3597c",
+      "size": 63286
     },
     {
       "path": "src/server_app.py",
@@ -762,8 +762,8 @@
     },
     {
       "path": "src/tools/_common.py",
-      "sha256": "5fd7bde8c61b8aac3cabb8c69c2088f0efc2ddfabb69e97246dc01997569c85f",
-      "size": 64857
+      "sha256": "4dd60f1ab6bc692ec9127968af16dcddec6f2f2bfc4d1a50041662686cc7a136",
+      "size": 71463
     },
     {
       "path": "src/tools/_runtime.py",
@@ -847,13 +847,13 @@
     },
     {
       "path": "src/tools/grow/core.py",
-      "sha256": "4574f1563363f33368483dad8a093c9b356379954e6383e45f8f5c5a1c385e12",
-      "size": 12275
+      "sha256": "d650a8d4fd4ee5db111416d5383ea6e7fe801259f086b95d97be9ecfc5c456e9",
+      "size": 12639
     },
     {
       "path": "src/tools/grow/shortpath.py",
-      "sha256": "21a619270f6e7ee235c0ec267516ffac2b82a9c8d6d838e06d1569d0626cbf22",
-      "size": 3057
+      "sha256": "5790ce247f673aa6a56b92ce0adc864d158e47720a2017a8b7a7b9261df806c7",
+      "size": 3138
     },
     {
       "path": "src/tools/hold/__init__.py",
@@ -977,8 +977,8 @@
     },
     {
       "path": "src/web/meta.py",
-      "sha256": "7b4ac71e4893240ea43397797f305d50a2be2730f15848be92fae17e57cff6ab",
-      "size": 64996
+      "sha256": "7074e7bc013a1af3b002de75f55a3856ae9631644ccaf70bf62b5ae951520009",
+      "size": 68262
     },
     {
       "path": "src/web/oauth.py",
@@ -1032,5 +1032,5 @@
     }
   ],
   "rollout_strategy": "single-node",
-  "version": "2.16.7"
+  "version": "2.16.8"
 }

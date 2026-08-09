@@ -35,7 +35,7 @@ from .._common import merge_or_create, check_duplicate_for, check_plan_resolutio
 async def grow_shortpath(content: str) -> str:
     rt.logger.info(f"grow short-content fast path: {len(content.strip())} chars")
     try:
-        analysis = await rt.dehydrator.analyze(content)
+        analysis = await rt.dehydrator.analyze(content, include_why=True)
     except Exception as e:
         rt.logger.error(
             "grow short analysis failed: err_type=%s detail=hidden",
@@ -58,6 +58,7 @@ async def grow_shortpath(content: str) -> str:
         arousal=analysis.get("arousal", 0.3),
         name=analysis.get("suggested_name", ""),
         raw_merge=True,
+        merge_why_remembered=analysis.get("why_remembered") or "",
         source_tool="grow",
         grow_batch_id=batch_id,
     )

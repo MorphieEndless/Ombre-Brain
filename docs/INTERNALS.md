@@ -312,9 +312,10 @@ feel 桶自身：
 
 签名：`grow(content="", items=None)`
 
-- 短内容（< 30 字符）走快速路径：`analyze()` + `_merge_or_create()`，跳过 `digest()` 节省一次 API。
+- 短内容（< 30 字符）走快速路径：`analyze(include_why=True)` + `_merge_or_create()`，跳过 `digest()` 节省一次 API。候选 `why_remembered` 同样只用于后续合并补空值，首次新建不写。普通 `hold` 和 `items` 补元数据仍调用默认 `analyze()`，不要求模型生成会被丢弃的理由。
 - 正常路径：`dehydrator.digest()` 拆为 2~6 条 → 每条独立走 `_merge_or_create()`，单条失败 try/except 隔离，标 `⚠️条目名`。
-- `items=[...]` 模式表示调用方已经拆好最终正文。对象条目可显式给出 `title/content/tags/importance/domain/valence/arousal/source_ranges`，显式字段优先于自动打标。若同时传 `content`，它会作为整批共享的不可变原文证据保存一次；每个桶以 1-based 闭区间 `source_ranges` 指向自己的片段。
+- `items=[...]` 模式表示调用方已经拆好最终正文。对象条目可显式给出 `title/content/tags/importance/domain/valence/arousal/why_remembered/source_ranges`，显式字段优先于自动打标。`why_remembered` 必须是不超过 500 字符的字符串，首次新建可直接保存。若同时传 `content`，它会作为整批共享的不可变原文证据保存一次；每个桶以 1-based 闭区间 `source_ranges` 指向自己的片段。
+- `content` 自动模式会为每条产生候选 `why_remembered`：长内容由 digest 逐条生成，短内容由仅该路径开启的 `analyze(include_why=True)` 生成。两者首次新建都不写入候选理由；后续 `grow` 确认命中同一具体事件并合并时，仅在旧桶该字段为空时原子补入。旧值永不被 grow 自动覆盖，空值也不会清除它。
 - 末尾异步触发 `_check_plan_resolution()`。
 
 返回示例：`3条|新2合1\n📝体检结果\n📌朋友聚餐\n📎近期焦虑情绪`。
@@ -413,6 +414,8 @@ feel 桶自身：
 Dashboard 的既有 `/api/letter/{letter_id}` PATCH 同时承载两类互斥请求：原稿字段编辑，或锁元数据管理；单次请求混用两类字段会被拒绝。历史/无锁 Letter 与锁拥有者自己的锁信仍可编辑原稿，来信方未解锁内容不可编辑。原稿变更沿用 BucketManager 的索引刷新，并且不会修改 `writer_name` 或锁元数据。
 
 信件特性：永不衰减、永不合并、不参与压缩。`/breath-hook` 以 hook Token 为 AI 视角、Dashboard session 为人类视角；公开未认证 hook 不返回任何仍锁定内容。时间锁是应用层访问边界，不是磁盘加密，主机或 vault 文件权限持有者仍可读取 Markdown 原文。
+
+历史版本中若 Letter 已异常进入 `archive/`，使用登录后维护接口 `/api/maintenance/restore-archived-letters`：先发 GET 做只读 dry-run，再把确认过的候选 ID 以 `POST {"ids":["..."]}` 显式提交；系统不会启动时自动迁移。恢复只接受 `source_tool=letter` 或 `__letter__` 强标记，并在写入前于同一桶租约内重新校验唯一物理真源；删除墓碑、pinned/protected/anchor、弱线索或碰撞项均拒绝。迁移仅把 `type` 改回 `letter` 并原子移入 `letters/history/`，正文、作者、时间与锁字段不变，也不刷新 `last_active`；响应禁用缓存且只报告 ID、计数与原因。
 
 ### 3.9 `anchor` — 标记坐标系桶（iter 2.0）
 

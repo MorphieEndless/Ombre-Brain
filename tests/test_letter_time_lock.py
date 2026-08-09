@@ -669,3 +669,36 @@ async def test_historical_conversion_accepts_request_scoped_ai_name_override(
         "ai_name": "assistant",
     }, other_id))
     assert generic_name_rejected.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_archived_letter_compat_restore_keeps_opposite_side_lock_hidden(
+    bucket_mgr,
+):
+    """恢复历史 Letter 不能把原本对 AI 隐藏的信意外解锁。"""
+    secret = "restored locked letter must remain hidden"
+    letter_id = await bucket_mgr.create(
+        content=secret,
+        tags=["__letter__"],
+        domain=["letter"],
+        bucket_type="letter",
+        source_tool="letter",
+        lock_type="permanent",
+        unlock_date=PERMANENT_UNLOCK_DATE,
+        locked_by="human",
+        writer_name="Alice",
+    )
+    assert await bucket_mgr.update(letter_id, author="user", title="hidden title")
+    assert await bucket_mgr.archive(letter_id) is True
+    install_runtime(bucket_mgr)
+
+    result = await bucket_mgr.recover_archived_letter(letter_id)
+    output = await letter_read(limit=10)
+
+    assert result["reason"] == "restored"
+    restored = await bucket_mgr.get(letter_id)
+    assert restored["metadata"]["lock_type"] == "permanent"
+    assert restored["metadata"]["unlock_date"] == PERMANENT_UNLOCK_DATE
+    assert restored["metadata"]["locked_by"] == "human"
+    assert secret not in output
+    assert "hidden title" not in output

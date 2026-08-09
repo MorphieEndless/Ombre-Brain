@@ -34,6 +34,7 @@ import json
 import re
 
 from .. import _runtime as rt
+from ..plan.core import is_letter_bucket
 from utils import count_tokens_approx
 
 
@@ -506,6 +507,7 @@ def format_dream_output(
         plans_active = [
             b for b in all_buckets
             if b["metadata"].get("type") == "plan"
+            and not is_letter_bucket(b)
             and b["metadata"].get("status", "active") == "active"
         ]
         plans_active.sort(key=lambda b: b["metadata"].get("created", ""), reverse=True)
@@ -542,7 +544,11 @@ def format_dream_output(
 
     # --- 全量 feel 段（按 token 预算折叠老 feel）---
     try:
-        feels_all = [b for b in all_buckets if b["metadata"].get("type") == "feel"]
+        feels_all = [
+            b for b in all_buckets
+            if b["metadata"].get("type") == "feel"
+            and not is_letter_bucket(b)
+        ]
         feels_all.sort(key=lambda b: b["metadata"].get("created", ""), reverse=True)
         if feels_all:
             try:

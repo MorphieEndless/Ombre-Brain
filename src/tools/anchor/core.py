@@ -30,6 +30,7 @@ from typing import Optional
 
 from .. import _runtime as rt
 from .._common import check_metadata_size
+from ..plan.core import is_letter_bucket, letter_lock_state
 
 
 async def anchor_set(bucket_id: str) -> str:
@@ -139,7 +140,15 @@ async def pulse(include_archive: Optional[bool] = False) -> str:
     for b in buckets:
         meta = b.get("metadata", {})
         btype = meta.get("type")
-        if meta.get("pinned") or meta.get("protected"):
+        logical_letter = is_letter_bucket(b)
+        letter_locked = (
+            logical_letter and letter_lock_state(b, "ai")["locked"]
+        )
+        if letter_locked:
+            icon = "🔒"
+        elif logical_letter:
+            icon = "💌"
+        elif meta.get("pinned") or meta.get("protected"):
             icon = "📌"
         elif btype == "permanent":
             icon = "📦"
@@ -147,8 +156,6 @@ async def pulse(include_archive: Optional[bool] = False) -> str:
             icon = "🫧"
         elif btype == "plan":
             icon = "📋"
-        elif btype == "letter":
-            icon = "💌"
         elif btype == "archived":
             icon = "🗄️"
         elif meta.get("resolved", False):
@@ -159,11 +166,16 @@ async def pulse(include_archive: Optional[bool] = False) -> str:
             score = rt.decay_engine.calculate_score(meta)
         except Exception:
             score = 0.0
-        domains = ",".join(meta.get("domain", []))
+        domains = (
+            "letter" if letter_locked else ",".join(meta.get("domain", []))
+        )
         val = float(meta.get("valence") or 0.5)
         aro = float(meta.get("arousal") or 0.3)
         resolved_tag = " [已解决]" if meta.get("resolved", False) else ""
-        name = meta.get("name", "") or ""
+        name = (
+            "一封上锁的信"
+            if letter_locked else meta.get("name", "") or ""
+        )
         name_tag = f" 《{name}》" if name and name != b["id"] else ""
         line = (
             f"{icon} [{b['id']}]{name_tag}{resolved_tag} "
@@ -172,7 +184,10 @@ async def pulse(include_archive: Optional[bool] = False) -> str:
             f"重要:{meta.get('importance', '?')} "
             f"权重:{score:.2f}"
         )
-        tags = [t for t in (meta.get("tags", []) or []) if not (t.startswith("__") and t.endswith("__"))]
+        tags = [] if letter_locked else [
+            t for t in (meta.get("tags", []) or [])
+            if not (t.startswith("__") and t.endswith("__"))
+        ]
         if tags:
             line += f" 标签:{','.join(tags)}"
         if btype == "feel":
@@ -180,7 +195,7 @@ async def pulse(include_archive: Optional[bool] = False) -> str:
         elif btype == "plan":
             plan_status = meta.get("status", "active")
             plan_lines.append(line + f" [{plan_status}]")
-        elif btype == "letter":
+        elif logical_letter:
             author = meta.get("author", "?")
             letter_lines.append(line + f" [{author}]")
         else:

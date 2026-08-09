@@ -19,6 +19,7 @@ breath_search(query=...) 精准拉取需要的记忆——代替把全部记忆�
 """
 
 from .. import _runtime as rt
+from ..plan.core import is_letter_bucket, letter_lock_state
 
 # 类型 → (区头, 排序位)。未知类型归入动态区兜底。
 _SECTIONS = [
@@ -47,21 +48,35 @@ async def surface_catalog(
     grouped: dict[str, list[tuple[int, str]]] = {key: [] for key, _ in _SECTIONS}
     for b in buckets:
         meta = b.get("metadata", {})
-        domains = [d for d in (meta.get("domain") or []) if d]
+        logical_letter = is_letter_bucket(b)
+        letter_locked = (
+            logical_letter and letter_lock_state(b, "ai")["locked"]
+        )
+        domains = (
+            ["letter"]
+            if letter_locked
+            else [d for d in (meta.get("domain") or []) if d]
+        )
         if domain_filter and not any(d in domain_filter for d in domains):
             continue
-        bucket_tags = set(meta.get("tags") or [])
+        bucket_tags = (
+            {"__letter__"} if letter_locked else set(meta.get("tags") or [])
+        )
         if tag_filter and not all(tag in bucket_tags for tag in tag_filter):
             continue
         try:
             imp = int(meta.get("importance") or 0)
         except (TypeError, ValueError):
             imp = 0
-        name = meta.get("name") or b["id"]
-        pin_mark = "📌" if (meta.get("pinned") or meta.get("protected")) else ""
+        name = "一封上锁的信" if letter_locked else meta.get("name") or b["id"]
+        pin_mark = (
+            "📌"
+            if not logical_letter and (meta.get("pinned") or meta.get("protected"))
+            else ""
+        )
         line = f"{pin_mark}{name} | {','.join(domains) or '未分类'} | {imp}"
         btype = meta.get("type")
-        key = btype if btype in grouped else "dynamic"
+        key = "letter" if logical_letter else btype if btype in grouped else "dynamic"
         grouped[key].append((imp, line))
 
     total = sum(len(v) for v in grouped.values())

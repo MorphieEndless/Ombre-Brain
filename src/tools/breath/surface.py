@@ -30,6 +30,7 @@ from datetime import datetime, timedelta
 
 from ombrebrain.policy.surfacing import SurfacePolicyVM
 from .. import _runtime as rt
+from ..plan.core import is_letter_bucket
 from utils import parse_bool, parse_iso_datetime
 from ._verbatim import render_stored_bucket
 
@@ -93,7 +94,7 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
             or b["metadata"].get("type") == "permanent"
         )
         and _can_surface(b)
-        and b["metadata"].get("type") != "letter"
+        and not is_letter_bucket(b)
         and not b["metadata"].get("anchor", False)  # 防御：anchor 是坐标系，永不主动浮现，即使 pinned
     ]
     core_filter_notice = ""
@@ -127,6 +128,7 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
         b for b in all_buckets_non_anchor
         if _can_surface(b)
         and not b["metadata"].get("resolved", False)
+        and not is_letter_bucket(b)
         and b["metadata"].get("type") not in ("permanent", "feel", "plan", "letter", "self", "i")
         and not b["metadata"].get("pinned", False)
         and not b["metadata"].get("protected", False)
@@ -329,6 +331,7 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
                 if _can_surface(b)
                 and b["metadata"].get("resolved", False)
                 and b["id"] not in shown_ids
+                and not is_letter_bucket(b)
                 and b["metadata"].get("type") not in ("feel", "plan", "letter")
                 and not b["metadata"].get("pinned")
             ]

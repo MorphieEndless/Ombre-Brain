@@ -19,7 +19,10 @@ from . import _shared as sh
 from tools._common import check_content_size, check_metadata_size
 from tools.plan.core import (
     author_side,
+    is_letter_bucket,
+    letter_lock_revision,
     letter_lock_state,
+    normalize_expired_lock,
     normalize_lock_type,
     normalize_unlock_date,
     resolve_writer_name,
@@ -62,7 +65,7 @@ def register(mcp) -> None:
             return JSONResponse({"error": metadata_error}, status_code=400)
         try:
             all_b = await sh.bucket_mgr.list_all(include_archive=False)
-            letters = [b for b in all_b if b["metadata"].get("type") == "letter"]
+            letters = [b for b in all_b if is_letter_bucket(b)]
             if author:
                 af_low = author.lower()
                 if af_low == "user":
@@ -80,9 +83,14 @@ def register(mcp) -> None:
             for b in letters:
                 state = letter_lock_state(b, "human")
                 if state["expired"]:
-                    await sh.bucket_mgr.update(
-                        b["id"], lock_type="none", unlock_date=None
+                    b, state = await normalize_expired_lock(
+                        b,
+                        state,
+                        "human",
+                        bucket_mgr=sh.bucket_mgr,
                     )
+                    if not b:
+                        continue
                 result.append(safe_letter_metadata(b, "human"))
             return JSONResponse({"letters": result, "total": len(result)})
         except Exception as e:
@@ -228,8 +236,9 @@ def register(mcp) -> None:
             return err
         letter_id = request.path_params["letter_id"]
         bucket = await sh.bucket_mgr.get(letter_id)
-        if not bucket or bucket["metadata"].get("type") != "letter":
+        if not bucket or not is_letter_bucket(bucket):
             return JSONResponse({"error": "letter not found"}, status_code=404)
+        expected_lock_state = letter_lock_revision(bucket)
         try:
             body = await sh._read_json_object(request)
         except Exception:
@@ -284,8 +293,15 @@ def register(mcp) -> None:
                     writer_name=ai_writer_name,
                     lock_type="none",
                     unlock_date=None,
+                    expected_lock_state=expected_lock_state,
                 )
                 if not ok:
+                    latest = await sh.bucket_mgr.get(letter_id)
+                    if latest and letter_lock_revision(latest) != expected_lock_state:
+                        return JSONResponse(
+                            {"error": "letter lock changed concurrently"},
+                            status_code=409,
+                        )
                     return JSONResponse({"error": "conversion failed"}, status_code=500)
                 return JSONResponse({
                     "ok": True,
@@ -330,8 +346,18 @@ def register(mcp) -> None:
             if not updates:
                 return JSONResponse({"error": "nothing to update"}, status_code=400)
             try:
-                ok = await sh.bucket_mgr.update(letter_id, **updates)
+                ok = await sh.bucket_mgr.update(
+                    letter_id,
+                    expected_lock_state=expected_lock_state,
+                    **updates,
+                )
                 if not ok:
+                    latest = await sh.bucket_mgr.get(letter_id)
+                    if latest and letter_lock_revision(latest) != expected_lock_state:
+                        return JSONResponse(
+                            {"error": "letter lock changed concurrently"},
+                            status_code=409,
+                        )
                     return JSONResponse({"error": "update failed"}, status_code=500)
                 if "content" in updates:
                     try:
@@ -374,8 +400,18 @@ def register(mcp) -> None:
         updates = {"lock_type": lock_type, "unlock_date": unlock_date}
 
         try:
-            ok = await sh.bucket_mgr.update(letter_id, **updates)
+            ok = await sh.bucket_mgr.update(
+                letter_id,
+                expected_lock_state=expected_lock_state,
+                **updates,
+            )
             if not ok:
+                latest = await sh.bucket_mgr.get(letter_id)
+                if latest and letter_lock_revision(latest) != expected_lock_state:
+                    return JSONResponse(
+                        {"error": "letter lock changed concurrently"},
+                        status_code=409,
+                    )
                 return JSONResponse({"error": "update failed"}, status_code=500)
             return JSONResponse({
                 "ok": True,
@@ -399,7 +435,7 @@ def register(mcp) -> None:
             return JSONResponse({"error": "confirm=true required for delete-to-archive"}, status_code=400)
         letter_id = request.path_params["letter_id"]
         bucket = await sh.bucket_mgr.get(letter_id)
-        if bucket and bucket["metadata"].get("type") != "letter":
+        if bucket and not is_letter_bucket(bucket):
             return JSONResponse({"error": "letter not found"}, status_code=404)
         try:
             # Idempotent repair for a half-deleted letter: the Markdown file may

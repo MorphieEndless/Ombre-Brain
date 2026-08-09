@@ -56,6 +56,23 @@ except ImportError:  # pragma: no cover
         occupies_high_importance_quota_slot as _occupies_high_importance_slot,
     )
 
+try:
+    from tools.plan.core import (  # type: ignore
+        is_letter_bucket,
+        letter_lock_state,
+        safe_letter_metadata,
+    )
+except ImportError:  # pragma: no cover
+    from ..tools.plan.core import (  # type: ignore
+        is_letter_bucket,
+        letter_lock_state,
+        safe_letter_metadata,
+    )
+
+
+_LOCKED_LETTER_NAME = "一封上锁的信"
+_LOCKED_LETTER_NOTICE = "这封信尚未向你开放。"
+
 
 def _datetime_epoch_ms(value) -> int | None:
     """Return one server-normalized instant for Dashboard sorting/display."""
@@ -116,14 +133,24 @@ def register(mcp) -> None:
                 meta = b.get("metadata", {})
                 if meta.get("deleted_at"):
                     continue
+                lock_state = letter_lock_state(b, "human")
+                letter_locked = bool(lock_state["locked"])
                 created_epoch_ms = _datetime_epoch_ms(meta.get("created"))
                 last_active_epoch_ms = _datetime_epoch_ms(meta.get("last_active"))
                 result.append({
                     "id": b["id"],
-                    "name": meta.get("name", b["id"]),
+                    "name": (
+                        _LOCKED_LETTER_NAME
+                        if letter_locked
+                        else meta.get("name", b["id"])
+                    ),
                     "type": meta.get("type", "dynamic"),
-                    "domain": meta.get("domain", []),
-                    "tags": meta.get("tags", []),
+                    "domain": (
+                        ["letter"] if letter_locked else meta.get("domain", [])
+                    ),
+                    "tags": (
+                        ["__letter__"] if letter_locked else meta.get("tags", [])
+                    ),
                     "valence": meta.get("valence", 0.5),
                     "arousal": meta.get("arousal", 0.3),
                     "model_valence": meta.get("model_valence"),
@@ -139,13 +166,24 @@ def register(mcp) -> None:
                     "last_active_epoch_ms": last_active_epoch_ms,
                     "activation_count": meta.get("activation_count", 0),
                     "score": sh.decay_engine.calculate_score(meta),
-                    "content_preview": strip_wikilinks(b.get("content", ""))[:200],
+                    "content_preview": (
+                        _LOCKED_LETTER_NOTICE
+                        if letter_locked
+                        else strip_wikilinks(b.get("content", ""))[:200]
+                    ),
+                    "letter_locked": letter_locked,
+                    "lock_type": lock_state["lock_type"],
+                    "unlock_date": lock_state["unlock_date"],
                     # iter 1.8 新增字段（后台老桶读出默认值）
-                    "why_remembered": meta.get("why_remembered", ""),
+                    "why_remembered": (
+                        "" if letter_locked else meta.get("why_remembered", "")
+                    ),
                     "dont_surface": bool(meta.get("dont_surface", False)),
                     "first_of_kind": bool(meta.get("first_of_kind", False)),
                     "weight": meta.get("weight"),  # plan 专有，非 plan 为 None
-                    "triggered_by": meta.get("triggered_by", ""),
+                    "triggered_by": (
+                        "" if letter_locked else meta.get("triggered_by", "")
+                    ),
                     "erasable_test_data": bool(
                         isinstance(meta.get("provenance"), dict)
                         and meta["provenance"].get("kind") == "test"
@@ -187,6 +225,30 @@ def register(mcp) -> None:
         if not bucket:
             return JSONResponse({"error": "not found"}, status_code=404)
         meta = bucket.get("metadata", {})
+        lock_state = letter_lock_state(bucket, "human")
+        if lock_state["locked"]:
+            safe_letter = safe_letter_metadata(bucket, "human")
+            return JSONResponse({
+                "id": bucket["id"],
+                "metadata": {
+                    "name": _LOCKED_LETTER_NAME,
+                    "type": meta.get("type", "letter"),
+                    "domain": ["letter"],
+                    "author": safe_letter["author"],
+                    "user_name": safe_letter["user_name"],
+                    "writer_name": safe_letter["writer_name"],
+                    "letter_date": safe_letter["date"],
+                    "created": safe_letter["created"],
+                    "lock_type": safe_letter["lock_type"],
+                    "unlock_date": safe_letter["unlock_date"],
+                    "locked": True,
+                },
+                "content": "",
+                "display_content": _LOCKED_LETTER_NOTICE,
+                "score": sh.decay_engine.calculate_score(meta),
+                "triggered_feels": [],
+                "letter_locked": True,
+            })
         # iter 1.9 D / iter 2.0 §10 U-04: 反向链——只扫 feel_dir，O(feel桶数) 而非全库扫描
         triggered_feels = []
         try:
@@ -204,6 +266,7 @@ def register(mcp) -> None:
             "display_content": strip_wikilinks(raw_content),
             "score": sh.decay_engine.calculate_score(meta),
             "triggered_feels": triggered_feels,  # iter 1.9 D
+            "letter_locked": False,
         })
 
 
@@ -228,6 +291,11 @@ def register(mcp) -> None:
                 if not bucket:
                     return JSONResponse({"error": "not found"}, status_code=404)
                 meta = bucket.get("metadata", {})
+                if is_letter_bucket(bucket):
+                    return JSONResponse(
+                        {"error": "letters cannot be pinned from the bucket API"},
+                        status_code=403,
+                    )
                 if _is_terminal_memory_metadata(meta):
                     return JSONResponse(
                         {"error": "archived buckets cannot be pinned or unpinned"},
@@ -310,6 +378,11 @@ def register(mcp) -> None:
                 locked_meta = locked_bucket.get("metadata", {})
                 if not isinstance(locked_meta, dict):
                     locked_meta = {}
+                if is_letter_bucket(locked_bucket):
+                    return JSONResponse(
+                        {"error": "letter state changed concurrently"},
+                        status_code=409,
+                    )
                 if _is_terminal_memory_metadata(locked_meta):
                     return JSONResponse(
                         {"error": "bucket was archived concurrently"},
@@ -903,15 +976,30 @@ def register(mcp) -> None:
         items = []
         for b in anchors:
             m = b.get("metadata", {})
+            lock_state = letter_lock_state(b, "human")
+            letter_locked = bool(lock_state["locked"])
             items.append({
                 "id": b["id"],
-                "name": m.get("name") or b["id"],
+                "name": (
+                    _LOCKED_LETTER_NAME
+                    if letter_locked
+                    else m.get("name") or b["id"]
+                ),
                 "created": m.get("created", ""),
-                "domain": m.get("domain", []),
-                "tags": m.get("tags", []),
+                "domain": (
+                    ["letter"] if letter_locked else m.get("domain", [])
+                ),
+                "tags": (
+                    ["__letter__"] if letter_locked else m.get("tags", [])
+                ),
                 "type": m.get("type", "dynamic"),
                 "pinned": bool(m.get("pinned", False)),
-                "preview": (b.get("content", "") or "")[:80],
+                "preview": (
+                    _LOCKED_LETTER_NOTICE
+                    if letter_locked
+                    else (b.get("content", "") or "")[:80]
+                ),
+                "letter_locked": letter_locked,
             })
         return JSONResponse({
             "ok": True,
@@ -1007,8 +1095,11 @@ def register(mcp) -> None:
             all_b = await sh.bucket_mgr.list_all(include_archive=False)
             self_buckets = [
                 b for b in all_b
-                if b["metadata"].get("type") == "i"
-                or "__i__" in (b["metadata"].get("tags") or [])
+                if not is_letter_bucket(b)
+                and (
+                    b["metadata"].get("type") == "i"
+                    or "__i__" in (b["metadata"].get("tags") or [])
+                )
             ]
             self_buckets.sort(key=lambda b: b["metadata"].get("created", ""), reverse=True)
             result = []

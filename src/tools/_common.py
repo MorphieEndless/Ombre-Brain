@@ -824,7 +824,12 @@ async def _merge_or_create_inner(
                     metadata = bucket.get("metadata", {})
                     if not isinstance(metadata, dict):
                         metadata = {}
-                    if parse_bool(metadata.get("pinned"), default=False) or parse_bool(
+                    # Letter 是专用通道，生命周期类型即使被历史数据改写，也绝不
+                    # 参与 hold/grow 的事件合并；延迟导入避免 plan.core 回引本模块。
+                    from .plan.core import is_letter_bucket
+                    if is_letter_bucket(bucket) or parse_bool(
+                        metadata.get("pinned"), default=False
+                    ) or parse_bool(
                         metadata.get("protected"), default=False
                     ) or is_terminal_memory_metadata(metadata) or str(
                         metadata.get("i_stage") or ""
@@ -1237,10 +1242,13 @@ async def _rank_active_plans_by_query(
 async def check_plan_resolution(new_event_text: str, source_bucket_id: str = "") -> None:
     """新事件触发 active plan 关键词/向量召回，再由 LLM 保守判断是否闭环。"""
     try:
+        from .plan.core import is_letter_bucket
+
         all_b = await rt.bucket_mgr.list_all(include_archive=False)
         active_plans = [
             b for b in all_b
             if b["metadata"].get("type") == "plan"
+            and not is_letter_bucket(b)
             and b["metadata"].get("status", "active") == "active"
         ]
         if not active_plans:

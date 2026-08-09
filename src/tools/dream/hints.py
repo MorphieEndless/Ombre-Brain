@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 
 from ..i import I_PROMOTE_THRESHOLD, is_pending_candidate
 from .. import _runtime as rt
+from ..plan.core import is_letter_bucket
 from utils import strip_wikilinks
 
 # 对照池上限：正式 I 条目和其它候选永远全量参与碰撞，普通记忆只取最近这么多条。
@@ -77,7 +78,11 @@ async def build_crystal_hint(all_buckets: list) -> str:
     if not (rt.embedding_engine and rt.embedding_engine.enabled):
         return ""
     try:
-        feels = [b for b in all_buckets if b["metadata"].get("type") == "feel"]
+        feels = [
+            b for b in all_buckets
+            if b["metadata"].get("type") == "feel"
+            and not is_letter_bucket(b)
+        ]
         if len(feels) < 3:
             return ""
         feel_embeddings: dict = {}
@@ -141,7 +146,10 @@ async def collect_self_candidates(all_buckets: list) -> SelfReview:
 
     材料只是材料：支持、反驳、撞车都可能，这里不做任何判定。
     """
-    pending = [b for b in all_buckets if is_pending_candidate(b)]
+    pending = [
+        b for b in all_buckets
+        if is_pending_candidate(b) and not is_letter_bucket(b)
+    ]
     if not pending:
         return SelfReview()
 
@@ -170,11 +178,13 @@ async def collect_self_candidates(all_buckets: list) -> SelfReview:
         pool = [
             b for b in all_buckets
             if b["id"] not in pending_ids
+            and not is_letter_bucket(b)
             and (b.get("metadata") or {}).get("type") == "i"
         ]
         ordinary = [
             b for b in all_buckets
             if b["id"] not in pending_ids
+            and not is_letter_bucket(b)
             and (b.get("metadata") or {}).get("type") not in ("i", "letter")
         ]
         ordinary.sort(key=_timestamp_key, reverse=True)

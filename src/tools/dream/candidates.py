@@ -26,6 +26,7 @@ from datetime import datetime, timedelta
 
 from ombrebrain.policy.surfacing import SurfacePolicyVM
 from .. import _runtime as rt
+from ..plan.core import is_letter_bucket
 from utils import parse_iso_datetime
 
 DREAM_MAX_CANDIDATES = 40
@@ -53,6 +54,7 @@ def collect_core_context(all_buckets: list) -> list:
             or b["metadata"].get("type") == "permanent"
         )
         and _can_dream(b)
+        and not is_letter_bucket(b)
         and b["metadata"].get("type") not in ("letter", "self", "i")
     ]
     core.sort(
@@ -69,7 +71,8 @@ def collect_core_context(all_buckets: list) -> list:
 def collect_candidates(all_buckets: list, window_hours: int) -> list:
     candidates = [
         b for b in all_buckets
-        if b["metadata"].get("type") not in ("permanent", "feel", "plan", "letter", "self", "i")
+        if not is_letter_bucket(b)
+        and b["metadata"].get("type") not in ("permanent", "feel", "plan", "letter", "self", "i")
         and _can_dream(b)
         and not b["metadata"].get("pinned", False)
         and not b["metadata"].get("protected", False)

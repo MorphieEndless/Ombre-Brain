@@ -25,7 +25,11 @@ from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
 
 from ombrebrain.policy.surfacing import SurfacePolicyVM
-from tools.plan.core import letter_lock_state
+from tools.plan.core import (
+    is_letter_bucket,
+    letter_lock_state,
+    normalize_expired_lock,
+)
 
 from . import _shared as sh
 
@@ -295,6 +299,7 @@ def register(mcp) -> None:
                     and _SURFACE_POLICY.evaluate_bucket(
                         bucket, mode="spontaneous"
                     ).allowed
+                    and not is_letter_bucket(bucket)
                 ]
                 pinned.sort(
                     key=lambda bucket: (
@@ -310,6 +315,7 @@ def register(mcp) -> None:
                     not in ("permanent", "feel", "plan", "letter", "self", "i")
                     and not bucket["metadata"].get("pinned")
                     and not bucket["metadata"].get("protected")
+                    and not is_letter_bucket(bucket)
                     and _SURFACE_POLICY.evaluate_bucket(
                         bucket, mode="spontaneous"
                     ).allowed
@@ -401,15 +407,30 @@ def register(mcp) -> None:
 
                 letters = [
                     bucket for bucket in all_buckets
-                    if bucket["metadata"].get("type") == "letter"
+                    if is_letter_bucket(bucket)
                 ]
+                normalized_letters = []
+                letter_states = {}
+                for letter in letters:
+                    state = letter_lock_state(letter, caller_side)
+                    letter, state = await normalize_expired_lock(
+                        letter,
+                        state,
+                        caller_side,
+                        bucket_mgr=sh.bucket_mgr,
+                    )
+                    if not letter:
+                        continue
+                    normalized_letters.append(letter)
+                    letter_states[letter["id"]] = state
+                letters = normalized_letters
                 if letters:
                     def latest(*authors: str) -> dict | None:
                         wanted = set(authors)
                         pool = [
                             letter for letter in letters
                             if letter["metadata"].get("author") in wanted
-                            and not letter_lock_state(letter, caller_side)["locked"]
+                            and not letter_states[letter["id"]]["locked"]
                         ]
                         if not pool:
                             return None
@@ -429,11 +450,7 @@ def register(mcp) -> None:
                         if letter is None:
                             continue
                         meta = letter["metadata"]
-                        state = letter_lock_state(letter, caller_side)
-                        if state["expired"]:
-                            await sh.bucket_mgr.update(
-                                letter["id"], lock_type="none", unlock_date=None
-                            )
+                        state = letter_states[letter["id"]]
                         if state["stored_lock_type"] != "none":
                             # Locked Letters created by V1 always snapshot the
                             # actual writer name.  Even the owner's full-text
@@ -458,12 +475,7 @@ def register(mcp) -> None:
                     if caller_side is not None:
                         incoming_by_writer: dict[str, list[tuple[dict, dict]]] = {}
                         for letter in letters:
-                            state = letter_lock_state(letter, caller_side)
-                            if state["expired"]:
-                                await sh.bucket_mgr.update(
-                                    letter["id"], lock_type="none", unlock_date=None
-                                )
-                                continue
+                            state = letter_states[letter["id"]]
                             if not state["locked"]:
                                 continue
                             meta = letter.get("metadata") or {}
@@ -494,8 +506,11 @@ def register(mcp) -> None:
 
                 self_buckets = [
                     bucket for bucket in all_buckets
-                    if bucket["metadata"].get("type") == "i"
-                    or "__i__" in (bucket["metadata"].get("tags") or [])
+                    if not is_letter_bucket(bucket)
+                    and (
+                        bucket["metadata"].get("type") == "i"
+                        or "__i__" in (bucket["metadata"].get("tags") or [])
+                    )
                 ]
                 self_buckets.sort(
                     key=lambda bucket: bucket["metadata"].get("created", ""),

@@ -4807,7 +4807,8 @@ function _paintBuckets() {
     // iter 1.8: dont_surface = 主动遗忘（仍在磁盘） / first_of_kind = 首次出现的标签组合
     // 图标：feel→计算表情、letter→信封、pinned→可发光的钉、其余沿用原逻辑
     var iconCls = 'icon', iconHtml;
-    if (b.dont_surface)        iconHtml = '<i data-lucide="eye-off"></i>';
+    if (b.letter_locked)       iconHtml = '<i data-lucide="lock-keyhole"></i>';
+    else if (b.dont_surface)   iconHtml = '<i data-lucide="eye-off"></i>';
     else if (b.pinned)       { iconHtml = '<i data-lucide="pin"></i>'; iconCls = 'icon pin-ic'; }
     else if (b.type === 'feel')   iconHtml = feelFace(b.valence, b.arousal);
     else if (b.type === 'letter') iconHtml = '<i data-lucide="mail"></i>';
@@ -4933,6 +4934,25 @@ async function showDetail(id) {
     var meta = b.metadata || {};
     // content 是可无损写回的原始 Markdown；display_content 仅供详情展示。
     var displayContent = typeof b.display_content === 'string' ? b.display_content : (b.content || '');
+    if (b.letter_locked) {
+      panel.classList.add('letter-mode');
+      panel.classList.remove('anchor-mode');
+      var lockUntil = meta.lock_type === 'timed' && meta.unlock_date
+        ? '<div class="field"><label>解锁时间 / Unlock</label>' + esc(String(meta.unlock_date).replace('T', ' ').slice(0, 19)) + '</div>'
+        : '';
+      content.innerHTML =
+        '<h2><i data-lucide="lock-keyhole" style="width:18px;height:18px;vertical-align:-3px;"></i> ' + esc(meta.name || '一封上锁的信') + '</h2>' +
+        '<div class="detail-meta letter-lock-meta">' +
+          '<div class="field"><label>ID</label>' + esc(id) + '</div>' +
+          '<div class="field"><label>写信人 / Writer</label>' + esc(meta.writer_name || meta.author || '—') + '</div>' +
+          '<div class="field"><label>日期 / Date</label>' + esc(meta.letter_date || meta.created || '—') + '</div>' +
+          '<div class="field"><label>锁类型 / Lock</label>' + esc(meta.lock_type || '—') + '</div>' +
+          lockUntil +
+        '</div>' +
+        '<div class="detail-content">' + esc(displayContent || '这封信尚未向你开放。') + '</div>';
+      if (window.lucide) lucide.createIcons();
+      return true;
+    }
     var safeValence = safeNumber(meta.valence, 0.5, 0, 1);
     var safeArousal = safeNumber(meta.arousal, 0.3, 0, 1);
     var safeModelValence = meta.model_valence == null
@@ -8254,7 +8274,8 @@ async function loadImportResults(options) {
         </div>
         <p style="font-size:13px;margin:6px 0;white-space:pre-wrap;">${esc(b.content)}</p>
         <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;">${esc((b.tags||[]).map(t=>'#'+t).join(' '))}</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        ${b.letter_item ? '<div style="font-size:12px;color:var(--text-dim);">请在「信」页管理 / Manage in Letters</div>' : ''}
+        <div style="display:${b.letter_item ? 'none' : 'flex'};gap:8px;flex-wrap:wrap;">
           <button data-bucket-id="${escAttr(b.id)}" onclick="openImportedBucketEditor(this.dataset.bucketId)" class="icon-btn" title="编辑完整记忆 / Edit full memory"><svg class="icon" aria-hidden="true"><use href="#i-edit"></use></svg> 编辑</button>
           <button data-bucket-id="${escAttr(b.id)}" onclick="reviewAction(this.dataset.bucketId,'pin')" class="icon-btn" title="固定为永久记忆"><i data-lucide="pin"></i> 固定</button>
           <button data-bucket-id="${escAttr(b.id)}" onclick="reviewAction(this.dataset.bucketId,'important')" class="icon-btn" title="标为重要"><i data-lucide="star"></i> 重要</button>

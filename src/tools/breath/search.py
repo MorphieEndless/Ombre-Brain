@@ -32,6 +32,7 @@ from datetime import datetime, time
 
 from ombrebrain.policy.surfacing import SurfacePolicyVM
 from .. import _runtime as rt
+from ..plan.core import is_letter_bucket
 from ._verbatim import render_stored_bucket
 from utils import parse_iso_datetime
 
@@ -244,6 +245,8 @@ async def surface_search(
         )
         exact_bucket = None
     if exact_bucket:
+        if is_letter_bucket(exact_bucket):
+            return "Letter 不通过普通 breath 检索返回；请使用 letter_read。"
         meta = exact_bucket.get("metadata", {}) or {}
         is_archived = _is_archived(exact_bucket)
         archived_original_kind = (
@@ -316,6 +319,8 @@ async def surface_search(
     eligible_matches = []
     for bucket in matches:
         meta = bucket.get("metadata", {}) or {}
+        if is_letter_bucket(bucket):
+            continue
         if _is_archived(bucket):
             original_kind = (
                 footprint_snapshot.original_kind(str(bucket.get("id") or ""), meta)
@@ -390,6 +395,7 @@ async def surface_search(
                 and _SURFACE_POLICY.evaluate_bucket(
                     b, mode="spontaneous"
                 ).allowed
+                and not is_letter_bucket(b)
                 and b["metadata"].get("type") not in ("feel", "plan", "letter")
                 and rt.decay_engine.calculate_score(b["metadata"]) < 2.0
                 and _bucket_in_created_range(b, created_from, created_to)

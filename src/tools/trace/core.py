@@ -46,6 +46,7 @@ from .._common import (
     enforce_high_importance_quota,
     occupies_high_importance_quota_slot,
 )
+from ..plan.core import is_letter_bucket, letter_lock_revision, letter_lock_state
 
 
 async def trace_core(
@@ -188,6 +189,15 @@ async def trace_core(
     if not bucket_id or not bucket_id.strip():
         return "请提供有效的 bucket_id。"
 
+    if restore or delete or hard_delete:
+        guarded_bucket = await rt.bucket_mgr.get(bucket_id)
+        if (
+            guarded_bucket
+            and is_letter_bucket(guarded_bucket)
+            and letter_lock_state(guarded_bucket, "ai")["locked"]
+        ):
+            return "这封信尚未向你开放，不能通过 trace 修改其生命周期。"
+
     restore_conflicts = any((
         delete,
         hard_delete,
@@ -288,6 +298,19 @@ async def trace_core(
 
     meta = bucket.get("metadata", {})
     current_pinned = parse_bool(meta.get("pinned"), default=False)
+    logical_letter = is_letter_bucket(bucket)
+    lock_precondition = (
+        {"expected_lock_state": letter_lock_revision(bucket)}
+        if logical_letter else {}
+    )
+    if logical_letter and letter_lock_state(bucket, "ai")["locked"]:
+        return "这封信尚未向你开放；请使用 Letter 专用入口管理锁状态。"
+    if (
+        logical_letter
+        and pinned in (0, 1)
+        and bool(pinned) != current_pinned
+    ):
+        return "Letter 不能通过 trace 改变 pinned 状态；请使用 Letter 专用入口。"
     protected = parse_bool(meta.get("protected"), default=False)
     unpinning_now = pinned == 0 and current_pinned
     if unpinning_now and not (1 <= importance <= 10):
@@ -492,6 +515,7 @@ async def trace_core(
                 new_str=new_str,
                 append_plan_history=append_plan_history_in_patch,
                 event_actor="llm",
+                **lock_precondition,
                 **updates,
             )
             if not patch_result.get("ok"):
@@ -519,6 +543,7 @@ async def trace_core(
             success = await rt.bucket_mgr.update(
                 bucket_id,
                 event_actor="llm",
+                **lock_precondition,
                 **updates,
             )
             if not success:

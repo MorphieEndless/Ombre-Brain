@@ -15,6 +15,7 @@ tools/dream/hints.py — dream 的连接提示、结晶提示与 I 候选碰撞�
 
 关键行为：
 - 都依赖 embedding_engine.enabled；未启用时返回空串 / 空材料并明说
+- protected 只防衰减：连接、结晶、I 候选及碰撞材料一律不读取其正文
 - 任意异常都吞掉，只 warning，不影响 dream 主流程
 - 只读已落盘向量，不发新的 embedding 请求
 
@@ -33,7 +34,7 @@ from dataclasses import dataclass, field
 from ..i import I_PROMOTE_THRESHOLD, is_pending_candidate
 from .. import _runtime as rt
 from ..plan.core import is_letter_bucket
-from utils import strip_wikilinks
+from utils import parse_bool, strip_wikilinks
 
 # 对照池上限：正式 I 条目和其它候选永远全量参与碰撞，普通记忆只取最近这么多条。
 # get_embedding 每条一次 sqlite 查询，全库几千条会让 dream 明显变慢，而更老的
@@ -45,6 +46,11 @@ _COLLISION_MIN_SIM = 0.35
 
 
 async def build_connection_hint(recent: list) -> str:
+    # 调用方通常已过滤 protected；这里再次收口，避免未来复用时把受保护正文带入提示。
+    recent = [
+        b for b in recent
+        if not parse_bool((b.get("metadata") or {}).get("protected"), default=False)
+    ]
     if not (rt.embedding_engine and rt.embedding_engine.enabled and len(recent) >= 2):
         return ""
     try:
@@ -82,6 +88,9 @@ async def build_crystal_hint(all_buckets: list) -> str:
             b for b in all_buckets
             if b["metadata"].get("type") == "feel"
             and not is_letter_bucket(b)
+            and not parse_bool(
+                (b.get("metadata") or {}).get("protected"), default=False
+            )
         ]
         if len(feels) < 3:
             return ""
@@ -149,6 +158,9 @@ async def collect_self_candidates(all_buckets: list) -> SelfReview:
     pending = [
         b for b in all_buckets
         if is_pending_candidate(b) and not is_letter_bucket(b)
+        and not parse_bool(
+            (b.get("metadata") or {}).get("protected"), default=False
+        )
     ]
     if not pending:
         return SelfReview()
@@ -180,12 +192,18 @@ async def collect_self_candidates(all_buckets: list) -> SelfReview:
             if b["id"] not in pending_ids
             and not is_letter_bucket(b)
             and (b.get("metadata") or {}).get("type") == "i"
+            and not parse_bool(
+                (b.get("metadata") or {}).get("protected"), default=False
+            )
         ]
         ordinary = [
             b for b in all_buckets
             if b["id"] not in pending_ids
             and not is_letter_bucket(b)
             and (b.get("metadata") or {}).get("type") not in ("i", "letter")
+            and not parse_bool(
+                (b.get("metadata") or {}).get("protected"), default=False
+            )
         ]
         ordinary.sort(key=_timestamp_key, reverse=True)
         pool.extend(ordinary[:_COLLISION_POOL_RECENT])

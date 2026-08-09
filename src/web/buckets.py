@@ -304,6 +304,14 @@ def register(mcp) -> None:
                 current_pinned = parse_bool(meta.get("pinned"), default=False)
                 new_pinned = not current_pinned
                 protected = parse_bool(meta.get("protected"), default=False)
+                if protected and new_pinned:
+                    return JSONResponse(
+                        {
+                            "error": "protected 与 pinned 互斥；请先解除保护",
+                            "conflict": "pinned_protected_mutually_exclusive",
+                        },
+                        status_code=409,
+                    )
                 update_kwargs: dict[str, object] = {"pinned": new_pinned}
                 try:
                     current_importance = int(meta.get("importance") or 0)

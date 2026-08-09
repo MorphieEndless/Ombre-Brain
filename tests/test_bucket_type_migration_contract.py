@@ -169,6 +169,20 @@ async def test_guarded_permanent_bucket_cannot_be_retyped_out_of_permanent(
 
 
 @pytest.mark.asyncio
+async def test_create_rejects_pinned_and_protected_without_writing(bucket_mgr):
+    before = set(Path(bucket_mgr.base_dir).rglob("*.md"))
+
+    with pytest.raises(ValueError, match="pinned 与 protected"):
+        await bucket_mgr.create(
+            content="互斥保护状态不能成为新的持久化脏数据。",
+            pinned=True,
+            protected=True,
+        )
+
+    assert set(Path(bucket_mgr.base_dir).rglob("*.md")) == before
+
+
+@pytest.mark.asyncio
 async def test_type_move_collision_never_overwrites_existing_target(bucket_mgr):
     bucket_id = await bucket_mgr.create(
         content="source must survive a collision",
@@ -304,6 +318,137 @@ async def test_archive_move_failure_keeps_active_type_and_source(
     assert Path(unchanged["path"]) == source_path
     assert source_path.read_bytes() == source_bytes
     assert _bucket_files(bucket_mgr, bucket_id) == [source_path]
+
+
+@pytest.mark.asyncio
+async def test_restore_archived_pin_is_one_atomic_storage_transition(bucket_mgr):
+    """恢复清 pin，但保留 protection，并同时刷新活跃时间与唯一真源。"""
+    bucket_id = await bucket_mgr.create(
+        content="restore lifecycle state atomically",
+        domain=["migration-domain"],
+        pinned=True,
+    )
+    active_path = Path((await bucket_mgr.get(bucket_id))["path"])
+    stale_last_active = "2000-01-01T00:00:00+00:00"
+    stale_post = frontmatter.load(active_path)
+    # 模拟历史脏数据：新写入会拒绝 pinned+protected，
+    # 但恢复流程不能抹掉旧记忆已经持久化的保护状态。
+    stale_post["protected"] = True
+    stale_post["last_active"] = stale_last_active
+    active_path.write_text(frontmatter.dumps(stale_post), encoding="utf-8")
+
+    assert await bucket_mgr.archive(bucket_id) is True
+    archived = await bucket_mgr.get_including_archive(bucket_id)
+    archived_path = Path(archived["path"])
+
+    assert archived["metadata"]["type"] == "archived"
+    assert archived["metadata"]["pinned"] is True
+    assert archived["metadata"]["protected"] is True
+    assert archived["metadata"]["last_active"] == stale_last_active
+    assert _bucket_files(bucket_mgr, bucket_id) == [archived_path]
+
+    result = await bucket_mgr.restore_archived(bucket_id)
+    restored = await bucket_mgr.get(bucket_id)
+    restored_path = Path(restored["path"])
+
+    assert result == {"ok": True, "restored": bucket_id, "type": "permanent"}
+    assert restored["metadata"]["type"] == "permanent"
+    assert restored["metadata"].get("pinned", False) is False
+    assert restored["metadata"]["protected"] is True
+    assert restored["metadata"]["last_active"] != stale_last_active
+    assert restored_path.exists()
+    assert not archived_path.exists()
+    assert _bucket_files(bucket_mgr, bucket_id) == [restored_path]
+
+
+@pytest.mark.asyncio
+async def test_restore_archived_protected_anchor_requires_atomic_unprotect(bucket_mgr):
+    bucket_id = await bucket_mgr.create(
+        content="dirty archived protection must be resolved atomically",
+        domain=["migration-domain"],
+        protected=True,
+    )
+    active = await bucket_mgr.get(bucket_id)
+    active_path = Path(active["path"])
+    dirty_post = frontmatter.load(active_path)
+    dirty_post["anchor"] = True
+    active_path.write_text(frontmatter.dumps(dirty_post), encoding="utf-8")
+
+    assert await bucket_mgr.archive(bucket_id) is True
+    archived = await bucket_mgr.get_including_archive(bucket_id)
+    archived_path = Path(archived["path"])
+
+    rejected = await bucket_mgr.restore_archived(bucket_id)
+    missing_importance = await bucket_mgr.restore_archived(
+        bucket_id,
+        protected_override=False,
+    )
+
+    assert rejected == {
+        "ok": False,
+        "error": "incompatible_protected_anchor",
+    }
+    assert missing_importance == {
+        "ok": False,
+        "error": "missing_importance_override",
+    }
+    assert archived_path.exists()
+    assert _bucket_files(bucket_mgr, bucket_id) == [archived_path]
+
+    result = await bucket_mgr.restore_archived(
+        bucket_id,
+        protected_override=False,
+        importance_override=7,
+    )
+    restored = await bucket_mgr.get(bucket_id)
+
+    assert result == {"ok": True, "restored": bucket_id, "type": "dynamic"}
+    assert restored["metadata"]["anchor"] is True
+    assert restored["metadata"].get("protected", False) is False
+    assert restored["metadata"]["pinned"] is False
+    assert restored["metadata"]["importance"] == 7
+    assert restored["metadata"]["type"] == "dynamic"
+
+
+@pytest.mark.asyncio
+async def test_restore_move_failure_keeps_archived_pin_and_single_source(
+    bucket_mgr,
+    monkeypatch,
+):
+    """恢复提交失败时不得提前清 pin，也不得留下活跃区副本。"""
+    import bucket_manager as bucket_manager_module
+
+    bucket_id = await bucket_mgr.create(
+        content="restore failure preserves archived state",
+        domain=["migration-domain"],
+        pinned=True,
+    )
+    assert await bucket_mgr.archive(bucket_id) is True
+    archived = await bucket_mgr.get_including_archive(bucket_id)
+    archived_path = Path(archived["path"])
+    archived_bytes = archived_path.read_bytes()
+    real_remove = bucket_manager_module.os.remove
+
+    def fail_archived_source_removal(path, *_args, **_kwargs):
+        if Path(path) == archived_path:
+            raise OSError("simulated restore source removal failure")
+        return real_remove(path, *_args, **_kwargs)
+
+    monkeypatch.setattr(
+        bucket_manager_module.os,
+        "remove",
+        fail_archived_source_removal,
+    )
+
+    result = await bucket_mgr.restore_archived(bucket_id)
+
+    assert result["ok"] is False
+    assert result["error"].startswith("restore_failed:")
+    unchanged = frontmatter.load(archived_path)
+    assert unchanged["type"] == "archived"
+    assert unchanged["pinned"] is True
+    assert archived_path.read_bytes() == archived_bytes
+    assert _bucket_files(bucket_mgr, bucket_id) == [archived_path]
 
 
 @pytest.mark.asyncio

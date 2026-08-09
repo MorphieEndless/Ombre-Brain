@@ -1439,8 +1439,12 @@ class BucketManager:
         - imported=True: 对话导入桶的持久化来源标记；创建时间与最后活跃时间
           均使用本次导入时刻。
         """
-        # ``allow_embedding_fallback`` is retained for API compatibility.
-        # All memory types now write first; embedding is a derived index.
+        # 保留 ``allow_embedding_fallback`` 以兼容旧调用；所有记忆类型均先写入，
+        # embedding 只是可重建的派生索引。
+        pinned = parse_bool(pinned, default=False)
+        protected = parse_bool(protected, default=False)
+        if pinned and protected:
+            raise ValueError("pinned 与 protected 不能同时为 True")
 
         # F-04: 清洗 content / tags / name 中的危险控制字符和双向覆写符
         content = self._sanitize_text(content)
@@ -2224,6 +2228,7 @@ class BucketManager:
         for field in (
             "resolved",
             "pinned",
+            "protected",
             "digested",
             "dont_surface",
             "first_of_kind",
@@ -2293,6 +2298,7 @@ class BucketManager:
         # successful edit.
         was_pinned = parse_bool(post.get("pinned", False), default=False)
         is_protected = parse_bool(post.get("protected", False), default=False)
+        was_anchor = parse_bool(post.get("anchor", False), default=False)
         current_type = str(post.get("type") or "dynamic").strip().lower()
         if (
             current_type == "archived"
@@ -2311,9 +2317,30 @@ class BucketManager:
         will_be_pinned = parse_bool(
             kwargs.get("pinned", was_pinned), default=was_pinned
         )
+        will_be_protected = parse_bool(
+            kwargs.get("protected", is_protected), default=is_protected
+        )
+        will_be_anchor = parse_bool(
+            kwargs.get("anchor", was_anchor), default=was_anchor
+        )
+        if will_be_pinned and will_be_protected:
+            logger.warning(
+                "update() rejected incompatible pinned/protected state "
+                "bucket=%s",
+                bucket_id,
+            )
+            return False
+        if will_be_anchor and will_be_protected:
+            logger.warning(
+                "update() rejected incompatible anchor/protected state "
+                "bucket=%s",
+                bucket_id,
+            )
+            return False
 
         requested_type: str | None = None
-        if "type" in kwargs:
+        explicit_type_requested = "type" in kwargs
+        if explicit_type_requested:
             requested_type = str(kwargs["type"] or "").strip().lower()
             if requested_type not in _EDITABLE_BUCKET_TYPES:
                 logger.warning(
@@ -2325,9 +2352,11 @@ class BucketManager:
         forced_type: str | None = None
         if will_be_pinned:
             forced_type = "permanent"
-        elif "pinned" in kwargs and was_pinned and not is_protected:
-            # A true pinned bucket demotes when explicitly unpinned.  Explicit
-            # permanent memories (was_pinned=False) remain permanent.
+        elif "pinned" in kwargs and was_pinned:
+            # 真正的 pinned 桶在显式解除时降回 dynamic；原本就是
+            # permanent（was_pinned=False）的记忆仍保持 permanent。
+            # pinned -> protected 的同步切换仍在同一个事务内完成，
+            # 但 protected 本身不强制任何存储类型。
             forced_type = "dynamic"
 
         if forced_type is not None:
@@ -2344,9 +2373,10 @@ class BucketManager:
             requested_type = forced_type
 
         if (
-            requested_type is not None
+            explicit_type_requested
+            and requested_type is not None
             and requested_type != current_type
-            and is_protected
+            and will_be_protected
             and requested_type != "permanent"
         ):
             logger.warning(
@@ -2357,10 +2387,9 @@ class BucketManager:
             )
             return False
 
-        # pinned/protected buckets lock importance at 10.  An atomic
-        # pinned=False + importance=N transition is allowed, because the final
-        # state is no longer pinned; this is needed for quota-safe unpinning.
-        if will_be_pinned or is_protected:
+        # 最终仍为 pinned/protected 时把 importance 锁定为 10；若在同一事务中
+        # 解除最后一层保护，则允许恢复调用方显式选择的动态 importance。
+        if will_be_pinned or will_be_protected:
             kwargs.pop("importance", None)
 
         # --- Update only fields that were passed in / 只改传入的字段 ---
@@ -2394,6 +2423,13 @@ class BucketManager:
             if kwargs["pinned"]:
                 post["importance"] = _PINNED_IMPORTANCE  # pinned → lock importance to 10
                 post.metadata.pop("anchor", None)  # pinned 与 anchor 互斥：钉为核心准则即清除坐标系标记
+        if "protected" in kwargs:
+            if kwargs["protected"]:
+                post["protected"] = True
+                post["importance"] = _PINNED_IMPORTANCE
+            else:
+                # False 回到缺省态，不在新数据里留遗留假值字段。
+                post.metadata.pop("protected", None)
         if "digested" in kwargs:
             post["digested"] = kwargs["digested"]
         if "model_valence" in kwargs:
@@ -2652,7 +2688,13 @@ class BucketManager:
             await self._discard_derived_index_if_terminal(bucket_id)
         return deleted
 
-    async def restore_archived(self, bucket_id: str) -> dict:
+    async def restore_archived(
+        self,
+        bucket_id: str,
+        *,
+        importance_override: Optional[int] = None,
+        protected_override: Optional[bool] = None,
+    ) -> dict:
         """Restore an archived/tombstoned Markdown bucket to its original channel.
 
         Discovery never calls this method.  It is deliberately exposed only
@@ -2690,12 +2732,53 @@ class BucketManager:
             )
             if original_kind not in _EDITABLE_BUCKET_TYPES:
                 original_kind = "dynamic"
-            if parse_bool(post.get("pinned"), default=False) or parse_bool(
-                post.get("protected"), default=False
+            was_pinned = parse_bool(post.get("pinned"), default=False)
+            is_protected = parse_bool(post.get("protected"), default=False)
+            is_anchor = parse_bool(post.get("anchor"), default=False)
+            if protected_override is not None and parse_bool(
+                protected_override, default=False
             ):
+                return {"ok": False, "error": "invalid_protected_override"}
+            final_protected = (
+                is_protected
+                if protected_override is None
+                else False
+            )
+            if final_protected and is_anchor:
+                return {
+                    "ok": False,
+                    "error": "incompatible_protected_anchor",
+                }
+            if (
+                is_protected
+                and not final_protected
+                and importance_override is None
+            ):
+                return {
+                    "ok": False,
+                    "error": "missing_importance_override",
+                }
+            if was_pinned:
                 original_kind = "permanent"
 
             post["type"] = original_kind
+            # 归档态不占 pinned 名额；恢复时也不能暗中重新占用。
+            # 历史 pinned+protected 脏数据通常原子收敛为仅 protected；
+            # 显式 protected_override=False 的恢复则同时解除 protected。
+            post["pinned"] = False
+            if final_protected:
+                post["protected"] = True
+                post["importance"] = _PINNED_IMPORTANCE
+            else:
+                post.metadata.pop("protected", None)
+            if not final_protected and importance_override is not None:
+                try:
+                    normalized_importance = int(importance_override)
+                except (TypeError, ValueError, OverflowError):
+                    return {"ok": False, "error": "invalid_importance_override"}
+                if not 1 <= normalized_importance <= 10:
+                    return {"ok": False, "error": "invalid_importance_override"}
+                post["importance"] = normalized_importance
             # 显式恢复应刷新衰减使用的活跃时钟；保留旧时间会让低分桶
             # 在下一轮衰减中立即二次归档。与类型恢复一起原子提交，避免分裂。
             post["last_active"] = now_iso()

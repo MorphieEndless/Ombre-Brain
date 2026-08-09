@@ -18,6 +18,7 @@ from tools._common import (
     _quota_turn,
     count_high_importance,
     count_pinned,
+    count_protected,
     merge_or_create,
 )
 from tools.hold.pinned import store_pinned
@@ -67,6 +68,31 @@ async def test_concurrent_hold_pinned_does_not_exceed_cap(bucket_mgr, monkeypatc
     assert final_count == 3, f"pinned 配额被冲破：cap=3 实际={final_count}"
     succeeded = [r for r in results if r.startswith("📌")]
     assert len(succeeded) == 1, f"应该只有 1 个并发请求真正钉成功，实际 {len(succeeded)} 个: {results}"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_trace_protect_does_not_exceed_independent_cap(bucket_mgr):
+    install_runtime(bucket_mgr, limits={"max_protected": 3})
+
+    for i in range(2):
+        await bucket_mgr.create(content=f"已保护 {i}", protected=True)
+    candidates = [
+        await bucket_mgr.create(content=f"候选保护 {i}", importance=5)
+        for i in range(5)
+    ]
+
+    await asyncio.gather(*[
+        trace_core(bucket_id, protected=1)
+        for bucket_id in candidates
+    ])
+
+    assert await count_protected() == 3
+    protected_candidates = 0
+    for bucket_id in candidates:
+        bucket = await bucket_mgr.get(bucket_id)
+        if bucket["metadata"].get("protected") is True:
+            protected_candidates += 1
+    assert protected_candidates == 1
 
 
 @pytest.mark.asyncio

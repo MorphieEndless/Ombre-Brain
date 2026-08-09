@@ -822,6 +822,7 @@ async def trace(
     tags: Optional[str] = "",
     resolved: Optional[int] = -1,
     pinned: Optional[int] = -1,
+    protected: Optional[int] = -1,
     digested: Optional[int] = -1,
     content: Optional[str] = "",
     delete: Optional[bool] = False,
@@ -842,7 +843,9 @@ async def trace(
     """仅在明确需要修改某条已存在记忆时调用，不要猜测 bucket_id 或自行改写记忆。
 
     resolved=1 标记已放下；resolved=0 重新激活。pinned=1 标记永久核心并锁定
-    importance=10；pinned=0 取消时必须在同一次调用显式传入 importance=1..10。
+    importance=10。protected=1 保护记忆不被衰减，但不作为核心准则强制浮现；
+    它与 pinned/anchor 互斥且同样锁定 importance=10。解除最后一层
+    pinned/protected 保护时，必须在同一次调用显式传入 importance=1..10。
     digested=1 标记已消化并从默认/被动浮现及 dream 隐藏，
     但仍可通过显式 query、importance 审计或目录找回。content 会完整替换正文；
     old_str/new_str 会在完整原文中做唯一、逐字的局部替换（new_str 可为空以删除），
@@ -853,13 +856,16 @@ async def trace(
     物理抹除。hard_delete=True 仅用于清理创建时明确标记 test_data=True 的测试桶，
     必须单独提供非空 delete_reason；普通记忆和 plan 一律拒绝且不会顺带归档。
     delete 与 hard_delete 不能同时使用。归档记忆只有在反思后决定值得再次回忆时，才单独调用
-    trace(bucket_id="...", restore=True) 恢复；检索命中不会自动恢复。只传需要修改的字段，-1 或空串表示不改。
+    trace(bucket_id="...", restore=True) 恢复；若历史归档同时带有 protected/anchor，
+    只能用 restore=True、protected=0、importance=1..10 原子解除冲突后恢复。
+    检索命中不会自动恢复。只传需要修改的字段，-1 或空串表示不改。
     """
     return await _with_notice(
         _t_trace.dispatch(
             bucket_id=bucket_id, name=name, domain=domain,
             valence=valence, arousal=arousal, importance=importance,
-            tags=tags, resolved=resolved, pinned=pinned, digested=digested,
+            tags=tags, resolved=resolved, pinned=pinned,
+            protected=protected, digested=digested,
             content=content, delete=delete, status=status, weight=weight,
             dont_surface=dont_surface, why_remembered=why_remembered,
             meaning_append=meaning_append, meaning_replace=meaning_replace,
@@ -872,7 +878,8 @@ async def trace(
         args={
             "bucket_id": bucket_id, "name": name, "domain": domain,
             "valence": valence, "arousal": arousal, "importance": importance,
-            "tags": tags, "resolved": resolved, "pinned": pinned, "digested": digested,
+            "tags": tags, "resolved": resolved, "pinned": pinned,
+            "protected": protected, "digested": digested,
             "content_len": len(content or ""), "delete": delete, "status": status,
             "hard_delete": hard_delete,
             "restore": restore,

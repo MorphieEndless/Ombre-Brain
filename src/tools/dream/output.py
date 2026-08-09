@@ -14,10 +14,10 @@ tools/dream/output.py — dream 最终输出格式化
 - 显式 inspiration=True 时追加最多三个只读 Spark 材料/问题候选；默认不出现
 - I 候选段：列所有待沉淀的「我觉得……」，每条附本次撞上的材料与见证次数；
   只报告实际渲染出的候选 ID，见证计数由 dream/__init__.py 事后写入
-- active plan 段：列所有 status=active 的 plan（按 created 倒序）
+- active plan 段：列未受 protected 保护且 status=active 的 plan（按 created 倒序）
 - 整体输出受 surfacing.dream_max_tokens（默认 20000）硬预算约束；只省略完整块，
   绝不截断数据边界或伪造 payload 哈希
-- feel 历史段：按 surfacing.feel_max_tokens（默认 6000）对最终渲染块计费；
+- feel 历史段：排除 protected 后，按 surfacing.feel_max_tokens（默认 6000）对最终渲染块计费；
   新 feel 优先全文、老 feel 优先短摘录，放不下的仅报告省略数量
 
 不做什么（边界）：
@@ -35,7 +35,7 @@ import re
 from .. import _runtime as rt
 from .._common import memory_data_block, memory_data_protocol_header
 from ..plan.core import is_letter_bucket
-from utils import count_tokens_approx
+from utils import count_tokens_approx, parse_bool
 
 
 _IMPERATIVE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -463,6 +463,9 @@ def format_dream_output(
             if b["metadata"].get("type") == "plan"
             and not is_letter_bucket(b)
             and b["metadata"].get("status", "active") == "active"
+            and not parse_bool(
+                (b.get("metadata") or {}).get("protected"), default=False
+            )
         ]
         plans_active.sort(key=lambda b: b["metadata"].get("created", ""), reverse=True)
         if plans_active:
@@ -502,6 +505,9 @@ def format_dream_output(
             b for b in all_buckets
             if b["metadata"].get("type") == "feel"
             and not is_letter_bucket(b)
+            and not parse_bool(
+                (b.get("metadata") or {}).get("protected"), default=False
+            )
         ]
         feels_all.sort(key=lambda b: b["metadata"].get("created", ""), reverse=True)
         if feels_all:

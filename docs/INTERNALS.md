@@ -138,13 +138,13 @@ Ombre-Brain/
 src/tools/
 ├── _runtime.py    # 依赖注入容器：config / bucket_mgr / dehydrator / decay_engine /
 │                #   embedding_engine / import_engine / logger / fire_webhook / mark_op
-├── _common.py     # 多个工具共享的 helper：内容限额/pinned 配额/check_duplicate_for/
+├── _common.py     # 多个工具共享的 helper：内容限额/pinned/protected 配额/check_duplicate_for/
 │                #   check_plan_resolution/merge_or_create
 ├── breath/        # feel/importance/surface/search 四分支，__init__.py 转发
 ├── hold/          # core/feel/pinned 三分支，__init__.py 统一入口与参数校验
 ├── grow/          # core/shortpath（短内容快路径在 shortpath，raw_merge=True）
 ├── dream/         # candidates/hints/output 三阶段 + __init__ 编排
-├── trace/         # core（metadata/resolved/pinned/delete/content 替换/计划状态等全在这）
+├── trace/         # core（metadata/resolved/pinned/protected/delete/content 替换/计划状态等全在这）
 ├── anchor/        # core：anchor_set / anchor_release / pulse
 ├── plan/          # core：plan_create / letter_write / letter_lock_update / letter_read
 └── i/             # core：自我认知的候选写入 / 升级 / 读取 + 见证计数（dispatch=i_core）
@@ -284,8 +284,8 @@ feel 桶自身：
 
 1. **Feel 通道**（`domain="feel"` 或 `tags` 含 `"feel"`/`"__feel__"`，仅 `breath_advanced`）：直接拉所有 `type==feel` 桶，按 `created` 倒序展示原文，按 `surfacing.feel_max_tokens`（默认 6000）做 token 预算；**超出预算的旧 feel 折叠为 60 字符单行摘要**，并在末尾追加 `更早的 feel 摘要（N 条，已折叠）` 段。**不排除 anchor 桶**（设计：feel 通道只看 type=feel）。
 2. **重要度批量模式**（`importance_min >= 1`，仅 `breath_advanced`）：跳过语义搜索，按 importance 降序返回 ≤20 条；过滤 `feel/plan/letter` 与 `dont_surface=True`；**不过滤 anchor、不过滤 pinned**（设计：主动按 importance 检索时希望能找到所有重要桶）。
-3. **浮现模式**（无 `query`；`breath()` 固定走这里）：钉选桶始终展示为「核心准则」+ 未解决桶按衰减分排序，**冷启动**（`activation_count==0 && importance>=8`）的桶最多 2 个插到最前；后续排序**有两条互斥路径**：当 `surfacing.sampling.enabled=true` 时走加权无放回采样（`top_k` / `sample_k` / `temperature` 控制；详见 §7.1），否则走原 Top-1 固定 + Top-2~20 随机洗牌；按 `max_results` 硬截断。**排除 anchor 桶**（设计：anchor 是坐标系，不该随机冒泡干扰日常浮现；这是浮现模式独有的过滤）。浮现**不调用** `touch()`。每条返回正文后附一行紧凑 `👣 Footprint`，只表达创建、补充、淡去、归档、恢复等有意义的变迁，不展示 touch/索引噪声。**末尾追加 `=== 久未浮现 ===` 段**：从久未激活的高重要度桶里随机抽 1～2 条，模拟「突然想起来」。
-4. **检索模式**（有 `query`；`breath_search()` 固定走这里）：每个 query 只生成一次查询向量，与 rapidfuzz/BM25 多维评分共同进入 `BucketManager.search()` → 过滤 `feel/plan/letter`，**pinned/permanent 仍可被检索命中（不过滤），命中后加 📌 前缀** → 纯语义候选相似度 `>=0.65` 标 `[语义关联]`，且不能绕过 domain/tags/type 过滤 → 活跃桶命中时 `touch()`。查询也会检索 archive；归档命中返回保留的 Markdown 原文与 Footprint，明确邀请模型判断是否值得再次回忆，并显示 `trace(bucket_id="...", restore=True)`。查询只发现、不自动恢复，也不 touch 归档桶。结果不足时保留设计上的自由联想。embedding 不可用时明确提示后继续关键词/BM25；桶一旦命中，返回层直接使用当前存储的完整 `content`，不调用 dehydrate、不剥除 wikilink、不截断或改写。**不过滤 anchor**（设计：主动检索时希望能找到坐标系桶）。
+3. **浮现模式**（无 `query`；`breath()` 固定走这里）：pinned/显式 permanent 桶展示为「核心准则」+ 未解决桶按衰减分排序，**冷启动**（`activation_count==0 && importance>=8`）的桶最多 2 个插到最前；后续排序**有两条互斥路径**：当 `surfacing.sampling.enabled=true` 时走加权无放回采样（`top_k` / `sample_k` / `temperature` 控制；详见 §7.1），否则走原 Top-1 固定 + Top-2~20 随机洗牌；按 `max_results` 硬截断。**排除 anchor 与 protected 桶**：anchor 是坐标系；protected 只防衰减，不进入核心准则、未解决、久未浮现或偶遇池。浮现**不调用** `touch()`。每条返回正文后附一行紧凑 `👣 Footprint`，只表达创建、补充、淡去、归档、恢复等有意义的变迁，不展示 touch/索引噪声。**末尾追加 `=== 久未浮现 ===` 段**：从久未激活的高重要度桶里随机抽 1～2 条，模拟「突然想起来」。
+4. **检索模式**（有 `query`；`breath_search()` 固定走这里）：每个 query 只生成一次查询向量，与 rapidfuzz/BM25 多维评分共同进入 `BucketManager.search()` → 过滤 `feel/plan/letter`，**pinned/permanent/protected 仍可被显式检索命中**：pinned/permanent 加 `📌 [核心准则]`，protected 加 `🛡️ [受保护记忆]` → 纯语义候选相似度 `>=0.65` 标 `[语义关联]`，且不能绕过 domain/tags/type 过滤 → 活跃桶命中时 `touch()`。查询也会检索 archive；归档命中返回保留的 Markdown 原文与 Footprint，明确邀请模型判断是否值得再次回忆，并显示 `trace(bucket_id="...", restore=True)`。查询只发现、不自动恢复，也不 touch 归档桶。结果不足时保留设计上的自由联想，但 protected 不进入这一非命中随机通道。embedding 不可用时明确提示后继续关键词/BM25；桶一旦命中，返回层直接使用当前存储的完整 `content`，不调用 dehydrate、不剥除 wikilink、不截断或改写。**不过滤 anchor**（设计：主动检索时希望能找到坐标系桶）。catalog 同样保留 protected 并使用相同的受保护标记。
 
 (实现注意：`tags="feel"` 在第一个分支被映射为 `domain="feel"` 后清出 tag_filter；其它 tag 走 AND 过滤；`max_tokens` 上限 20000，`max_results` 上限 50；`importance_min` 模式下硬上限 20 条不可调；浮现模式中钉选桶**不计入** `max_results` 上限。)
 
@@ -293,7 +293,7 @@ feel 桶自身：
 
 `FootprintSnapshot` 从兼容路径 `_ledger/events.jsonl` 读取 append-only 事件镜像并压缩展示；Markdown 正文仍是当前运行时的内容真源，Footprint 不复制正文，也不把 Ledger 提升为新的真源。旧存储名 `LedgerMirror` 保留用于兼容，面向模型的产品概念统一称为 Footprint。
 
-恢复是对归档状态的显式逆操作：`trace(bucket_id="...", restore=True)` 必须单独调用。`BucketManager.restore_archived()` 根据创建足迹恢复原 bucket type，清除 tombstone/deleted_at 等归档标记，把 Markdown 移回对应活跃目录，重建正文与 meaning 派生索引，并追加 `TraceRestored`。普通查询、无参 breath 和 Footprint 展示均没有恢复权限。
+恢复是对归档状态的显式逆操作：`trace(bucket_id="...", restore=True)` 必须单独调用。`BucketManager.restore_archived()` 根据创建足迹恢复原 bucket type，清除 tombstone/deleted_at 等归档标记，把 Markdown 移回对应活跃目录，重建正文与 meaning 派生索引，并追加 `TraceRestored`。归档期间会保留历史 pinned 标记，但恢复提交会原子清除它，避免记忆静默重新占用 pinned 配额；若最终进入普通 importance≥9 池，同一配额事务会执行既有降级规则。历史档案若异常同时带有 protected 与 anchor，普通恢复会拒绝；调用 `trace(bucket_id="...", restore=True, protected=0, importance=1..10)` 可在同一事务中保留 anchor、解除保护并恢复。普通查询、无参 breath 和 Footprint 展示均没有恢复权限。
 
 ### 3.2 `hold` — 存储单条记忆
 
@@ -332,12 +332,21 @@ feel 桶自身：
 
 ### 3.4 `trace` — 修改/删除
 
-签名：`trace(bucket_id, name="", domain="", valence=-1, arousal=-1, importance=-1, tags="", resolved=-1, pinned=-1, digested=-1, content="", delete=False, status="", weight=-1, dont_surface=-1, why_remembered="", meaning_append="", meaning_replace=None, media_append=None, media_replace=None, hard_delete=False, delete_reason="", old_str="", new_str=None)`
+签名：`trace(bucket_id, name="", domain="", valence=-1, arousal=-1, importance=-1, tags="", resolved=-1, pinned=-1, protected=-1, digested=-1, content="", delete=False, status="", weight=-1, dont_surface=-1, why_remembered="", meaning_append="", meaning_replace=None, media_append=None, media_replace=None, hard_delete=False, delete_reason="", restore=False, old_str="", new_str=None)`
 
 - `delete=True` → `bucket_mgr.delete()`：写入 `deleted_at` 并将 Markdown 移入 `archive/`；只清理可重建的 embedding 索引，不抹除记忆文件。
 - `hard_delete=True` → 仅当桶在创建时带有 `provenance.kind=test` 与 `erasable=true` 才物理删除；真实记忆、后补字段及普通 Dashboard 路径均不得越过此边界。Dashboard 普通模式支持多选/当前筛选全选的沉底、主动遗忘和归档，开发者模式才显示测试桶永久删除入口。
 - 其它字段：仅收集传入的（用 `-1`/空串作为「未传」哨兵）批量更新 frontmatter。
 - `pinned=1` 自动锁 importance=10 + 触发 `_move_bucket(permanent_dir)`。
+- `protected=1` 表示「防衰减、不主动浮现」，与 `pinned=True` 互斥，单桶不能同时为 True；不注入
+  `breath()`、dream 的 recent/core/I 候选碰撞/active plan/feel/提示/灵感候选，或 `/breath-hook`
+  的主池与 Letter/I 附加池；只在显式 search/catalog
+  中可见并标为 `🛡️ [受保护记忆]`。解除最后一层 pinned/protected
+  保护时，必须在同次调用传 `protected=0, importance=1..10`，避免解锁后
+  仍无意保留 importance=10。
+  protected 使用独立 `limits.max_protected`（默认 20）配额；从 False
+  设为 True 时会在同一 `protected` quota turn 内检查并落盘，
+  满额显式拒绝，不部分修改。
 - `resolved=1` **不**自动归档（B-01 修复）；只更新 frontmatter，由 decay 引擎自然衰减。
 - `status` 仅接受 `active`/`resolved`/`abandoned`，主要用于 plan 桶。
 - `content="..."` 替换正文并重新生成 embedding。
@@ -360,7 +369,7 @@ feel 桶自身：
 
 签名：`dream(window_hours=48, inspiration=False)`（默认 48h 窗口；clamp 到 1~336h）
 
-- 默认取过去 48 小时内 `created` 或 `last_active` 任一在窗口内的桶（排除 permanent/feel/pinned/protected/plan/letter，以及 digested/dont_surface/anchor）
+- 默认取过去 48 小时内 `created` 或 `last_active` 任一在窗口内的桶（排除 permanent/feel/pinned/protected/plan/letter，以及 digested/dont_surface/anchor）。pinned/permanent 可作为只读 core 背景；protected 不进入 recent/core、I 候选及碰撞、active plan、feel 历史、连接/结晶提示或显式灵感候选，避免任何 dream 旁路被动注入。
 - 排序：先按 `last_active` 倒序；候选超过 **40 个**时改按 `decay_engine.calculate_score()` 降序截断到前 40，避免一次涌进来太多撑爆上下文
 - 拼接桶摘要（完整正文，不截断）+ 自省引导 header
 - embedding 启用时附加：连接提示（最相似对，`>0.5`）+ feel 结晶提示（一条 feel 与 ≥2 条其它 feel 相似度 `>0.7` → 建议升级为 pinned）
@@ -588,7 +597,7 @@ FTS 搜索只用于本地验证和未来 projection 迁移准备，当前只索�
 - Dashboard `/api/breath` 轻量浮现接口。
 
 当前规则：
-- `spontaneous` / `dream` 模式拒绝 `dont_surface=True`、`digested=True`、`anchor=True`、`feel/plan/letter/self/i`、`archived`、`deleted_at`、`tombstone`；`search` 与显式 importance 审计仍允许读取 digested。
+- `spontaneous` / `dream` 模式拒绝 `dont_surface=True`、`digested=True`、`anchor=True`、`protected=True`、`feel/plan/letter/self/i`、`archived`、`deleted_at`、`tombstone`；`search` 与显式 importance 审计仍允许读取 digested/protected。
 - `importance` 模式拒绝 `dont_surface=True` 与专用类型，但保留 anchor 可达性。
 - `search` 模式只拒绝终态（archived / deleted / tombstone），显式关键词搜索仍可找回 `dont_surface=True` 的记忆。这是主动遗忘契约：不主动冒出来，但没有被抹去。
 
@@ -1241,7 +1250,8 @@ Phase 47 后，`LegacyRuntime` 会暴露 `score_retrieval_bucket(...)` / `rank_r
 | `first_of_kind` | bool | False | 自动检测：写入新桶时若其 `tags` 与全库已有 `tags` **完全无交集**则置 True。仅展示用，dashboard 旁亮 ✨。失败不阻塞写入。 | ❌ |
 | `weight` | float ∈ [0,1] | None（仅 plan 写） | plan 桶专有「承诺重量」。由 `plan(content, weight=0.7, ...)` 写入（hold 没有 `domain` 参数，不能用 `hold(domain=["plan"], ...)` 创建 plan）；或事后 `trace(weight=0.7)` 调整。dashboard 计划看板按 weight 倒序排 active 列。**与 importance 是两个轴**：importance 是事的客观重要度，weight 是这件事压在心头的主观重量。 | ❌ |
 | `triggered_by` | str (bucket_id) | 不写 | feel/衍生桶的因果链入口：记下「我这条感受是被哪条记忆触发的」。1.9 会做 UI 联动。 | ❌ |
-| `anchor` | bool | 不写 (False) | **iter 2.0**：坐标系标记。True 时该桶**不参与**无参 `breath()` 浮现池——即使 pinned 也不浮现。但 `query` / `domain` / `importance_min` 命中时仍返回（检索 / 重要度模式不过滤 anchor；Feel 通道只看 type=feel，也不过滤）。硬上限 24（`BucketManager.ANCHOR_LIMIT`）：`set_anchor()` 入口与 `update(anchor=True)` 透传路径都会校验（False→True 切换计数，幂等重复设置不计），超过返回 `{ok:False, error}` / 端点返回 409。通过 `anchor()` MCP tool / `release()` MCP tool / `POST /api/bucket/{id}/anchor` 切换；**`trace` 不暴露该字段**。**不参与评分；与 pinned/dont_surface/weight 完全独立**。 | ❌ |
+| `protected` | bool | 不写 (False) | 防衰减保护。通过 `trace(protected=1\|0, ...)` 修改；不主动注入无参 `breath()`、dream 任一候选/提示/附加段或 `/breath-hook` 任一主池/附加池，但显式 search/catalog 可见并标记为「🛡️ [受保护记忆]」。独立硬上限由 `limits.max_protected` 控制。 | ✅（短路 999） |
+| `anchor` | bool | 不写 (False) | **iter 2.0**：坐标系标记。True 时该桶**不参与**无参 `breath()` 浮现池——即使 pinned 也不浮现。但 `query` / `domain` / `importance_min` 命中时仍返回（检索 / 重要度模式不过滤 anchor；Feel 通道只看 type=feel，也不过滤）。硬上限 24（`BucketManager.ANCHOR_LIMIT`）：`set_anchor()` 入口与 `update(anchor=True)` 透传路径都会校验（False→True 切换计数，幂等重复设置不计），超过返回 `{ok:False, error}` / 端点返回 409。通过 `anchor()` MCP tool / `release()` MCP tool / `POST /api/bucket/{id}/anchor` 切换；**`trace` 不暴露该字段**。**不参与评分；与 pinned、protected 互斥，与 dont_surface/weight 独立**。 | ❌ |
 | `source_tool` | str (`hold`/`grow`) | 不写 | **iter 2.0**：记录「这条桶是哪个工具创建的」。`hold` 路径（含 `feel=True` 子分支）写 `hold`；`grow`（含短路径与 digest 拆出来的每条）写 `grow`。**合并不会改这个字段**——保留原桶最初来源；合并触发方写到下面的 `last_merged_by`。dashboard 桶详情可按 source 筛选。letters/plans/anchor 等不写此字段（它们的 `type` 已经表明出处）。 | ❌ |
 | `grow_batch_id` | str (`g_<12hex>`) | 不写 | **iter 2.0**：仅 `grow` 创建的桶有此字段，同一次 `grow` 调用里所有新建桶共享同一个 batch_id（包括短路径，即使只产出一条）。dashboard 可按 batch 聚合「这次日记一共归档了哪些事件」。合并不写此字段（合并到的老桶可能来自完全不同的批次/工具，硬覆盖会丢失原始批次信息）。 | ❌ |
 | `last_merged_by` | str (`hold`/`grow`) | 不写 | **iter 2.0**：仅在桶被合并时由 `_common.merge_or_create` 写入，记录「最近一次合并是被哪个工具触发的」。原桶最初来源仍由 `source_tool` 表达。 | ❌ |
@@ -1372,21 +1382,23 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 | 类型 (`type`) | 目录 | importance | 衰减分 | 普通 breath 浮现 | 参与合并 | 参与 dream | 自动归档 |
 |---|---|---|---|---|---|---|---|
 | `dynamic` | `dynamic/{domain}/` | 1~10 | 公式计算 | ✅ | ✅ | ✅ | ✅ |
-| `permanent`（可独立于 `pinned`） | `permanent/{domain}/` | 显式 permanent 为 1~10；pinned 锁 10 | 999 | 作为固化记忆展示 | ❌ | ❌ | ❌ |
+| `permanent`（可独立于 `pinned`） | `permanent/{domain}/` | 显式 permanent 为 1~10；pinned 锁 10 | 999 | 作为固化记忆展示；`protected=True` 时不主动展示 | ❌ | ❌ | ❌ |
 | `feel` | `feel/沉淀物/` | 5 | 50 | ❌（仅 `domain="feel"`） | ❌ | 仅参与结晶检测 | ❌ |
 | `plan` | `plans/active/` | 7 | 50 | ❌（仅 dream 末尾 active 段） | ❌ | dream 列出 | ❌ |
 | `letter` | `letters/history/` | 10 | 50 | ❌（仅 `/breath-hook` 末尾各最新一封） | ❌ | ❌ | ❌ |
 | `archived` | `archive/{domain}/` | — | — | ❌ | ❌ | ❌ | — |
 
-**新建时初始字段**：`activation_count = 0`（B-04 修复值；曾经是 1 导致冷启动检测失效）；`resolved/pinned/digested` 不显式写入，仅在变更时才出现在 frontmatter 中。
+**新建时初始字段**：`activation_count = 0`（B-04 修复值；曾经是 1 导致冷启动检测失效）；`resolved/pinned/protected/digested` 默认不显式写入，仅在变更时才出现在 frontmatter 中。
 
 **permanent 与 pinned 的配额关系**：配额唯一真相是 `metadata.pinned=True`。`type=="permanent"` 是独立的固化类型，不会仅因目录或 type 占用 `limits.max_pinned`（默认 20）；只有真正 pinned 的桶占配额并锁定 importance=10。`feel` / `plan` / `letter` 同样不占该配额。
 
 `pinned` 计数按逻辑 bucket ID 去重，并通过 `parse_bool` 解释历史 YAML 布尔值；archived/deleted/tombstone 是终态，不占 pinned 名额，也不能通过常规 `BucketManager.update()`、Dashboard 或导入复核重新激活。
 
-**importance≥9 配额口径**：只统计能被 `breath_advanced(importance_min=9)` 审计的普通记忆，再排除走独立配额的 `pinned/protected`。因此 `dont_surface`、`feel/plan/letter`、archived/deleted/tombstone 不占该池；显式且未 pinned 的 `permanent` 仍属于普通高重要度候选。历史恢复或手工文件可能产生同 ID 的物理副本，配额始终按逻辑 bucket ID 只计一次。取消钉选、恢复浮现、特殊类型转回 dynamic/permanent、历史对话在线导入，以及其他在线新建/合并导致 importance 升到 9+ 时，资格检查和写盘必须在同一个 `high_importance` quota turn 内完成；历史对话导入本身只做精确内容去重，不再语义合并旧桶。备份迁移、`write_memory.py` 和手工 Markdown 属于受信任的保真/维护入口，允许原样恢复或直接修订数据，不适用在线写入配额。
+`protected` 使用独立 `limits.max_protected`（默认 20）。计数只看活跃、非终态且 `metadata.protected=True` 的逻辑桶，按 bucket ID 去重；显式 permanent 和 pinned 不会自动占用 protected 配额。False→True 的检查与落盘必须在同一 `protected` quota turn 内完成，满额必须硬拒绝。
 
-(实现注意：`pinned` 和 `protected` 在代码里几乎等价处理，但 `protected` 是历史遗留字段，新桶不应再写；UI 只暴露 pinned。)
+**importance≥9 配额口径**：只统计能被 `breath_advanced(importance_min=9)` 审计的普通记忆，再排除走独立配额的 `pinned/protected`。因此 `dont_surface`、`feel/plan/letter`、archived/deleted/tombstone 不占该池；显式且未 pinned/protected 的 `permanent` 仍属于普通高重要度候选。历史恢复或手工文件可能产生同 ID 的物理副本，配额始终按逻辑 bucket ID 只计一次。取消钉选或保护、恢复浮现、特殊类型转回 dynamic/permanent、历史对话在线导入，以及其他在线新建/合并导致 importance 升到 9+ 时，资格检查和写盘必须在同一个 `high_importance` quota turn 内完成；历史对话导入本身只做精确内容去重，不再语义合并旧桶。备份迁移、`write_memory.py` 和手工 Markdown 属于受信任的保真/维护入口，允许原样恢复或直接修订数据，不适用在线写入配额。
+
+(实现注意：`pinned` 是需要主动重见的核心准则；`protected` 只防衰减、不主动浮现。两者互斥，单桶不能同时为 True；均可由 trace 显式修改，但使用独立配额，不得再把 protected 当作 pinned 注入。)
 
 ---
 
@@ -1426,6 +1438,7 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 | `hooks.allow_public` | `false` | 是否允许 hook 无鉴权访问；也可用 `OMBRE_HOOK_ALLOW_PUBLIC=true`，仅建议在外层已有鉴权时开启 |
 | `limits.max_bucket_bytes` | `51200` (50KB) | 单桶内容字节上限（iter 1.6 §5）；0 禁用 |
 | `limits.max_pinned` | `20` | `metadata.pinned=True` 桶数量上限；显式 permanent 不占；0 禁用 |
+| `limits.max_protected` | `20` | 活跃、非终态的 `metadata.protected=True` 逻辑桶上限；按 ID 去重；0 禁用 |
 | `limits.max_mcp_request_bytes` | `4194304` | `/mcp` 请求体上限；0 禁用 |
 | `limits.max_management_request_bytes` | `4194304` | Dashboard/OAuth 普通写请求上限；导入上传使用独立上限；0 禁用 |
 | `bucket_type_defaults.{type}.{field}` | （空） | iter 1.9：按桶类型覆盖 importance/valence/arousal 默认值。例：`bucket_type_defaults.feel.importance: 5`。`bucket_manager.create()` 在不传入该字段时查此表 |
@@ -1588,6 +1601,7 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 |---|---|---|
 | `breath()` 无参返回「权重池平静」但桶其实存在 | `tools/breath/` | 浮现分支；检查 `bucket_mgr.list_all()` 是否漏遍历某子目录 |
 | 应该浮现的钉选桶没出现 | `tools/breath/` | 浮现分支的 pinned 过滤；`bucket_mgr.create` 是否写入 `pinned: True` |
+| protected 桶出现在无参 breath/dream/hook | `tools/breath/` + `tools/dream/` + `web/hooks.py` | protected 应只防衰减；检查主候选、提示、plan/feel、Letter/I 等附加池是否统一显式排除 |
 | 钉选桶 importance 不是 10 | `bucket_manager.py` | `create()`（pinned 锁 10）+ `update()`（pinned 重新锁 10） |
 | 检索结果排序看着不对 | `bucket_manager.py` | `search()` Layer 2 + `_calc_topic_score / _calc_emotion_score / _calc_time_score` |
 | 关键词明明在桶名里却没命中 | `bucket_manager.py` | `_calc_topic_score`（rapidfuzz partial_ratio 阈值）+ `fuzzy_threshold` 配置 |

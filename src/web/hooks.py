@@ -3,7 +3,8 @@
 web/hooks.py — breath 浮现挂载点（HTTP hook）
 ========================================
 
-- /breath-hook：对话开头由外部 hook 拉取，返回应浮现的记忆（pinned + 未解决采样）
+- /breath-hook：对话开头由外部 hook 拉取，返回应浮现的记忆（pinned + 未解决采样）。
+  protected 只防衰减，主池与 Letter/I 附加池都不通过 hook 主动注入。
 
 不提供 /dream-hook：dream 按哲学不是义务、不该每次开场自动触发（详见下方端点处注释）。
 
@@ -274,10 +275,8 @@ def register(mcp) -> None:
                 all_buckets = await sh.bucket_mgr.list_all(include_archive=False)
                 pinned = [
                     bucket for bucket in all_buckets
-                    if (
-                        bucket["metadata"].get("pinned")
-                        or bucket["metadata"].get("protected")
-                    )
+                    if _truthy(bucket["metadata"].get("pinned"))
+                    and not _truthy(bucket["metadata"].get("protected"))
                     and _SURFACE_POLICY.evaluate_bucket(
                         bucket, mode="spontaneous"
                     ).allowed
@@ -295,8 +294,8 @@ def register(mcp) -> None:
                     if not bucket["metadata"].get("resolved", False)
                     and bucket["metadata"].get("type")
                     not in ("permanent", "feel", "plan", "letter", "self", "i")
-                    and not bucket["metadata"].get("pinned")
-                    and not bucket["metadata"].get("protected")
+                    and not _truthy(bucket["metadata"].get("pinned"))
+                    and not _truthy(bucket["metadata"].get("protected"))
                     and not is_letter_bucket(bucket)
                     and _SURFACE_POLICY.evaluate_bucket(
                         bucket, mode="spontaneous"
@@ -388,6 +387,7 @@ def register(mcp) -> None:
                 letters = [
                     bucket for bucket in all_buckets
                     if is_letter_bucket(bucket)
+                    and not _truthy(bucket["metadata"].get("protected"))
                 ]
                 normalized_letters = []
                 letter_states = {}
@@ -487,6 +487,7 @@ def register(mcp) -> None:
                 self_buckets = [
                     bucket for bucket in all_buckets
                     if not is_letter_bucket(bucket)
+                    and not _truthy(bucket["metadata"].get("protected"))
                     and (
                         bucket["metadata"].get("type") == "i"
                         or "__i__" in (bucket["metadata"].get("tags") or [])

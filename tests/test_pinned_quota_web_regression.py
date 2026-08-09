@@ -124,6 +124,49 @@ async def test_bucket_pin_route_rejects_archived_bucket(pinned_quota_runtime):
 
 
 @pytest.mark.asyncio
+async def test_bucket_pin_route_rejects_protected_bucket_before_quota_check(
+    pinned_quota_runtime,
+):
+    metadata = pinned_quota_runtime.rows["plain"]["metadata"]
+    metadata["protected"] = True
+    mcp = FakeMcp()
+    buckets_web.register(mcp)
+
+    response = await mcp.routes["/api/bucket/{bucket_id}/pin"](
+        FakeRequest(path_params={"bucket_id": "plain"})
+    )
+
+    payload = _json(response)
+    assert response.status_code == 409
+    assert payload["conflict"] == "pinned_protected_mutually_exclusive"
+    assert metadata["pinned"] is False
+    assert metadata["protected"] is True
+    assert pinned_quota_runtime.updates == []
+
+
+@pytest.mark.asyncio
+async def test_bucket_pin_route_can_unpin_historical_pinned_protected_state(
+    pinned_quota_runtime,
+):
+    metadata = pinned_quota_runtime.rows["already-pinned"]["metadata"]
+    metadata["protected"] = True
+    mcp = FakeMcp()
+    buckets_web.register(mcp)
+
+    response = await mcp.routes["/api/bucket/{bucket_id}/pin"](
+        FakeRequest(path_params={"bucket_id": "already-pinned"})
+    )
+
+    assert response.status_code == 200
+    assert _json(response)["pinned"] is False
+    assert metadata["pinned"] is False
+    assert metadata["protected"] is True
+    assert pinned_quota_runtime.updates == [
+        ("already-pinned", {"pinned": False})
+    ]
+
+
+@pytest.mark.asyncio
 async def test_import_review_pin_action_respects_pinned_quota(pinned_quota_runtime):
     mcp = FakeMcp()
     import_api.register(mcp)

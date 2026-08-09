@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import tools._runtime as rt
+from tools.breath.search import surface_search
 from tools.breath.surface import surface_default
 from tools.dream import dispatch as dream_dispatch
 
@@ -76,3 +77,40 @@ async def test_dream_includes_core_bucket_content_as_reference(bucket_mgr):
 
     assert bucket_id in result
     assert "Pinned dream context must remain visible" in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bucket_type", ["dynamic", "permanent"])
+async def test_protected_memory_is_silent_by_default_but_explicitly_readable(
+    bucket_mgr,
+    bucket_type,
+):
+    content = f"Protected {bucket_type} memory is explicit-read only."
+    bucket_id = await bucket_mgr.create(
+        content=content,
+        protected=True,
+        bucket_type=bucket_type,
+        domain=["rules"],
+    )
+    install_runtime(bucket_mgr, EchoDehydrator())
+
+    breath = await surface_default(
+        max_results=10,
+        max_tokens=10000,
+        tag_filter=[],
+    )
+    dream = await dream_dispatch(window_hours=48)
+    explicit = await surface_search(
+        query=bucket_id,
+        max_results=1,
+        max_tokens=10000,
+        domain="",
+        valence=-1,
+        arousal=-1,
+        tag_filter=[],
+    )
+
+    assert content not in breath
+    assert content not in dream
+    assert content in explicit
+    assert "受保护记忆" in explicit

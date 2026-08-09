@@ -4,11 +4,13 @@ tools/_common.py — 跨工具共享的辅助逻辑
 ========================================
 
 这个文件收纳被多个工具同时复用的、与具体工具语义无关的小工具：
-配额检查（单桶字节上限 / pinned 数量上限）、合并或新建（hold/grow 共用）、
+配额检查（单桶字节上限 / pinned/protected 数量上限）、
+合并或新建（hold/grow 共用）、
 新桶疑似重复扫描、新事件触发的 plan 自动闭环判定。
 
 关键行为：
-- check_content_size / check_pinned_quota：读取 config.limits，超限返回中文提示串
+- check_content_size / check_pinned_quota / check_protected_quota：读取
+  config.limits，超限返回中文提示串
 - merge_or_create：先用语义检索找近似桶；超过阈值则合并（hold 用原文拼接，
   grow 用 LLM 压缩），否则新建；写完投递 embedding 队列并刷新脱水缓存
 - iter 2.0：merge_or_create 接受 ``source_tool`` / ``grow_batch_id``，
@@ -21,8 +23,9 @@ tools/_common.py — 跨工具共享的辅助逻辑
 - 不持有任何全局对象，所有依赖都从 _runtime 取
 - 不做日志格式化以外的副作用包装；调用方自行决定是否 await
 
-对外暴露：limits_cfg / max_bucket_bytes / max_pinned / check_content_size /
-         count_pinned / check_pinned_quota / merge_or_create /
+对外暴露：limits_cfg / max_bucket_bytes / max_pinned / max_protected /
+         check_content_size / count_pinned / count_protected /
+         check_pinned_quota / check_protected_quota / merge_or_create /
          check_duplicate_for / check_plan_resolution
 ========================================
 """
@@ -60,6 +63,7 @@ _EMBED_WARN = (
 # --- 桶与配额默认值 ---
 _DEFAULT_MAX_BUCKET_BYTES = 50 * 1024  # 50 KB 单桶上限（超过建议走 grow 拆存）
 _DEFAULT_MAX_PINNED = 20               # pinned 桶上限（哲学边界：重要必须稀缺）；与 config.example.yaml limits.max_pinned 同步
+_DEFAULT_MAX_PROTECTED = 20            # protected 桶独立上限；与 config.example.yaml limits.max_protected 同步
 _DEFAULT_MAX_GROW_INPUT_BYTES = 2 * 1024 * 1024
 _DEFAULT_MAX_QUERY_BYTES = 16 * 1024
 _DEFAULT_MAX_METADATA_BYTES = 16 * 1024
@@ -332,12 +336,11 @@ async def _content_turn(content: str):
 
 @asynccontextmanager
 async def _quota_turn(name: str):
-    """Serialize a quota check-then-write so concurrent requests can't all pass
-    the same stale pre-check before either commits (pinned/importance TOCTOU).
+    """串行化配额检查与落盘，防止并发请求基于同一过期快照
+    同时通过 pinned/protected/importance 配额。
 
-    Reuses the same cross-loop/cross-process lock-file machinery as
-    ``_content_turn`` — FastMCP may dispatch requests from different event
-    loops, so a plain ``asyncio.Lock`` here would not actually serialize them.
+    复用 ``_content_turn`` 的跨事件循环、跨进程文件锁；FastMCP
+    可能从不同事件循环调度请求，普通 ``asyncio.Lock`` 无法覆盖该边界。
     """
     async with _keyed_turn(f"quota-{name}"):
         yield
@@ -372,7 +375,7 @@ def _push_warning_safe(code: str, msg: str) -> None:
 
 
 def limits_cfg() -> dict:
-    """读 config.limits 段；缺省值与 1.6 spec §5 一致：50KB 单桶 / 20 pinned。"""
+    """读 config.limits 段；缺省为 50KB 单桶 / 20 pinned / 20 protected。"""
     config = rt.config if isinstance(rt.config, dict) else {}
     return config.get("limits", {}) or {}
 
@@ -392,6 +395,10 @@ def max_bucket_bytes() -> int:
 
 def max_pinned() -> int:
     return _configured_limit("max_pinned", _DEFAULT_MAX_PINNED)
+
+
+def max_protected() -> int:
+    return _configured_limit("max_protected", _DEFAULT_MAX_PROTECTED)
 
 
 def max_grow_input_bytes() -> int:
@@ -570,6 +577,38 @@ async def count_pinned() -> int:
         return 0
 
 
+async def count_protected() -> int:
+    """统计活跃、非终态的 protected 逻辑桶数量。
+
+    protected 与 pinned 是独立资源：type=permanent 不等于
+    protected=True，不占用这一配额。历史物理副本按 bucket ID 去重。
+    读取失败时保守返回 0，不因诊断通道异常阻断其他工具。
+    """
+    try:
+        all_b = await rt.bucket_mgr.list_all(include_archive=False)
+        seen_ids: set[str] = set()
+        count = 0
+        for bucket in all_b:
+            bucket_id = str(bucket.get("id") or "").strip()
+            if bucket_id:
+                if bucket_id in seen_ids:
+                    continue
+                seen_ids.add(bucket_id)
+            metadata = bucket.get("metadata", {})
+            if is_terminal_memory_metadata(metadata):
+                continue
+            if isinstance(metadata, dict) and parse_bool(
+                metadata.get("protected"), default=False
+            ):
+                count += 1
+        return count
+    except Exception as e:
+        warning = getattr(getattr(rt, "logger", None), "warning", None)
+        if callable(warning):
+            warning(f"count_protected failed: {e}")
+        return 0
+
+
 def _is_pinned_orphan(meta: dict) -> bool:
     """Return True only for confidently repairable pinned/type desync.
 
@@ -655,6 +694,26 @@ async def check_pinned_quota() -> str | None:
         return (
             f"pinned 桶已达上限（{cur}/{cap}），建议先用 trace(bucket_id, pinned=0) "
             "清理低优先级钉选；或在 config.limits.max_pinned 调高上限。"
+        )
+    return None
+
+
+async def check_protected_quota() -> str | None:
+    """显式设为 protected 时的独立硬配额检查。
+
+    达到上限时返回可直接给 trace 的拒绝提示；调用方必须把
+    配额判定与落盘放在同一个 ``_quota_turn("protected")`` 内。
+    """
+    cap = max_protected()
+    if cap <= 0:
+        return None
+    cur = await count_protected()
+    if cur >= cap:
+        return (
+            f"protected 桶已达上限（{cur}/{cap}），请先用 "
+            "trace(bucket_id, protected=0, importance=1..10) "
+            "取消不再需要的保护；"
+            "或在 config.limits.max_protected 调高上限。"
         )
     return None
 

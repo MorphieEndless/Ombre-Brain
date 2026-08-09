@@ -106,6 +106,7 @@ EXPECTED_TOOL_PROPERTIES = {
         "tags",
         "resolved",
         "pinned",
+        "protected",
         "digested",
         "content",
         "delete",

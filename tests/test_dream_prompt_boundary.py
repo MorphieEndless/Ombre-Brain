@@ -183,6 +183,37 @@ def test_every_persisted_dream_surface_is_bounded_without_changing_legal_bodies(
     assert ([recent], [plan, feel], [core]) == inputs_before
 
 
+def test_protected_plan_and_feel_never_enter_dream_output():
+    recent = _bucket("recent-visible", "可见的近期记忆")
+    protected_plan = _bucket(
+        "protected-plan",
+        "受保护计划正文不得进入 dream",
+        "plan",
+        status="active",
+        protected="true",
+    )
+    protected_feel = _bucket(
+        "protected-feel",
+        "受保护感受正文不得进入 dream",
+        "feel",
+        protected=True,
+    )
+
+    result = dream_output.format_dream_output(
+        recent=[recent],
+        all_buckets=[protected_plan, protected_feel],
+        window_hours=48,
+        connection_hint="",
+        crystal_hint="",
+    )
+
+    assert "可见的近期记忆" in result
+    assert "受保护计划正文不得进入 dream" not in result
+    assert "受保护感受正文不得进入 dream" not in result
+    assert "=== 你的 active plans ===" not in result
+    assert "=== 你的 feel 历史" not in result
+
+
 def test_collapsed_feel_is_explicitly_marked_as_non_verbatim_and_truncated(monkeypatch):
     feel_budget = 1200
     monkeypatch.setattr(

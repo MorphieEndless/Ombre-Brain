@@ -2,6 +2,26 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.16.7
+
+### 修复 / Fixed
+
+- 修复 Issue #76 中 pinned 记忆归档后，显式恢复会静默重新占用 pinned 配额的
+  问题。归档文件仍保留历史标记；恢复时会在同一原子提交中清除 pinned、刷新
+  活跃时间并校验普通高重要度配额，不会产生幽灵钉选或中间状态。
+- 完成 Issue #82 的 `trace(protected=1|0)` 能力。protected 现在使用独立配额
+  （默认 20），与 pinned/anchor 互斥，锁定 importance=10；解除最后一层保护
+  必须在同次调用重新指定 importance，配额检查与写盘保持并发原子性。
+- protected 被明确为「防衰减但不主动浮现」：无参 breath、Dream 的全部候选与
+  提示、SessionStart hook 以及 Dashboard 默认 Breath 均不会注入受保护记忆；
+  显式 search/catalog 仍可读取，并统一显示受保护标记。
+- 历史 `protected+anchor` 冲突档案不会恢复成非法活跃状态；可用
+  `trace(id, restore=True, protected=0, importance=1..10)` 原子解除保护并恢复。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.16.7`。
+
 ## 2.16.6
 
 ### 修复 / Fixed

@@ -11,6 +11,7 @@ breath_search(query=...) 精准拉取需要的记忆——代替把全部记忆�
 - 每桶一行：名称 | 域 | 重要度，按重要度降序
 - 按类型分区（固化/动态/feel/plan/letter），区头带数量
 - 可选 domain 过滤（OR）、tags 过滤（AND）和条数上限
+- protected 桶保留在显式目录中，统一标记为「🛡️ [受保护记忆]」
 
 不做什么（边界）：
 - 不返回正文、不算权重分、不触发衰减/浮现逻辑——那些是其他分支的事
@@ -20,6 +21,7 @@ breath_search(query=...) 精准拉取需要的记忆——代替把全部记忆�
 
 from .. import _runtime as rt
 from ..plan.core import is_letter_bucket, letter_lock_state
+from utils import parse_bool
 
 # 类型 → (区头, 排序位)。未知类型归入动态区兜底。
 _SECTIONS = [
@@ -69,11 +71,13 @@ async def surface_catalog(
         except (TypeError, ValueError):
             imp = 0
         name = "一封上锁的信" if letter_locked else meta.get("name") or b["id"]
-        pin_mark = (
-            "📌"
-            if not logical_letter and (meta.get("pinned") or meta.get("protected"))
-            else ""
-        )
+        protected = parse_bool(meta.get("protected"), default=False)
+        pin_mark = ""
+        if not logical_letter:
+            if protected:
+                pin_mark = "🛡️ [受保护记忆] "
+            elif parse_bool(meta.get("pinned"), default=False):
+                pin_mark = "📌"
         line = f"{pin_mark}{name} | {','.join(domains) or '未分类'} | {imp}"
         btype = meta.get("type")
         key = "letter" if logical_letter else btype if btype in grouped else "dynamic"

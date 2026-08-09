@@ -16,6 +16,7 @@ import pytest
 
 from tools import dream
 from tools import _runtime as rt
+from tools.dream.hints import build_crystal_hint
 from tools.i import core as i_core
 from tools.i.core import I_CANDIDATE_TAG, I_PROMOTE_THRESHOLD
 
@@ -228,6 +229,80 @@ async def test_dream_surfaces_collisions_with_existing_self_knowledge(env, monke
     assert "撞上[已认下的自我认知]" in out
     assert entry_id in out
     assert "向量索引不可用" not in out
+
+
+@pytest.mark.asyncio
+async def test_protected_i_candidate_and_collision_material_stay_out_of_dream(
+    env,
+    monkeypatch,
+):
+    await i_core.i_core(content="我觉得可见候选需要继续核查。")
+    visible_id = next(iter(env.buckets))
+    await i_core.i_core(content="受保护 I 候选正文不得进入 dream。")
+    protected_candidate_id = list(env.buckets)[-1]
+    await env.update(protected_candidate_id, protected=True)
+
+    protected_memory_id = await env.create("受保护普通碰撞正文不得进入 dream。")
+    await env.update(protected_memory_id, protected=True)
+    protected_i_id = await env.create(
+        "受保护正式 I 正文不得进入 dream。",
+        bucket_type="i",
+    )
+    await env.update(
+        protected_i_id,
+        protected="true",
+        tags=["__i__"],
+        dont_surface=True,
+    )
+    monkeypatch.setattr(
+        rt,
+        "embedding_engine",
+        _StubEmbedding(
+            {
+                visible_id: [1.0, 0.0],
+                protected_candidate_id: [1.0, 0.0],
+                protected_memory_id: [1.0, 0.0],
+                protected_i_id: [1.0, 0.0],
+            }
+        ),
+        raising=False,
+    )
+
+    out = await dream.dispatch(window_hours=48)
+
+    assert "我觉得可见候选需要继续核查" in out
+    assert "受保护 I 候选正文不得进入 dream" not in out
+    assert "受保护普通碰撞正文不得进入 dream" not in out
+    assert "受保护正式 I 正文不得进入 dream" not in out
+    assert env.buckets[protected_candidate_id]["metadata"].get("i_dream_dates") == []
+
+
+@pytest.mark.asyncio
+async def test_crystal_hint_ignores_protected_feel(env, monkeypatch):
+    protected_id = await env.create(
+        "受保护 feel 预览不得进入结晶提示。",
+        bucket_type="feel",
+    )
+    await env.update(protected_id, protected="true")
+    visible_a = await env.create("普通 feel A", bucket_type="feel")
+    visible_b = await env.create("普通 feel B", bucket_type="feel")
+    monkeypatch.setattr(
+        rt,
+        "embedding_engine",
+        _StubEmbedding(
+            {
+                protected_id: [1.0, 0.0],
+                visible_a: [1.0, 0.0],
+                visible_b: [1.0, 0.0],
+            }
+        ),
+        raising=False,
+    )
+
+    hint = await build_crystal_hint(await env.list_all())
+
+    assert hint == ""
+    assert "受保护 feel 预览不得进入结晶提示" not in hint
 
 
 @pytest.mark.asyncio

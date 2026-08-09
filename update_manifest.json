@@ -7,8 +7,8 @@
     },
     {
       "path": "frontend/dashboard.html",
-      "sha256": "1a3aca0188d1989e9723e46926af5e74dc298f360f1b603e9dae41bb1e0da0ca",
-      "size": 528462
+      "sha256": "02b891b0469064f8bfd3e33d4e52669ee2f7d13af977dff0551bb7a0f84aa832",
+      "size": 531083
     },
     {
       "path": "frontend/favicon.svg",
@@ -32,7 +32,7 @@
     },
     {
       "path": "src/VERSION",
-      "sha256": "7be56a17e108c92cfcaffa205365107de54c72b60e80143ed107c5a604e50e65",
+      "sha256": "7ee203ac73fca7d93c699ceefabb5bb5cdea2e02213de22ceea56908ff0945c5",
       "size": 7
     },
     {
@@ -1032,5 +1032,5 @@
     }
   ],
   "rollout_strategy": "single-node",
-  "version": "2.16.5"
+  "version": "2.16.6"
 }

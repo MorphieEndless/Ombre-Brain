@@ -2,6 +2,21 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.16.9
+
+### 修复 / Fixed
+
+- 修复默认 stdio 传输未启动持久化向量队列，导致 `grow` 已完成 Markdown 原子写入后，
+  仍同步等待外部 embedding provider；客户端可能先报“server isn't responding”，
+  随后误判保存失败并重复写入的问题。
+- stdio 现在与 HTTP 托管模式复用同一 `EmbeddingOutbox` 生命周期。默认后台索引开启时，
+  写入请求在正文和索引期望状态持久化后即可回包，慢 provider 由队列继续处理；
+  独立运行或显式关闭后台索引时仍保留原有同步索引兼容行为。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.16.9`。
+
 ## 2.16.8
 
 ### 修复 / Fixed

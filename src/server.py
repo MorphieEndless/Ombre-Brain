@@ -1312,9 +1312,11 @@ if __name__ == "__main__":
         )
     elif transport == "stdio":
         # stdio：16 个工具已直接注册在唯一 mcp 实例上；启动成功边界由
-        # FastMCP public lifespan 触发，复用 RuntimeLifecycle 的 boot marker 语义。
+        # FastMCP public lifespan 触发。向量队列必须与 HTTP 一样纳入生命周期，
+        # 否则正文落盘后会退回同步索引，让慢 provider 拖住工具回包。
         _stdio_runtime_lifecycle = RuntimeLifecycle(
             logger=logger,
+            embedding_outbox=embedding_outbox,
             boot_marker_path=os.path.join(
                 os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                 ".boot_fails",

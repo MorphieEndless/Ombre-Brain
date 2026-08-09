@@ -32,7 +32,7 @@
     },
     {
       "path": "src/VERSION",
-      "sha256": "235941e09bc1637da9228fbeb54fcf0ebce51150c1438f22090c31966c501116",
+      "sha256": "a03703efdc90cd6a34b74ceab1d59a2fb136981ad32964c353df0e339c08d544",
       "size": 7
     },
     {
@@ -42,8 +42,8 @@
     },
     {
       "path": "src/bucket_manager.py",
-      "sha256": "20e2fe9be7bd5c1ee7744274ceb44a31c520568141900341ced03ccef9c45090",
-      "size": 168524
+      "sha256": "e19609eaf5caaa916d8ed78a97c7fe4d4d263da04edd2d897a0ab7e26354e63e",
+      "size": 168772
     },
     {
       "path": "src/decay_engine.py",
@@ -1032,5 +1032,5 @@
     }
   ],
   "rollout_strategy": "single-node",
-  "version": "2.16.2"
+  "version": "2.16.3"
 }

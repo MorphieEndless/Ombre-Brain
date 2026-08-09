@@ -2,6 +2,18 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.16.3
+
+### 修复 / Fixed
+
+- 修复 Issue #82 中显式恢复归档记忆时保留旧 `last_active` 的问题。
+  `trace(..., restore=True)` 现在会在同一次原子恢复中刷新活跃时间，
+  避免低分桶在下一轮衰减中立即二次归档。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.16.3`。
+
 ## 2.16.2
 
 ### 新增 / Added

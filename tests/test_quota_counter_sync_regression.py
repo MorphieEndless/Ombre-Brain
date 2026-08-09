@@ -13,14 +13,18 @@
   importance≥9 配额排除 pinned/protected。
 """
 import asyncio
+from pathlib import Path
 from unittest.mock import MagicMock
 
+import frontmatter
 import pytest
 
 import tools._runtime as rt
 from tools._common import (
+    check_protected_quota,
     count_high_importance,
     count_pinned,
+    count_protected,
     enforce_high_importance_quota,
     enforce_pinned_quota,
     merge_or_create,
@@ -188,6 +192,137 @@ async def test_pinned_counter_normalizes_booleans_and_logical_ids():
     )
 
     assert await count_pinned() == 1
+
+
+@pytest.mark.asyncio
+async def test_active_protected_uses_an_independent_configured_quota(bucket_mgr):
+    install_runtime(bucket_mgr, limits={"max_pinned": 1, "max_protected": 1})
+    await bucket_mgr.create(content="ordinary pinned slot", pinned=True)
+    await bucket_mgr.create(
+        content="the sole protected slot",
+        protected=True,
+        bucket_type="dynamic",
+    )
+    await bucket_mgr.create(
+        content="unprotected permanent does not use protected quota",
+        bucket_type="permanent",
+    )
+
+    assert await count_pinned() == 1
+    assert await count_protected() == 1
+    assert await check_protected_quota() is not None
+
+    candidate_id = await bucket_mgr.create(
+        content="protected quota overflow candidate",
+        importance=5,
+    )
+    result = await trace_core(candidate_id, protected=1)
+    candidate = await bucket_mgr.get(candidate_id)
+
+    assert "protected 桶已达上限" in result
+    assert candidate["metadata"].get("protected", False) is False
+    assert candidate["metadata"]["importance"] == 5
+    assert await count_protected() == 1
+
+
+@pytest.mark.asyncio
+async def test_restore_archived_protected_rejects_when_quota_is_full(bucket_mgr):
+    install_runtime(bucket_mgr, limits={"max_protected": 1})
+    archived_id = await bucket_mgr.create(
+        content="archived protected memory",
+        protected=True,
+    )
+    assert await bucket_mgr.archive(archived_id) is True
+    assert await count_protected() == 0
+
+    await bucket_mgr.create(content="active protected slot", protected=True)
+    assert await count_protected() == 1
+
+    result = await trace_core(archived_id, restore=True)
+    archived = await bucket_mgr.get_including_archive(archived_id)
+
+    assert "protected 桶已达上限" in result
+    assert archived["metadata"]["type"] == "archived"
+    assert archived["metadata"]["protected"] is True
+    assert await count_protected() == 1
+
+
+@pytest.mark.asyncio
+async def test_restore_archived_pin_degrades_when_high_importance_quota_is_full(
+    bucket_mgr,
+    monkeypatch,
+):
+    install_runtime(bucket_mgr)
+    monkeypatch.setattr("tools._common._HIGH_IMP_HARD_CAP", 1)
+    monkeypatch.setattr("tools._common._HIGH_IMP_SOFT_WARN", 1)
+    await bucket_mgr.create(content="existing ordinary high slot", importance=9)
+    archived_id = await bucket_mgr.create(
+        content="archived pin must enter ordinary scoring safely",
+        pinned=True,
+    )
+    assert await bucket_mgr.archive(archived_id) is True
+
+    result = await trace_core(archived_id, restore=True)
+    restored = await bucket_mgr.get(archived_id)
+
+    assert result == f"已重新回忆并恢复记忆桶: {archived_id}"
+    assert restored["metadata"]["type"] == "permanent"
+    assert restored["metadata"].get("pinned", False) is False
+    assert restored["metadata"]["importance"] == 8
+    assert await count_high_importance() == 1
+
+
+@pytest.mark.asyncio
+async def test_trace_restore_dirty_protected_anchor_requires_atomic_unprotect(
+    bucket_mgr,
+    monkeypatch,
+):
+    install_runtime(bucket_mgr)
+    monkeypatch.setattr("tools._common._HIGH_IMP_HARD_CAP", 1)
+    monkeypatch.setattr("tools._common._HIGH_IMP_SOFT_WARN", 1)
+    await bucket_mgr.create(content="existing ordinary high slot", importance=9)
+
+    archived_id = await bucket_mgr.create(
+        content="historical protected anchor conflict",
+        protected=True,
+    )
+    active = await bucket_mgr.get(archived_id)
+    active_path = Path(active["path"])
+    dirty_post = frontmatter.load(active_path)
+    dirty_post["anchor"] = True
+    active_path.write_text(frontmatter.dumps(dirty_post), encoding="utf-8")
+    assert await bucket_mgr.archive(archived_id) is True
+
+    rejected = await trace_core(archived_id, restore=True)
+    missing_importance = await trace_core(
+        archived_id,
+        restore=True,
+        protected=0,
+    )
+    unchanged = await bucket_mgr.get_including_archive(archived_id)
+
+    assert "restore=True, protected=0" in rejected
+    assert "importance=1..10" in rejected
+    assert "importance=1..10" in missing_importance
+    assert unchanged["metadata"]["type"] == "archived"
+    assert unchanged["metadata"]["protected"] is True
+    assert unchanged["metadata"]["anchor"] is True
+
+    result = await trace_core(
+        archived_id,
+        restore=True,
+        protected=0,
+        importance=9,
+    )
+    restored = await bucket_mgr.get(archived_id)
+
+    assert result == f"已重新回忆并恢复记忆桶: {archived_id}"
+    assert restored["metadata"]["type"] == "dynamic"
+    assert restored["metadata"].get("protected", False) is False
+    assert restored["metadata"]["pinned"] is False
+    assert restored["metadata"]["anchor"] is True
+    assert restored["metadata"]["importance"] == 8
+    assert await count_high_importance() == 1
 
 
 # ------------------------------------------------------------

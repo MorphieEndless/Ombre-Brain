@@ -15,6 +15,7 @@ from starlette.responses import Response
 
 from . import _shared as sh
 from tools._common import check_content_size
+from tools.plan.core import is_letter_bucket
 
 logger = sh.logger
 
@@ -44,7 +45,7 @@ def register(mcp) -> None:
             for b in all_buckets:
                 meta = b.get("metadata", {})
                 # 过滤：只要计划类，跳过其他类型的桶
-                if meta.get("type") != "plan":
+                if meta.get("type") != "plan" or is_letter_bucket(b):
                     continue
                 # status 不一定存在（老数据），默认 active；lower() 防御大小写
                 st = (meta.get("status") or "active").lower()
@@ -127,7 +128,10 @@ def register(mcp) -> None:
             if not bucket:
                 return JSONResponse({"error": f"plan not found: {bucket_id}"}, status_code=404)
             # 双重防御：这个端点只能动 plan 桃子，别的类型不允许
-            if bucket.get("metadata", {}).get("type") != "plan":
+            if (
+                bucket.get("metadata", {}).get("type") != "plan"
+                or is_letter_bucket(bucket)
+            ):
                 return JSONResponse({"error": "bucket is not a plan"}, status_code=400)
 
             old_meta = bucket.get("metadata", {})

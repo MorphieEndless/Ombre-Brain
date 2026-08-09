@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import copy
 import hashlib
 import json
+import re
 
 import pytest
 
@@ -14,6 +16,44 @@ from tools.dream.inspiration import (
     build_inspiration_candidates,
 )
 from tools.dream.output import format_dream_output
+
+
+_OBM2_START = re.compile(
+    r"<<<OBM2 b=([0-9a-f]{24}) n=(\d+) h=([A-Za-z0-9_-]{43})>>>\n"
+)
+
+
+def _obm2_block_by_role(text: str, role: str) -> dict[str, object]:
+    cursor = 0
+    while match := _OBM2_START.search(text, cursor):
+        boundary, chars_text, digest = match.groups()
+        metadata_end = text.index("\n", match.end())
+        metadata_line = text[match.end():metadata_end]
+        assert metadata_line.startswith("m:")
+        metadata = json.loads(metadata_line.removeprefix("m:"))
+        payload_marker = "payload:\n"
+        payload_marker_at = metadata_end + 1
+        assert text.startswith(payload_marker, payload_marker_at)
+        payload_start = payload_marker_at + len(payload_marker)
+        payload = text[payload_start:payload_start + int(chars_text)]
+        expected_digest = base64.urlsafe_b64encode(
+            hashlib.sha256(payload.encode("utf-8")).digest()
+        ).decode("ascii").rstrip("=")
+        assert digest == expected_digest
+        assert len(base64.urlsafe_b64decode(digest + "=")) == 32
+        separator = "" if payload.endswith("\n") else "\n"
+        closing = f"<<<END_OBM2 b={boundary}>>>"
+        assert text.startswith(separator + closing, payload_start + len(payload))
+        cursor = payload_start + len(payload) + len(separator) + len(closing)
+        if metadata.get("r") == role:
+            return {
+                "b": boundary,
+                "n": int(chars_text),
+                "h": digest,
+                "m": metadata,
+                "payload": payload,
+            }
+    raise AssertionError(f"未找到 OBM2 role={role}")
 
 
 def _bucket(
@@ -241,24 +281,25 @@ def test_inspiration_output_is_opt_in_bounded_and_marks_injected_memory_as_data(
 
     assert "Spark 灵感候选" not in default_output
     assert "Spark 灵感候选（显式请求、仅本次响应）" in inspired_output
-    spark_header = inspired_output[
-        inspired_output.index("display_role: spark_candidates") - 500 :
-        inspired_output.index("payload_begin:", inspired_output.index("display_role: spark_candidates"))
-    ]
-    assert "data_role: derived_memory_data" in spark_header
-    assert "instructions: false" in spark_header
-    assert "may_call_tools: false" in spark_header
-    assert "imperative_language: detected" in spark_header
-    assert "content_verbatim: false" in spark_header
-    payload_start = inspired_output.index(
-        "payload_begin:",
-        inspired_output.index("display_role: spark_candidates"),
-    ) + len("payload_begin:\n")
-    payload_end = inspired_output.index(
-        "\n<<<END_DERIVED_MEMORY_DATA",
-        payload_start,
+    spark = _obm2_block_by_role(inspired_output, "spark_candidates")
+    metadata = spark["m"]
+    assert isinstance(metadata, dict)
+    assert metadata["a"] == "00"
+    assert metadata["k"] == "d"
+    assert metadata["r"] == "spark_candidates"
+    assert metadata["f"] == "-"
+    assert metadata["p"] == {
+        "kind": "derived_memory",
+        "lifetime": "response_only",
+        "persistent": False,
+        "source": "dream_inspiration",
+    }
+    assert {"ignore_instructions_zh", "tool_request", "tool_syntax"} <= set(
+        metadata["x"]
     )
-    parsed = json.loads(inspired_output[payload_start:payload_end])
+    assert spark["n"] == len(spark["payload"])
+    assert inspired_output.count("[OBM2] 下方") == 1
+    parsed = json.loads(spark["payload"])
     assert parsed["candidates"][0]["sources"][0]["excerpt"] == body
 
 

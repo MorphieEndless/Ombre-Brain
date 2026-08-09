@@ -776,7 +776,7 @@ async def hold(
 async def grow(content: str = "", items: Optional[list] = None) -> str:
     """仅在对话中已明确要求整理并写入长期记忆时调用，不要根据普通聊天自行推断写入意图。整理一段长文本(如一天的记录/一段日记/一篇总结)存入记忆,系统拆分为 2~6 条独立事件桶并各自尝试合并。短内容(<30 字)走 hold 单条快速路径,不强行拆分。
 
-    进阶(可选):若你已经把长文拆成 N 条最终正文，可传字符串 items，或对象 items=[{"title":"最终标题","content":"最终正文","tags":["中文短标签"],"importance":5,"domain":["恋爱"],"valence":0.8,"arousal":0.4,"source_ranges":[[1,20]]}]。显式字段优先于自动打标，正文逐字入库，合并时也不压缩。同时传 content 时，content 是整批共享的隐藏原文证据，只保存一次；source_ranges 使用 1-based 闭区间把每个桶连回自己的原文片段。"""
+    进阶(可选):若你已经把长文拆成 N 条最终正文，可传字符串 items，或对象 items=[{"title":"最终标题","content":"最终正文","tags":["中文短标签"],"importance":5,"domain":["恋爱"],"valence":0.8,"arousal":0.4,"why_remembered":"我为什么要留下这条","source_ranges":[[1,20]]}]。显式字段优先于自动打标，正文逐字入库，合并时也不压缩。人工 why_remembered 可在首次新建时直接保存；digest 或短内容打标自动生成的理由首次不写，只在后续 grow 确认合并到同一事件且旧理由为空时补入，绝不覆盖旧值。同时传 content 时，content 是整批共享的隐藏原文证据，只保存一次；source_ranges 使用 1-based 闭区间把每个桶连回自己的原文片段。"""
     return await _with_notice(
         _t_grow.dispatch(content, items=items),
         op="grow",
@@ -822,6 +822,7 @@ async def trace(
     tags: Optional[str] = "",
     resolved: Optional[int] = -1,
     pinned: Optional[int] = -1,
+    protected: Optional[int] = -1,
     digested: Optional[int] = -1,
     content: Optional[str] = "",
     delete: Optional[bool] = False,
@@ -842,7 +843,9 @@ async def trace(
     """仅在明确需要修改某条已存在记忆时调用，不要猜测 bucket_id 或自行改写记忆。
 
     resolved=1 标记已放下；resolved=0 重新激活。pinned=1 标记永久核心并锁定
-    importance=10；pinned=0 取消时必须在同一次调用显式传入 importance=1..10。
+    importance=10。protected=1 保护记忆不被衰减，但不作为核心准则强制浮现；
+    它与 pinned/anchor 互斥且同样锁定 importance=10。解除最后一层
+    pinned/protected 保护时，必须在同一次调用显式传入 importance=1..10。
     digested=1 标记已消化并从默认/被动浮现及 dream 隐藏，
     但仍可通过显式 query、importance 审计或目录找回。content 会完整替换正文；
     old_str/new_str 会在完整原文中做唯一、逐字的局部替换（new_str 可为空以删除），
@@ -853,13 +856,16 @@ async def trace(
     物理抹除。hard_delete=True 仅用于清理创建时明确标记 test_data=True 的测试桶，
     必须单独提供非空 delete_reason；普通记忆和 plan 一律拒绝且不会顺带归档。
     delete 与 hard_delete 不能同时使用。归档记忆只有在反思后决定值得再次回忆时，才单独调用
-    trace(bucket_id="...", restore=True) 恢复；检索命中不会自动恢复。只传需要修改的字段，-1 或空串表示不改。
+    trace(bucket_id="...", restore=True) 恢复；若历史归档同时带有 protected/anchor，
+    只能用 restore=True、protected=0、importance=1..10 原子解除冲突后恢复。
+    检索命中不会自动恢复。只传需要修改的字段，-1 或空串表示不改。
     """
     return await _with_notice(
         _t_trace.dispatch(
             bucket_id=bucket_id, name=name, domain=domain,
             valence=valence, arousal=arousal, importance=importance,
-            tags=tags, resolved=resolved, pinned=pinned, digested=digested,
+            tags=tags, resolved=resolved, pinned=pinned,
+            protected=protected, digested=digested,
             content=content, delete=delete, status=status, weight=weight,
             dont_surface=dont_surface, why_remembered=why_remembered,
             meaning_append=meaning_append, meaning_replace=meaning_replace,
@@ -872,7 +878,8 @@ async def trace(
         args={
             "bucket_id": bucket_id, "name": name, "domain": domain,
             "valence": valence, "arousal": arousal, "importance": importance,
-            "tags": tags, "resolved": resolved, "pinned": pinned, "digested": digested,
+            "tags": tags, "resolved": resolved, "pinned": pinned,
+            "protected": protected, "digested": digested,
             "content_len": len(content or ""), "delete": delete, "status": status,
             "hard_delete": hard_delete,
             "restore": restore,
@@ -1305,9 +1312,11 @@ if __name__ == "__main__":
         )
     elif transport == "stdio":
         # stdio：16 个工具已直接注册在唯一 mcp 实例上；启动成功边界由
-        # FastMCP public lifespan 触发，复用 RuntimeLifecycle 的 boot marker 语义。
+        # FastMCP public lifespan 触发。向量队列必须与 HTTP 一样纳入生命周期，
+        # 否则正文落盘后会退回同步索引，让慢 provider 拖住工具回包。
         _stdio_runtime_lifecycle = RuntimeLifecycle(
             logger=logger,
+            embedding_outbox=embedding_outbox,
             boot_marker_path=os.path.join(
                 os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                 ".boot_fails",

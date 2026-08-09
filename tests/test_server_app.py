@@ -1,3 +1,4 @@
+import ast
 import asyncio
 import json
 import shutil
@@ -1134,6 +1135,43 @@ def test_build_http_app_rejects_stdio_transport():
             token_validator=lambda *_args, **_kwargs: False,
             lifecycle=RuntimeLifecycle(logger=RecordingLogger()),
         )
+
+
+def test_stdio_runtime_lifecycle_owns_embedding_outbox():
+    source_path = Path(__file__).resolve().parents[1] / "src" / "server.py"
+    module = ast.parse(source_path.read_text(encoding="utf-8"))
+
+    stdio_branch = None
+    for node in ast.walk(module):
+        if not isinstance(node, ast.If) or not isinstance(node.test, ast.Compare):
+            continue
+        test = node.test
+        if (
+            isinstance(test.left, ast.Name)
+            and test.left.id == "transport"
+            and any(
+                isinstance(value, ast.Constant) and value.value == "stdio"
+                for value in test.comparators
+            )
+        ):
+            stdio_branch = node.body
+            break
+
+    assert stdio_branch is not None
+    lifecycle_calls = [
+        item
+        for statement in stdio_branch
+        for item in ast.walk(statement)
+        if isinstance(item, ast.Call)
+        and isinstance(item.func, ast.Name)
+        and item.func.id == "RuntimeLifecycle"
+    ]
+    assert len(lifecycle_calls) == 1
+
+    keywords = {keyword.arg: keyword.value for keyword in lifecycle_calls[0].keywords}
+    outbox = keywords.get("embedding_outbox")
+    assert isinstance(outbox, ast.Name)
+    assert outbox.id == "embedding_outbox"
 
 
 @pytest.mark.asyncio

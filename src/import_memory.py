@@ -39,6 +39,7 @@ from tools._common import (
     _quota_turn,
     enforce_high_importance_quota,
 )
+from tools.plan.core import is_letter_bucket
 from utils import atomic_write_text, clean_llm_json, count_tokens_approx, now_iso, parse_bool
 
 logger = logging.getLogger("ombre_brain.import")
@@ -1527,7 +1528,8 @@ class ImportEngine:
         all_buckets = await self.bucket_mgr.list_all(include_archive=False)
         dynamic_buckets = [
             b for b in all_buckets
-            if b["metadata"].get("type") == "dynamic"
+            if not is_letter_bucket(b)
+            and b["metadata"].get("type") == "dynamic"
             and not b["metadata"].get("pinned")
             and not b["metadata"].get("resolved")
         ]

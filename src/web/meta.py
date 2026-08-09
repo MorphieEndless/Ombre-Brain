@@ -98,6 +98,8 @@ _MAX_UPDATE_MEMBERS = 5_000
 _MAX_UPDATE_MEMBER_BYTES = 16 * 1024 * 1024
 _MAX_UPDATE_TOTAL_BYTES = 128 * 1024 * 1024
 _MAX_UPDATE_COMPRESSION_RATIO = 500.0
+_ARCHIVED_LETTER_RESTORE_MAX_IDS = 100
+_ARCHIVED_LETTER_RESTORE_ID_MAX_CHARS = 128
 _MAX_UPDATE_MANIFEST_BYTES = 2 * 1024 * 1024
 _MAX_DEPENDENCY_MANIFEST_BYTES = 2 * 1024 * 1024
 _DEPENDENCY_MANIFEST_NAMES = ("requirements.txt", "requirements.lock.txt")
@@ -1399,6 +1401,92 @@ def register(mcp) -> None:
             return JSONResponse({"ok": True, **result})
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    @mcp.custom_route(
+        "/api/maintenance/restore-archived-letters",
+        methods=["GET", "POST"],
+    )
+    async def api_restore_archived_letters(request: Request) -> Response:
+        """审计并显式恢复带强来源标记的历史误归档 Letter。
+
+        GET 永远只做 dry-run。POST 必须给出非空、受限的 ``ids`` 字符串列表；
+        维护 helper 的扫描结果不构成写授权，存储层会在桶租约内重新校验。
+        """
+        from starlette.responses import JSONResponse
+
+        def no_store_json(payload: dict, *, status_code: int = 200) -> Response:
+            return JSONResponse(
+                payload,
+                status_code=status_code,
+                headers={"Cache-Control": "no-store"},
+            )
+
+        err = sh._require_auth(request)
+        if err:
+            err.headers["Cache-Control"] = "no-store"
+            return err
+        from tools._common import restore_archived_letters
+
+        ids: list[str] | None = None
+        apply = request.method == "POST"
+        if apply:
+            try:
+                body = await sh._read_json_object(request)
+            except Exception:
+                return no_store_json(
+                    {"ok": False, "reason": "invalid_json"},
+                    status_code=400,
+                )
+            raw_ids = body.get("ids")
+            if (
+                not isinstance(raw_ids, list)
+                or not raw_ids
+                or len(raw_ids) > _ARCHIVED_LETTER_RESTORE_MAX_IDS
+            ):
+                return no_store_json(
+                    {"ok": False, "reason": "invalid_ids"},
+                    status_code=400,
+                )
+            normalized: list[str] = []
+            seen: set[str] = set()
+            for value in raw_ids:
+                if not isinstance(value, str):
+                    return no_store_json(
+                        {"ok": False, "reason": "invalid_ids"},
+                        status_code=400,
+                    )
+                bucket_id = value.strip()
+                if (
+                    not bucket_id
+                    or len(bucket_id) > _ARCHIVED_LETTER_RESTORE_ID_MAX_CHARS
+                ):
+                    return no_store_json(
+                        {"ok": False, "reason": "invalid_ids"},
+                        status_code=400,
+                    )
+                if bucket_id not in seen:
+                    seen.add(bucket_id)
+                    normalized.append(bucket_id)
+            if not normalized:
+                return no_store_json(
+                    {"ok": False, "reason": "invalid_ids"},
+                    status_code=400,
+                )
+            ids = normalized
+
+        try:
+            result = await restore_archived_letters(
+                sh.bucket_mgr,
+                ids=ids,
+                apply=apply,
+            )
+            return no_store_json({"ok": True, **result})
+        except Exception:
+            sh.logger.exception("历史归档 Letter 维护失败")
+            return no_store_json(
+                {"ok": False, "reason": "internal_error"},
+                status_code=500,
+            )
 
     @mcp.custom_route("/api/author", methods=["GET"])
     async def api_author(request: Request) -> Response:

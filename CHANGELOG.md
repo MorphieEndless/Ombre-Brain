@@ -2,6 +2,127 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.16.9
+
+### 修复 / Fixed
+
+- 修复默认 stdio 传输未启动持久化向量队列，导致 `grow` 已完成 Markdown 原子写入后，
+  仍同步等待外部 embedding provider；客户端可能先报“server isn't responding”，
+  随后误判保存失败并重复写入的问题。
+- stdio 现在与 HTTP 托管模式复用同一 `EmbeddingOutbox` 生命周期。默认后台索引开启时，
+  写入请求在正文和索引期望状态持久化后即可回包，慢 provider 由队列继续处理；
+  独立运行或显式关闭后台索引时仍保留原有同步索引兼容行为。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.16.9`。
+
+## 2.16.8
+
+### 修复 / Fixed
+
+- 修复 Issue #84 中历史 Letter 异常进入归档区后，Dashboard 仍能看到记录、
+  但 `letter_read` 无法读取的问题。新增登录后维护接口：GET 只读扫描，POST
+  仅恢复明确提交的候选 ID；不会在启动或日常读取时自动扫描、恢复归档数据。
+- 历史 Letter 恢复会在同一桶租约内重新确认唯一物理真源、强 Letter 标记及
+  非删除终态，再原子改回 `letter` 并移入 `letters/history/`。正文、作者、
+  原时间与锁字段保持不变；弱线索、墓碑、保护态和路径碰撞均拒绝处理。
+- 修复 Issue #85 中 `grow(items=[...])` 无法保存 `why_remembered` 的问题。
+  人工逐条理由会先做字符串、500 字符和批量元数据预算校验，首次新建即可保存；
+  合并时只补旧空值，不清除也不覆盖已有理由。
+- `grow(content=...)` 的长文 digest 与短内容专用打标都会生成候选理由，但首次
+  新建不盲目写入；仅后续 grow 再次确认命中同一具体事件时原子补入旧空值。
+  自动理由严格依据原文，且原文中的 system、ignore、tool 等文字只按数据处理。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.16.8`。
+
+## 2.16.7
+
+### 修复 / Fixed
+
+- 修复 Issue #76 中 pinned 记忆归档后，显式恢复会静默重新占用 pinned 配额的
+  问题。归档文件仍保留历史标记；恢复时会在同一原子提交中清除 pinned、刷新
+  活跃时间并校验普通高重要度配额，不会产生幽灵钉选或中间状态。
+- 完成 Issue #82 的 `trace(protected=1|0)` 能力。protected 现在使用独立配额
+  （默认 20），与 pinned/anchor 互斥，锁定 importance=10；解除最后一层保护
+  必须在同次调用重新指定 importance，配额检查与写盘保持并发原子性。
+- protected 被明确为「防衰减但不主动浮现」：无参 breath、Dream 的全部候选与
+  提示、SessionStart hook 以及 Dashboard 默认 Breath 均不会注入受保护记忆；
+  显式 search/catalog 仍可读取，并统一显示受保护标记。
+- 历史 `protected+anchor` 冲突档案不会恢复成非法活跃状态；可用
+  `trace(id, restore=True, protected=0, importance=1..10)` 原子解除保护并恢复。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.16.7`。
+
+## 2.16.6
+
+### 修复 / Fixed
+
+- 修复 PC 浏览器缩窄或放大到中间宽度时，Dashboard 页头仍强制保持单行，导致
+  标题和统计信息逐字竖排、搜索与操作按钮重叠以及页面出现横向滚动的问题。
+- 769–1500px 视口改用稳定的两行页头；导航在较窄 PC 下按 6+5 自适应排列，
+  移动端按三列排列并将页头操作收为图标按钮，宽屏原布局保持不变。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.16.6`。
+
+## 2.16.5
+
+### 修复 / Fixed
+
+- 修复 Issue #83 所述 breath 与 dream 返回值中安全元数据逐桶重复、挤占大量
+  上下文预算的问题。Dream 与 SessionStart breath-hook 现在共用紧凑的 OBM2
+  数据信封，普通 breath 也改用同一短标记；固定安全语义每次响应只声明一次。
+- 紧凑协议继续为每块保留独立内容边界、字符数、完整 SHA-256、来源、展示角色、
+  原文/截断状态和命令式文本风险标记；记忆正文仍逐字返回，块内伪造的 system、
+  tool 或边界文本仍只能作为历史数据处理。
+- 完整 SHA-256 改用等价的无填充 base64url 表达。270 字样例的单块信封开销
+  在 Dream 中约减少 50%，在 breath-hook 中约减少四成，普通 breath 的逐桶
+  标记约减少一半，同时继续计入原有 token 硬预算。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.16.5`。
+
+## 2.16.4
+
+### 修复 / Fixed
+
+- 修复上锁 Letter 在 Dashboard「所有桶」、`letter`/归档筛选和通用详情中泄露
+  标题或正文的问题。通用列表与详情现在复用 Letter 的 human 侧锁判定，只返回
+  中性占位和安全锁元数据；搜索、关系图、重复检测及调试浮现也不会纳入当前用户
+  无权读取的锁信。
+- 导入复核列表对锁信使用同一安全占位，并禁止复核动作或通用编辑绕过活动锁；
+  所有 Letter 均不能通过通用桶接口改变类型或钉选状态。
+- 历史上已被改成 `permanent`/pinned、`plan`、`feel` 或 `i` 的 Letter 仍按
+  `source_tool`/`__letter__` 识别，不会进入普通 breath、专用类型读取、检索、
+  hook、dream、导入模式分析或 hold/grow 合并；
+  非锁拥有者也不能借通用 trace 或原文证据入口读取、改写。通用编辑使用桶锁内的
+  锁版本前置校验，避免检查后并发上锁仍覆盖正文。
+- Letter 专用读取与锁管理同样识别历史类型迁移数据；锁拥有者、已解锁信件和已到期
+  定时锁仍按原契约正常可读。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.16.4`。
+
+## 2.16.3
+
+### 修复 / Fixed
+
+- 修复 Issue #82 中显式恢复归档记忆时保留旧 `last_active` 的问题。
+  `trace(..., restore=True)` 现在会在同一次原子恢复中刷新活跃时间，
+  避免低分桶在下一轮衰减中立即二次归档。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.16.3`。
+
 ## 2.16.2
 
 ### 新增 / Added

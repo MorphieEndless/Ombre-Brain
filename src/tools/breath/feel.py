@@ -20,13 +20,18 @@ tools/breath/feel.py — feel 通道
 """
 
 from .. import _runtime as rt
+from ..plan.core import is_letter_bucket
 from ._verbatim import render_stored_bucket
 
 
 async def surface_feels(max_tokens: int) -> str:
     try:
         all_buckets = await rt.bucket_mgr.list_all(include_archive=False)
-        feels = [b for b in all_buckets if b.get("metadata", {}).get("type") == "feel"]
+        feels = [
+            b for b in all_buckets
+            if b.get("metadata", {}).get("type") == "feel"
+            and not is_letter_bucket(b)
+        ]
         feels.sort(key=lambda b: b.get("metadata", {}).get("created", ""), reverse=True)
         if not feels:
             return "没有留下过 feel。"

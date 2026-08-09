@@ -38,6 +38,7 @@ from typing import Optional
 
 from .. import _runtime as rt
 from .._common import check_content_size, check_metadata_size, stored_data_marker
+from ..plan.core import is_letter_bucket
 
 _VALID_ASPECTS = {"nature", "values", "patterns", "limits", "becoming", "uncertainty", "stance"}
 
@@ -284,8 +285,12 @@ async def _read_i(limit: int) -> str:
     i_buckets = [
         b for b in all_buckets
         if b.get("metadata", {}).get("type") == "i"
+        and not is_letter_bucket(b)
     ]
-    pending = [b for b in all_buckets if is_pending_candidate(b)]
+    pending = [
+        b for b in all_buckets
+        if is_pending_candidate(b) and not is_letter_bucket(b)
+    ]
 
     if not i_buckets and not pending:
         return "还没有任何自我认知记录，也没有正在沉淀的候选。"

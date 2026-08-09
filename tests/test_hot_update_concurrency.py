@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 import web._shared as sh
 import web.meta as meta
@@ -639,8 +639,9 @@ async def test_asgi_send_failure_releases_unstarted_stream(monkeypatch):
 
 
 class _JsonRequest:
-    def __init__(self, body):
+    def __init__(self, body, method="POST"):
         self._body = body
+        self.method = method
 
     async def json(self):
         return self._body
@@ -695,3 +696,140 @@ async def test_update_settings_endpoint_rejects_missing_field(monkeypatch):
 
     response = await handler(_JsonRequest({}))
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_archived_letter_maintenance_get_is_authenticated_dry_run(
+    monkeypatch,
+):
+    import tools._common as common
+
+    calls = []
+
+    async def fake_restore(manager, *, ids=None, apply=False):
+        calls.append((manager, ids, apply))
+        return {
+            "candidate_count": 1,
+            "candidate_ids": ["letter-1"],
+            "excluded_count": 0,
+            "exclusions": [],
+        }
+
+    manager = object()
+    monkeypatch.setattr(sh, "_require_auth", lambda _request: None)
+    monkeypatch.setattr(sh, "bucket_mgr", manager)
+    monkeypatch.setattr(common, "restore_archived_letters", fake_restore)
+    mcp = _MCP()
+    meta.register(mcp)
+
+    response = await mcp.routes[
+        ("GET", "/api/maintenance/restore-archived-letters")
+    ](_JsonRequest(None, method="GET"))
+
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    assert json.loads(response.body) == {
+        "ok": True,
+        "candidate_count": 1,
+        "candidate_ids": ["letter-1"],
+        "excluded_count": 0,
+        "exclusions": [],
+    }
+    assert calls == [(manager, None, False)]
+
+
+@pytest.mark.asyncio
+async def test_archived_letter_maintenance_post_requires_bounded_exact_ids(
+    monkeypatch,
+):
+    import tools._common as common
+
+    calls = []
+
+    async def fake_restore(manager, *, ids=None, apply=False):
+        calls.append((manager, ids, apply))
+        return {
+            "requested_count": len(ids or []),
+            "restored_count": len(ids or []),
+            "unchanged_count": 0,
+            "failed_count": 0,
+            "results": [
+                {"id": bucket_id, "reason": "restored"}
+                for bucket_id in (ids or [])
+            ],
+        }
+
+    manager = object()
+    monkeypatch.setattr(sh, "_require_auth", lambda _request: None)
+    monkeypatch.setattr(sh, "bucket_mgr", manager)
+    monkeypatch.setattr(common, "restore_archived_letters", fake_restore)
+    mcp = _MCP()
+    meta.register(mcp)
+    handler = mcp.routes[("POST", "/api/maintenance/restore-archived-letters")]
+
+    invalid_bodies = (
+        None,
+        [],
+        "letter-1",
+        {},
+        {"ids": "letter-1"},
+        {"ids": []},
+        {"ids": [""]},
+        {"ids": ["letter-1", 1]},
+        {"ids": ["same-id"] * 101},
+    )
+    for body in invalid_bodies:
+        response = await handler(_JsonRequest(body))
+        assert response.status_code == 400
+    assert calls == []
+
+    response = await handler(
+        _JsonRequest({"ids": ["letter-1", "letter-1", "letter-2"]})
+    )
+
+    assert response.status_code == 200
+    payload = json.loads(response.body)
+    assert payload["ok"] is True
+    assert payload["requested_count"] == 2
+    assert payload["results"] == [
+        {"id": "letter-1", "reason": "restored"},
+        {"id": "letter-2", "reason": "restored"},
+    ]
+    assert calls == [(manager, ["letter-1", "letter-2"], True)]
+
+
+@pytest.mark.asyncio
+async def test_archived_letter_maintenance_stops_before_helper_on_auth_or_json_error(
+    monkeypatch,
+):
+    import tools._common as common
+
+    async def forbidden_helper(*_args, **_kwargs):
+        pytest.fail("认证或 JSON 失败时不得进入维护 helper")
+
+    monkeypatch.setattr(common, "restore_archived_letters", forbidden_helper)
+    monkeypatch.setattr(sh, "bucket_mgr", object())
+
+    denied = JSONResponse({"ok": False}, status_code=401)
+    monkeypatch.setattr(sh, "_require_auth", lambda _request: denied)
+    denied_mcp = _MCP()
+    meta.register(denied_mcp)
+    denied_response = await denied_mcp.routes[
+        ("GET", "/api/maintenance/restore-archived-letters")
+    ](_JsonRequest(None, method="GET"))
+    assert denied_response.status_code == 401
+    assert denied_response.headers["Cache-Control"] == "no-store"
+
+    class BrokenJsonRequest(_JsonRequest):
+        async def json(self):
+            raise ValueError("malformed JSON")
+
+    monkeypatch.setattr(sh, "_require_auth", lambda _request: None)
+    malformed_mcp = _MCP()
+    meta.register(malformed_mcp)
+    malformed_response = await malformed_mcp.routes[
+        ("POST", "/api/maintenance/restore-archived-letters")
+    ](BrokenJsonRequest(None))
+    assert malformed_response.status_code == 400
+    assert malformed_response.headers["Cache-Control"] == "no-store"
+    assert json.loads(malformed_response.body)["reason"] == "invalid_json"

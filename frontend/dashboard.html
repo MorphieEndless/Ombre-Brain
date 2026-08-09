@@ -1832,6 +1832,112 @@
     transition: opacity 0.3s;
   }
   .self-overlay.show { opacity: 1; pointer-events: auto; }
+
+  /* 多人模式名称来自环境变量；极长名称只能省略，不能反向撑宽页头。 */
+  #owner-badge {
+    min-width: 0;
+    max-width: min(220px, 100%);
+  }
+  #owner-badge-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* PC 窄窗：页头分为信息、操作两行，避免统计与标题被挤成竖排。 */
+  @media (min-width: 769px) and (max-width: 1500px) {
+    .header {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-areas:
+        "title meta meta"
+        "search search actions";
+      align-items: center;
+      gap: 12px 16px;
+      padding: 20px 24px 16px;
+    }
+    .header h1 {
+      grid-area: title;
+      min-width: max-content;
+      white-space: nowrap;
+    }
+    .header-meta {
+      grid-area: meta;
+      min-width: 0;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+    .header .stats { white-space: nowrap; }
+    .search-bar {
+      grid-area: search;
+      width: 100%;
+      max-width: 720px;
+      min-width: 0;
+      margin-left: 0;
+    }
+    .search-bar input {
+      width: auto;
+      min-width: 0;
+      flex: 1;
+    }
+    .header-actions {
+      grid-area: actions;
+      margin-left: 0;
+      flex-shrink: 0;
+    }
+    .tabs {
+      display: grid;
+      grid-template-columns: repeat(11, minmax(0, 1fr));
+      margin: 12px 24px 8px;
+    }
+    .tab {
+      min-width: 0;
+      max-width: none;
+      padding: 9px 10px 7px;
+    }
+    .tab-spacer { display: none; }
+  }
+
+  /* 更窄的 PC 窗口将入口稳定排成 6 + 5，避免“关于”独占一行。 */
+  @media (min-width: 769px) and (max-width: 1100px) {
+    .tabs { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  }
+
+  /* 移动端覆盖必须位于主题层之后，确保紧凑尺寸不会被桌面主题反向覆盖。 */
+  @media (max-width: 768px) {
+    .header h1 {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .header .stats {
+      white-space: normal;
+      word-break: keep-all;
+    }
+    .header-actions button {
+      width: 36px !important;
+      min-width: 36px !important;
+      height: 32px !important;
+      padding: 0 !important;
+      gap: 3px !important;
+      justify-content: center;
+      font-size: 0 !important;
+    }
+    .tabs {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin: 8px 12px;
+      padding: 6px 8px;
+      gap: 5px;
+    }
+    .tab {
+      min-width: 0;
+      max-width: none;
+      padding: 7px 10px 5px;
+    }
+    .tab-spacer { display: none; }
+  }
 </style>
 </head>
 <body>
@@ -4807,7 +4913,8 @@ function _paintBuckets() {
     // iter 1.8: dont_surface = 主动遗忘（仍在磁盘） / first_of_kind = 首次出现的标签组合
     // 图标：feel→计算表情、letter→信封、pinned→可发光的钉、其余沿用原逻辑
     var iconCls = 'icon', iconHtml;
-    if (b.dont_surface)        iconHtml = '<i data-lucide="eye-off"></i>';
+    if (b.letter_locked)       iconHtml = '<i data-lucide="lock-keyhole"></i>';
+    else if (b.dont_surface)   iconHtml = '<i data-lucide="eye-off"></i>';
     else if (b.pinned)       { iconHtml = '<i data-lucide="pin"></i>'; iconCls = 'icon pin-ic'; }
     else if (b.type === 'feel')   iconHtml = feelFace(b.valence, b.arousal);
     else if (b.type === 'letter') iconHtml = '<i data-lucide="mail"></i>';
@@ -4933,6 +5040,25 @@ async function showDetail(id) {
     var meta = b.metadata || {};
     // content 是可无损写回的原始 Markdown；display_content 仅供详情展示。
     var displayContent = typeof b.display_content === 'string' ? b.display_content : (b.content || '');
+    if (b.letter_locked) {
+      panel.classList.add('letter-mode');
+      panel.classList.remove('anchor-mode');
+      var lockUntil = meta.lock_type === 'timed' && meta.unlock_date
+        ? '<div class="field"><label>解锁时间 / Unlock</label>' + esc(String(meta.unlock_date).replace('T', ' ').slice(0, 19)) + '</div>'
+        : '';
+      content.innerHTML =
+        '<h2><i data-lucide="lock-keyhole" style="width:18px;height:18px;vertical-align:-3px;"></i> ' + esc(meta.name || '一封上锁的信') + '</h2>' +
+        '<div class="detail-meta letter-lock-meta">' +
+          '<div class="field"><label>ID</label>' + esc(id) + '</div>' +
+          '<div class="field"><label>写信人 / Writer</label>' + esc(meta.writer_name || meta.author || '—') + '</div>' +
+          '<div class="field"><label>日期 / Date</label>' + esc(meta.letter_date || meta.created || '—') + '</div>' +
+          '<div class="field"><label>锁类型 / Lock</label>' + esc(meta.lock_type || '—') + '</div>' +
+          lockUntil +
+        '</div>' +
+        '<div class="detail-content">' + esc(displayContent || '这封信尚未向你开放。') + '</div>';
+      if (window.lucide) lucide.createIcons();
+      return true;
+    }
     var safeValence = safeNumber(meta.valence, 0.5, 0, 1);
     var safeArousal = safeNumber(meta.arousal, 0.3, 0, 1);
     var safeModelValence = meta.model_valence == null
@@ -8254,7 +8380,8 @@ async function loadImportResults(options) {
         </div>
         <p style="font-size:13px;margin:6px 0;white-space:pre-wrap;">${esc(b.content)}</p>
         <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;">${esc((b.tags||[]).map(t=>'#'+t).join(' '))}</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        ${b.letter_item ? '<div style="font-size:12px;color:var(--text-dim);">请在「信」页管理 / Manage in Letters</div>' : ''}
+        <div style="display:${b.letter_item ? 'none' : 'flex'};gap:8px;flex-wrap:wrap;">
           <button data-bucket-id="${escAttr(b.id)}" onclick="openImportedBucketEditor(this.dataset.bucketId)" class="icon-btn" title="编辑完整记忆 / Edit full memory"><svg class="icon" aria-hidden="true"><use href="#i-edit"></use></svg> 编辑</button>
           <button data-bucket-id="${escAttr(b.id)}" onclick="reviewAction(this.dataset.bucketId,'pin')" class="icon-btn" title="固定为永久记忆"><i data-lucide="pin"></i> 固定</button>
           <button data-bucket-id="${escAttr(b.id)}" onclick="reviewAction(this.dataset.bucketId,'important')" class="icon-btn" title="标为重要"><i data-lucide="star"></i> 重要</button>

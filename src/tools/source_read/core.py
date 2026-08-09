@@ -11,6 +11,7 @@ from utils import count_tokens_approx, normalize_memory_title
 
 from .. import _runtime as rt
 from .._common import stored_data_marker
+from ..plan.core import is_letter_bucket, letter_lock_state
 
 
 _DEFAULT_MAX_TOKENS = 6000
@@ -143,6 +144,8 @@ async def dispatch(
     bucket = await getter(bucket_id)
     if not bucket:
         return f"未找到桶 {bucket_id}。"
+    if is_letter_bucket(bucket) and letter_lock_state(bucket, "ai")["locked"]:
+        return "这封信尚未向你开放，拒绝读取其原文证据。"
     metadata = bucket.get("metadata") or {}
     actual_title = _normalized_title(metadata.get("title"))
     if not actual_title:

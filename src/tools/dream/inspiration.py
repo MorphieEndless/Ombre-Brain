@@ -14,6 +14,7 @@ import re
 from typing import Any, Mapping
 
 from ombrebrain.policy.surfacing import SurfacePolicyVM
+from ..plan.core import is_letter_bucket
 
 
 MAX_INSPIRATION_CANDIDATES = 3
@@ -163,6 +164,8 @@ def _domains(metadata: Mapping[str, Any]) -> frozenset[str]:
 
 def _prepare_bucket(bucket: object) -> _PreparedBucket | None:
     if not isinstance(bucket, Mapping):
+        return None
+    if is_letter_bucket(bucket):
         return None
     metadata = bucket.get("metadata")
     if not isinstance(metadata, Mapping):

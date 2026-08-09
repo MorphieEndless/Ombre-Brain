@@ -63,6 +63,19 @@ except ImportError:  # pragma: no cover
     )
 
 try:
+    from tools.plan.core import (  # type: ignore
+        is_letter_bucket,
+        letter_lock_revision,
+        letter_lock_state,
+    )
+except ImportError:  # pragma: no cover
+    from ..tools.plan.core import (  # type: ignore
+        is_letter_bucket,
+        letter_lock_revision,
+        letter_lock_state,
+    )
+
+try:
     from import_memory import preview_import  # type: ignore
 except ImportError:  # pragma: no cover
     from ..import_memory import preview_import  # type: ignore
@@ -675,16 +688,32 @@ def register(mcp) -> None:
             page = imported_buckets[offset:offset + limit]
             results = []
             for b in page:
+                metadata = b["metadata"]
+                logical_letter = is_letter_bucket(b)
+                lock_state = letter_lock_state(b, "human")
+                letter_locked = bool(lock_state["locked"])
                 results.append({
                     "id": b["id"],
-                    "name": b["metadata"].get("name", ""),
-                    "content": b["content"][:300],
-                    "type": b["metadata"].get("type", ""),
-                    "domain": b["metadata"].get("domain", []),
-                    "tags": b["metadata"].get("tags", []),
-                    "importance": b["metadata"].get("importance", 5),
-                    "created": b["metadata"].get("created", ""),
+                    "name": (
+                        "一封上锁的信"
+                        if letter_locked else metadata.get("name", "")
+                    ),
+                    "content": (
+                        "这封信尚未向你开放。"
+                        if letter_locked else b["content"][:300]
+                    ),
+                    "type": metadata.get("type", ""),
+                    "domain": (
+                        ["letter"] if letter_locked else metadata.get("domain", [])
+                    ),
+                    "tags": (
+                        ["__letter__"] if letter_locked else metadata.get("tags", [])
+                    ),
+                    "importance": metadata.get("importance", 5),
+                    "created": metadata.get("created", ""),
                     "imported": True,
+                    "letter_item": logical_letter,
+                    "letter_locked": letter_locked,
                 })
             next_offset = offset + len(results)
             has_more = next_offset < len(imported_buckets)
@@ -743,6 +772,9 @@ def register(mcp) -> None:
                     async with _quota_turn("high_importance"):
                         bucket = await sh.bucket_mgr.get(bid)
                         if not bucket:
+                            errors += 1
+                            continue
+                        if is_letter_bucket(bucket):
                             errors += 1
                             continue
                         metadata = bucket.get("metadata", {})
@@ -813,6 +845,9 @@ def register(mcp) -> None:
                         if not bucket:
                             errors += 1
                             continue
+                        if is_letter_bucket(bucket):
+                            errors += 1
+                            continue
                         metadata = bucket.get("metadata", {})
                         if _is_terminal_memory_metadata(metadata):
                             errors += 1
@@ -858,6 +893,9 @@ def register(mcp) -> None:
                         if not bucket:
                             errors += 1
                             continue
+                        if is_letter_bucket(bucket):
+                            errors += 1
+                            continue
                         metadata = bucket.get("metadata", {})
                         if not isinstance(metadata, dict):
                             metadata = {}
@@ -898,6 +936,10 @@ def register(mcp) -> None:
                             errors += 1
                             continue
                 elif action == "delete":
+                    bucket = await sh.bucket_mgr.get(bid)
+                    if not bucket or is_letter_bucket(bucket):
+                        errors += 1
+                        continue
                     ok = await sh.bucket_mgr.delete(bid)
                     if not ok:
                         errors += 1
@@ -930,6 +972,20 @@ def register(mcp) -> None:
         bucket = await sh.bucket_mgr.get(bucket_id)
         if not bucket:
             return JSONResponse({"error": "bucket not found"}, status_code=404)
+        logical_letter = is_letter_bucket(bucket)
+        lock_precondition = (
+            {"expected_lock_state": letter_lock_revision(bucket)}
+            if logical_letter else {}
+        )
+        if letter_lock_state(bucket, "human")["locked"]:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": "locked letter cannot be edited from the bucket API",
+                    "updated": [],
+                },
+                status_code=403,
+            )
         try:
             body = await sh._read_json_object(request)
         except Exception:
@@ -1156,6 +1212,19 @@ def register(mcp) -> None:
                 requested_pinned = parse_bool(body["pinned"])
             except ValueError as e:
                 return reject(str(e))
+
+        if logical_letter and requested_type != current_type:
+            return reject(
+                "letter type cannot be changed from the bucket API",
+                status_code=409,
+                field="type",
+            )
+        if logical_letter and requested_pinned != current_pinned:
+            return reject(
+                "letter pin state cannot be changed from the bucket API",
+                status_code=409,
+                field="pinned",
+            )
 
         unpinning_now = current_pinned and not requested_pinned and not protected
         if unpinning_now and requested_importance is None:
@@ -1390,9 +1459,24 @@ def register(mcp) -> None:
                 ):
                     expected_values["type"] = "dynamic"
 
+                latest_bucket = await sh.bucket_mgr.get(bucket_id)
+                if not latest_bucket:
+                    return reject(
+                        "bucket changed concurrently; reload and retry",
+                        status_code=409,
+                        conflict="concurrent_change",
+                    )
+                if letter_lock_state(latest_bucket, "human")["locked"]:
+                    return reject(
+                        "letter was locked concurrently",
+                        status_code=409,
+                        conflict="concurrent_lock",
+                    )
+
                 ok = await sh.bucket_mgr.update(
                     bucket_id,
                     event_actor="human",
+                    **lock_precondition,
                     **updates,
                 )
                 if not ok:

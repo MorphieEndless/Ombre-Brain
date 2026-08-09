@@ -18,7 +18,7 @@ tools/grow/core.py — grow 长内容主路径（digest + merge）
 不做什么（边界）：
 - 不写 feel：grow 是事件归档，不是反思
 - 不做 pinned 标记：grow 拆出来的事件桶都是 dynamic
-- 不接受 why_remembered：grow 是整理，拆出来的每条桶就是事件本身，是 why 本身
+- items 可透传人工 why_remembered；digest 自动理由只在后续合并时补空值
 
 对外暴露：grow_core(content) → str
 ========================================
@@ -89,6 +89,7 @@ async def grow_core(content: str) -> str:
                 arousal=item.get("arousal") or 0.3,
                 name=item.get("name", ""),
                 title=normalize_memory_title(item.get("name", "")),
+                merge_why_remembered=item.get("why_remembered") or "",
                 source_tool="grow",
                 grow_batch_id=batch_id,
             )
@@ -139,6 +140,8 @@ async def grow_items(items: list, source_content: str = "") -> str:
             s = it.get("content", "").strip()
             item = dict(it)
             item["content"] = s
+            if isinstance(item.get("why_remembered"), str):
+                item["why_remembered"] = item["why_remembered"].strip()
         else:
             s = ""
         if s:
@@ -242,6 +245,7 @@ async def grow_items(items: list, source_content: str = "") -> str:
 
             inferred_title = normalize_memory_title(meta.get("suggested_name", ""))
             final_title = explicit_title or inferred_title
+            why_remembered = str(item.get("why_remembered") or "").strip()
             result_name, is_merged, embed_warn = await merge_or_create(
                 content=content_str,
                 tags=explicit_tags if explicit_tags is not None else (meta.get("tags") or []),
@@ -251,6 +255,8 @@ async def grow_items(items: list, source_content: str = "") -> str:
                 arousal=arousal,
                 name=final_title,
                 title=final_title,
+                why_remembered=why_remembered,
+                merge_why_remembered=why_remembered,
                 source_refs=source_refs,
                 source_tool="grow",
                 grow_batch_id=batch_id,

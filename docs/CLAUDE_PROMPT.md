@@ -73,7 +73,9 @@
 
 短内容（< 30 字符）传给 `grow` 会自动走 `hold` 单条快速路径，不会强行拆。
 
-**已经拆好了？用 `grow(items=[...])` 逐字入库。** 如果我（有完整对话上下文的你）已经把长文拆成几条最终正文，可以传字符串列表，或传对象列表 `[{"title":"最终标题","content":"逐字正文","tags":["短标签"],"importance":7,"source_ranges":[[1,20]]}, ...]`。每条正文**一字不动**存入；人工给出的标题、标签、重要度等字段优先，模型只补没填的部分。若同时传 `content=共享原文`，它不会被忽略，而是作为整批不可变原文证据保存一次；对象条目的 `source_ranges` 把各事件连回自己的 1-based 闭区间。什么时候用：当我对拆分和表述有把握、且不希望正文被改写时（例如照抄她/他的原话）。
+**已经拆好了？用 `grow(items=[...])` 逐字入库。** 如果我（有完整对话上下文的你）已经把长文拆成几条最终正文，可以传字符串列表，或传对象列表 `[{"title":"最终标题","content":"逐字正文","tags":["短标签"],"importance":7,"why_remembered":"我为什么要留下这条","source_ranges":[[1,20]]}, ...]`。每条正文**一字不动**存入；人工给出的 `why_remembered` 会在去掉首尾空白后保存，模型只补标题、标签、重要度等缺失的分类字段，不会自动猜 `why_remembered`。若同时传 `content=共享原文`，它不会被忽略，而是作为整批不可变原文证据保存一次；对象条目的 `source_ranges` 把各事件连回自己的 1-based 闭区间。什么时候用：当我对拆分和表述有把握、且不希望正文被改写时（例如照抄她/他的原话）。
+
+`grow(content=...)` 的长内容由 digest 决定拆出哪些桶，短内容则由 grow 专用打标产生候选理由；这两种自动生成的「为什么记得」在首次新建时都不会盲目写入。后续 grow 再次命中并确认是同一具体事件时，只会给仍为空的旧桶补上理由，不会覆盖已有句子。
 
 #### `source_read(bucket_id, expected_title, ...)` — 我核对一桶背后的原话
 
@@ -93,13 +95,16 @@
 | 这件事我已经放下了 | `trace(id, resolved=1)` — 排序大幅降权，关键词命中仍可达 |
 | 这件事其实没结案 | `trace(id, resolved=0)` |
 | 我想钉它为永久核心 | `trace(id, pinned=1)` — 自动锁 importance=10，移到 permanent/ |
-| 取消钉选 | `trace(id, pinned=0)` |
+| 取消钉选 | `trace(id, pinned=0, importance=1..10)` — 必须同时重新判断普通重要度 |
+| 重要但不需要每天浮现 | `trace(id, protected=1)` — 防衰减但不进入无参 breath、dream 或会话启动浮现；与 pinned/anchor 互斥 |
+| 取消静默保护 | `trace(id, protected=0, importance=1..10)` — 必须同时重新判断普通重要度 |
 | 我已经消化完，不想让它被动浮现 | `trace(id, digested=1)` — 从无参 breath、被动联想和 dream 隐藏；显式 query 真命中及 importance/catalog 审计仍可找回 |
 | 我想让它彻底安静下去 | `trace(id, dont_surface=1)` — 不再出现在无参 breath，关键词搜还能找到 |
 | 我对当时的判断改主意了 | `trace(id, valence=0.7, arousal=0.4)` — 改情感坐标 |
 | 局部内容写错了 | `trace(id, old_str="逐字且唯一的原文片段", new_str="修正片段")` — 原子局部替换并重建 embedding；`new_str=""` 可删除片段 |
 | 整段正文都要重写 | `trace(id, content="完整新版本")` — 完整替换正文并重建 embedding，不能与 `old_str/new_str` 同传 |
 | 放入删除档案 | `trace(id, delete=True)` — 从日常召回中隐藏并清理 embedding；Markdown 仍保留在 `archive/` |
+| 从档案重新回忆 | `trace(id, restore=True)` — 必须单独调用；恢复会刷新活跃时间，历史 pinned 不会被静默重新钉选 |
 | 创建可清理的虚假测试桶 | `hold(content="...", test_data=True)` — 创建时写入不可后补的测试来源标记，且不会合并进真实记忆 |
 | 永久删除虚假测试桶 | `trace(id, hard_delete=True, delete_reason="...")` — 仅限创建时已标记 `test_data=True` 的桶；真实记忆一律拒绝 |
 | 改 plan 状态 | `trace(plan_id, status="resolved")` — 仅对 plan 桶 |
@@ -108,7 +113,7 @@
 
 局部替换前先读取当前原文（普通桶可按完整 ID 使用 `breath_search`；预算不足时用 `breath_advanced(..., max_tokens=20000)`；其他类型可用对应入口或 Dashboard），再复制连续片段作为 `old_str`。匹配是逐字且按起始位置计数的，只有正文中恰好出现一次才会写入；零次命中、包含重叠在内的多次命中、或替换后正文为空都会拒绝且不改桶。替换本身始终针对存储中的完整正文，长桶和 pinned 桶也不会绕过同桶并发锁。
 
-**`anchor` 字段不在 trace 里**——切换 anchor 必须走专门的 `anchor()` / `release()`，受 24 上限保护。
+**`anchor` 字段不在 trace 里**——切换 anchor 必须走专门的 `anchor()` / `release()`，受 24 上限保护。`protected` 使用独立配额（默认 20），它与 pinned、anchor 都不能并存；显式 query/catalog 仍可找到受保护记忆。
 
 #### `dream(window_hours=48, inspiration=False)` — 我做梦消化
 
@@ -221,6 +226,7 @@ hook、后台任务或低检索命中自动开启。开启后最多追加三个�
 | 一个待办、承诺、未闭环的事 | `plan` |
 | 一封要永久留下的信 | `letter_write` |
 | 我们之间不能动的核心准则 | `hold(pinned=True)` |
+| 重要但不需要每天主动重见的记忆 | 先存入普通桶，再 `trace(id, protected=1)` |
 | 关于我自己是什么的认识（规律、立场、本质、局限） | `I` |
 | 已经存了但事后想定为坐标系 | 先 `hold`，再 `anchor(id)` |
 

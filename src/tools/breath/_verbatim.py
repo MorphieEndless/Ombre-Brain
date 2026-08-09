@@ -53,8 +53,10 @@ def render_stored_bucket(
     boundary = stored_data_marker(
         framed_payload,
         provenance=f"breath:{bucket.get('id', '')}",
+        compact=True,
     )
-    rendered = f"{metadata_header} {boundary}{miss_block}\n{content}"
+    # 标记必须位于被 n/h 校验的连续正文之前，宿主才能按字符数精确切片。
+    rendered = f"{boundary}\n{framed_payload}"
     if footprint:
         rendered += f"\n{footprint}"
     return rendered, count_tokens_approx(rendered)

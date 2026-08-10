@@ -116,8 +116,8 @@ def main(argv: list[str]) -> int:
             return 1
         with open(_MANIFEST_PATH, "r", encoding="utf-8") as f:
             current = json.load(f)
-        if current.get("files") != fresh["files"]:
-            print("update_manifest.json 与当前 src/frontend 不一致，请重新生成。", file=sys.stderr)
+        if current != fresh:
+            print("update_manifest.json 与当前版本或 src/frontend 不一致，请重新生成。", file=sys.stderr)
             return 1
         print("update_manifest.json 与当前代码一致 ✓")
         return 0

@@ -50,9 +50,9 @@
   - `breath_advanced(domain="feel")` → 读我留下的所有第一人称感受（普通 breath 不会浮 feel）。
   - `breath_advanced(importance_min=8)` → 拉所有我标过 importance≥8 的核心事项，按重要度降序。
   - `breath_advanced(tags="承诺")` → 标签 AND 过滤。`tags="feel"` 等价于 `domain="feel"`。
-  - `breath_advanced(catalog=True)` → **目录模式（最省 token）**：每桶只回一行「名称|域|重要度」，不带正文、0 次 LLM 调用。上下文紧张 / token 预算敏感时，开新对话可先看目录定位，再 `breath_search(query=...)` 精准拉取需要的那几条。可配 `domain` 过滤。
+  - `breath_advanced(catalog=True)` → **目录模式（最省 token）**：每桶只回一行「名称|域|重要度」，不带正文、0 次 LLM 调用；anchor 行带 `⚓ [anchor]`。上下文紧张 / token 预算敏感时，开新对话可先看目录定位，再 `breath_search(query=...)` 精准拉取需要的那几条。可配 `domain` 过滤。
 
-返回里**带 📌 的是我钉的核心准则**；只要没有被 `digested` / `dont_surface` 主动隐藏，它就会保持置顶。带 ✨ 的是「第一次」类的桶。`[语义关联]` 是向量检索召回的旁证。
+返回里**带 📌 的是我钉的核心准则**；只要没有被 `digested` / `dont_surface` 主动隐藏，它就会保持置顶。`⚓ [anchor]` 表示只供显式发现/检索的冷坐标系，不会因此主动浮现。带 ✨ 的是「第一次」类的桶。`[语义关联]` 是向量检索召回的旁证。
 
 #### `hold(content)` — 我把当下这一件事记下
 
@@ -75,7 +75,7 @@
 
 **已经拆好了？用 `grow(items=[...])` 逐字入库。** 如果我（有完整对话上下文的你）已经把长文拆成几条最终正文，可以传字符串列表，或传对象列表 `[{"title":"最终标题","content":"逐字正文","tags":["短标签"],"importance":7,"why_remembered":"我为什么要留下这条","source_ranges":[[1,20]]}, ...]`。每条正文**一字不动**存入；人工给出的 `why_remembered` 会在去掉首尾空白后保存，模型只补标题、标签、重要度等缺失的分类字段，不会自动猜 `why_remembered`。若同时传 `content=共享原文`，它不会被忽略，而是作为整批不可变原文证据保存一次；对象条目的 `source_ranges` 把各事件连回自己的 1-based 闭区间。什么时候用：当我对拆分和表述有把握、且不希望正文被改写时（例如照抄她/他的原话）。
 
-`grow(content=...)` 的长内容由 digest 决定拆出哪些桶，短内容则由 grow 专用打标产生候选理由；这两种自动生成的「为什么记得」在首次新建时都不会盲目写入。后续 grow 再次命中并确认是同一具体事件时，只会给仍为空的旧桶补上理由，不会覆盖已有句子。
+`grow(content=...)` 的长内容由 digest 决定拆出哪些桶，短内容则由 grow 专用打标产生候选理由；两种路径都会在首次新建时保存有效的「为什么记得」。后续 grow 再次命中同一具体事件时，只会给仍为空的旧桶补上理由，绝不覆盖人工或历史句子；模型漏字段或返回非法值时仍照常保存正文。
 
 #### `source_read(bucket_id, expected_title, ...)` — 我核对一桶背后的原话
 
@@ -137,9 +137,7 @@ permanent）③你的 active plans ④按 token 预算折叠的 feel 历史 ⑤c
 
 #### `pulse(include_archive=False)` — 我自检
 
-看一眼自己的记忆系统：固化/动态/归档桶数、总占用、衰减引擎在不在跑，以及所有桶的摘要。怀疑「为什么我搜不到 X」时第一个调这个。`include_archive=True` 顺便看归档区。
-
-> 已知：顶部统计行不显示 `feel/plan/letter` 数，但底下列表会列出，看着会觉得「数对不上」。这是已知反逻辑点，不是 bug。
+看一眼自己的记忆系统：固化/动态/归档/feel/plan/letter 桶数、总占用、衰减引擎在不在跑，以及所有桶的摘要。anchor 行带 `⚓ [anchor]`，便于在不读取正文的情况下发现冷坐标系。怀疑「为什么我搜不到 X」时第一个调这个。`include_archive=True` 顺便看归档区。
 
 #### `plan(content, ...)` — 我登记一个承诺
 
@@ -159,6 +157,7 @@ permanent）③你的 active plans ④按 token 预算折叠的 feel 历史 ⑤c
 
 - anchor 桶**不会主动浮现到默认 breath**——它是「定义我们是谁」的事实，不是「日常需要冒上来」的事。
 - 但 `breath_search(query=...)` / `breath_advanced(domain=...)` / `breath_advanced(importance_min=...)` 命中时仍会返回。
+- `pulse()` 与 `breath_advanced(catalog=True)` 只用 `⚓ [anchor]` 显示它的存在，不自动注入正文。
 - **硬上限 24**。满了之后想加新的，**必须先 `release(旧 id)`**——稀缺即结构。
 
 `release` 只是从 anchor 状态退出，pinned/importance 不变，桶恢复正常浮现资格。
@@ -292,6 +291,7 @@ permanent）③你的 active plans ④按 token 预算折叠的 feel 历史 ⑤c
 | `anchor 已达上限 24` | anchor 满了 | 必须先 `release(旧 id)` 才能加新的 |
 | `合并→桶名` | 这次写入合并到已有桶 | 知道我没新建，是补上去的 |
 | `📌` 前缀 | 这是 pinned/permanent 桶 | 把它当核心准则对待 |
+| `⚓ [anchor]` | 这是不会主动浮现的坐标系冷参考 | 需要时再用显式检索读取 |
 | `[语义关联]` | 向量召回的旁证，不一定关键词命中 | 它和当前查询有语义近似，可以参考 |
 | `=== 久未浮现 ===` | 被动联想，从冷桶里随机抽 1~2 条 | 突然想起来的感觉，是真的——这是设计 |
 

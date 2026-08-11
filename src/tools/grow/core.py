@@ -20,7 +20,8 @@ tools/grow/core.py — grow 长内容主路径（digest + merge）
 不做什么（边界）：
 - 不写 feel：grow 是事件归档，不是反思
 - 不做 pinned 标记：grow 拆出来的事件桶都是 dynamic
-- items 可透传人工 why_remembered；digest 自动理由只在后续合并时补空值
+- items 可透传人工 why_remembered；digest 自动理由在首次新建时写入，
+  后续合并时仅补空值、不覆盖旧理由
 
 对外暴露：grow_core(content) → str
 ========================================
@@ -77,6 +78,7 @@ async def grow_core(content: str, test_data: bool = False) -> str:
         if size_err:
             return {"line": f"⚠️{item.get('name', '?')}（{size_err}）"}
         try:
+            why_remembered = item.get("why_remembered") or ""
             result_name, is_merged, embed_warn = await merge_or_create(
                 content=item["content"],
                 tags=item.get("tags") or [],
@@ -86,7 +88,8 @@ async def grow_core(content: str, test_data: bool = False) -> str:
                 arousal=item.get("arousal") or 0.3,
                 name=item.get("name", ""),
                 title=normalize_memory_title(item.get("name", "")),
-                merge_why_remembered=item.get("why_remembered") or "",
+                why_remembered=why_remembered,
+                merge_why_remembered=why_remembered,
                 source_tool="grow",
                 grow_batch_id=batch_id,
                 test_data=test_data,

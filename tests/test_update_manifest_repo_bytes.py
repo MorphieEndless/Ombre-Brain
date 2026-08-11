@@ -48,9 +48,12 @@ def repo(tmp_path: Path) -> Path:
     _git(tmp_path, "init", "-q")
     _git(tmp_path, "config", "user.email", "test@example.com")
     _git(tmp_path, "config", "user.name", "test")
+    _git(tmp_path, "config", "core.autocrlf", "false")
     (tmp_path / "src").mkdir()
     (tmp_path / "frontend").mkdir()
     (tmp_path / "VERSION").write_bytes(b"9.9.9\n")
+    _git(tmp_path, "add", "VERSION")
+    _git(tmp_path, "commit", "-q", "-m", "version")
     return tmp_path
 
 
@@ -63,6 +66,8 @@ def test_manifest_records_lf_bytes_when_worktree_is_crlf(repo: Path):
     module = _load_module()
     target = repo / "src" / "app.py"
 
+    # 显式配置转换规则，避免测试结果依赖执行机的全局 Git 配置。
+    _git(repo, "config", "core.autocrlf", "true")
     target.write_bytes(b"line one\nline two\nline three\n")
     _git(repo, "add", "src/app.py")
     _git(repo, "commit", "-q", "-m", "lf")
@@ -110,6 +115,25 @@ def test_manifest_refuses_files_missing_from_the_repository(repo: Path):
     with pytest.raises(module.ManifestSourceError) as excinfo:
         module.build_manifest(str(repo))
     assert "src/stray.py" in str(excinfo.value)
+
+
+def test_manifest_refuses_unstaged_version_bump(repo: Path):
+    """版本已改但未 add 时必须中止，不能把工作区版本与旧 index 哈希混在一起。"""
+    module = _load_module()
+    src_version = repo / "src" / "VERSION"
+
+    src_version.write_bytes(b"9.9.9\n")
+    _git(repo, "add", "VERSION", "src/VERSION")
+    (repo / "VERSION").write_bytes(b"10.0.0\n")
+    src_version.write_bytes(b"10.0.0\n")
+
+    with pytest.raises(module.ManifestSourceError) as excinfo:
+        module.build_manifest(str(repo))
+
+    message = str(excinfo.value)
+    assert "VERSION" in message
+    assert "src/VERSION" in message
+    assert "git add" in message
 
 
 def test_shipped_manifest_matches_repository_bytes():

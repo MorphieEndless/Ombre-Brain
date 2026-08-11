@@ -169,7 +169,7 @@ async def test_dict_item_stores_explicit_why_remembered_on_first_create(grow_rt)
 
 
 @pytest.mark.asyncio
-async def test_digest_reason_is_only_filled_on_second_matching_grow(grow_rt):
+async def test_digest_reason_is_stored_on_first_create_and_preserved_on_merge(grow_rt):
     bucket_mgr, _stub = grow_rt
 
     class DigestWhyDehydrator(StubDehydrator):
@@ -182,7 +182,7 @@ async def test_digest_reason_is_only_filled_on_second_matching_grow(grow_rt):
                 "arousal": 0.3,
                 "tags": ["同一事件"],
                 "importance": 6,
-                "why_remembered": "这个理由只能在第二次合并时补入。",
+                "why_remembered": "这个理由应该在首次新建时写入。",
             }]
 
     rt.dehydrator = DigestWhyDehydrator()
@@ -191,35 +191,83 @@ async def test_digest_reason_is_only_filled_on_second_matching_grow(grow_rt):
     first = await grow_core(long_source)
     first_bucket = (await bucket_mgr.list_all(include_archive=False))[0]
     assert "新1合0" in first
-    assert "why_remembered" not in first_bucket["metadata"]
+    assert first_bucket["metadata"]["why_remembered"] == (
+        "这个理由应该在首次新建时写入。"
+    )
 
     second = await grow_core(long_source)
     buckets = await bucket_mgr.list_all(include_archive=False)
     assert "新0合1" in second
     assert len(buckets) == 1
     assert buckets[0]["metadata"]["why_remembered"] == (
-        "这个理由只能在第二次合并时补入。"
+        "这个理由应该在首次新建时写入。"
     )
 
 
 @pytest.mark.asyncio
-async def test_shortpath_reason_is_only_filled_on_second_matching_grow(grow_rt):
-    bucket_mgr, stub = grow_rt
+async def test_shortpath_reason_is_stored_on_first_create_and_preserved_on_merge(grow_rt):
+    bucket_mgr, _stub = grow_rt
     content = "短内容二次命中同一事件"
+
+    class ChangingWhyDehydrator(StubDehydrator):
+        async def analyze(self, content, *, include_why=False):
+            result = await super().analyze(content, include_why=include_why)
+            result["why_remembered"] = (
+                "首次新建时的自动理由。"
+                if self.analyze_calls == 1
+                else "后来的候选理由不应覆盖旧值。"
+            )
+            return result
+
+    dehydrator = ChangingWhyDehydrator()
+    rt.dehydrator = dehydrator
 
     first = await dispatch(content=content)
     first_bucket = (await bucket_mgr.list_all(include_archive=False))[0]
     assert "新建" in first
-    assert "why_remembered" not in first_bucket["metadata"]
+    assert first_bucket["metadata"]["why_remembered"] == (
+        "首次新建时的自动理由。"
+    )
 
     second = await dispatch(content=content)
     buckets = await bucket_mgr.list_all(include_archive=False)
     assert "合并" in second
     assert len(buckets) == 1
     assert buckets[0]["metadata"]["why_remembered"] == (
-        "这条短记忆会影响我后续的判断。"
+        "首次新建时的自动理由。"
     )
-    assert stub.analyze_calls == 2
+    assert dehydrator.analyze_calls == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "candidate, expected",
+    [
+        (None, None),
+        (["不是字符串"], None),
+        ("  " + "值" * 501 + "  ", "值" * 500),
+    ],
+)
+async def test_shortpath_reason_keeps_invalid_and_length_boundaries(
+    grow_rt, candidate, expected
+):
+    bucket_mgr, _stub = grow_rt
+
+    class BoundaryWhyDehydrator(StubDehydrator):
+        async def analyze(self, content, *, include_why=False):
+            assert include_why is True
+            result = await super().analyze(content, include_why=False)
+            result["why_remembered"] = candidate
+            return result
+
+    rt.dehydrator = BoundaryWhyDehydrator()
+    await dispatch(content="短理由边界")
+
+    bucket = (await bucket_mgr.list_all(include_archive=False))[0]
+    if expected is None:
+        assert "why_remembered" not in bucket["metadata"]
+    else:
+        assert bucket["metadata"]["why_remembered"] == expected
 
 
 @pytest.mark.asyncio

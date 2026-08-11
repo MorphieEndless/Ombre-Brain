@@ -48,6 +48,37 @@ class ManifestSourceError(RuntimeError):
     """清单无法按仓库内容生成时抛出——宁可不出清单，也不出错的清单。"""
 
 
+def _reject_unstaged_inputs(repo_root: str) -> None:
+    """拒绝会让工作区与待发布 index 分叉的未暂存改动。"""
+
+    proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            repo_root,
+            "diff-files",
+            "--name-only",
+            "--",
+            "VERSION",
+            *_TRACKED_DIRS,
+        ],
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        detail = proc.stderr.decode("utf-8", errors="replace").strip()
+        raise ManifestSourceError(f"无法检查 Git 工作区状态：{detail or 'git diff-files 失败'}")
+
+    changed = proc.stdout.decode("utf-8", errors="replace").splitlines()
+    if changed:
+        preview = "、".join(changed[:5])
+        if len(changed) > 5:
+            preview += f" 等 {len(changed)} 个文件"
+        raise ManifestSourceError(
+            f"存在未暂存的发布文件改动：{preview}。"
+            "请先 git add VERSION src frontend，再生成更新清单。"
+        )
+
+
 def repo_bytes(repo_root: str, rel: str) -> bytes:
     """读这个文件在 Git 仓库里实际存储的字节（优先 index，回退 HEAD）。
 
@@ -78,11 +109,11 @@ def repo_bytes(repo_root: str, rel: str) -> bytes:
 
 
 def build_manifest(repo_root: str = _REPO_ROOT) -> dict:
-    version = "unknown"
-    vpath = os.path.join(repo_root, "VERSION")
-    if os.path.isfile(vpath):
-        with open(vpath, "r", encoding="utf-8") as f:
-            version = f.read().strip() or "unknown"
+    _reject_unstaged_inputs(repo_root)
+    try:
+        version = repo_bytes(repo_root, "VERSION").decode("utf-8").strip() or "unknown"
+    except UnicodeDecodeError as exc:
+        raise ManifestSourceError("VERSION 不是有效的 UTF-8 文本") from exc
     entries = []
     for rel, _full in sorted(_iter_files(repo_root)):
         data = repo_bytes(repo_root, rel)

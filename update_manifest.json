@@ -32,7 +32,7 @@
     },
     {
       "path": "src/VERSION",
-      "sha256": "8eec80aaadd8d27ed7c2c7ec6874fb199df44092a8924a28254cb3acf177f610",
+      "sha256": "42c943dd85e10f1a0717dc89583e767a7c50865baece9a16360f028c4b78e436",
       "size": 7
     },
     {
@@ -747,8 +747,8 @@
     },
     {
       "path": "src/server.py",
-      "sha256": "b703f40c0936a84d0fa8a51c344a310a7c6edfa95d9dc652a0d75686a5c0f1cf",
-      "size": 63222
+      "sha256": "6e304b853a8f4f1046fd88270ac1cb377576025c7eb1c22c64adcb9f86fd6189",
+      "size": 63329
     },
     {
       "path": "src/server_app.py",
@@ -777,8 +777,8 @@
     },
     {
       "path": "src/tools/anchor/core.py",
-      "sha256": "ce443bb31f95591a61bf04a0ff69bfd2cba5ca58a4a0ab3ccb7a26d7c0ee9ae1",
-      "size": 9071
+      "sha256": "de26d5d6714b91c221524a5872e8e4c97ceb560e425770e44292249b8b265876",
+      "size": 9248
     },
     {
       "path": "src/tools/breath/__init__.py",
@@ -792,8 +792,8 @@
     },
     {
       "path": "src/tools/breath/catalog.py",
-      "sha256": "f7bbfec54474038c92601a2936548bf47deec659dd73f333064620668ec6f541",
-      "size": 4815
+      "sha256": "8d47f07409ec80aff70abe4291fdda7e3a171b0b196dd1c5cd3f51aae38cecb6",
+      "size": 4971
     },
     {
       "path": "src/tools/breath/feel.py",
@@ -842,13 +842,13 @@
     },
     {
       "path": "src/tools/grow/core.py",
-      "sha256": "39408d3c3d4f00539555f9ba1584ba192305a3dfea40e8d8687f322f51c8da1a",
-      "size": 14375
+      "sha256": "4e899dc7669d67150a175875fb2f7b0d7885dc856f060d2fc07bdbb081a8650b",
+      "size": 14501
     },
     {
       "path": "src/tools/grow/shortpath.py",
-      "sha256": "b5b7551008328c0c851ea52aa4a3ee6c05c553612f043a001e914ed539858bf3",
-      "size": 3192
+      "sha256": "4f0df1a7e447c808157b74f55700a11e8c8410fe2335c052c2606c604c68ec49",
+      "size": 3391
     },
     {
       "path": "src/tools/hold/__init__.py",
@@ -1027,5 +1027,5 @@
     }
   ],
   "rollout_strategy": "single-node",
-  "version": "2.17.1"
+  "version": "2.17.2"
 }

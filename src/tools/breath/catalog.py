@@ -89,8 +89,13 @@ async def surface_catalog(
                 pin_mark = "🛡️ [受保护记忆] "
             elif parse_bool(meta.get("pinned"), default=False):
                 pin_mark = "📌"
+        anchor_mark = (
+            "⚓ [anchor] "
+            if parse_bool(meta.get("anchor"), default=False)
+            else ""
+        )
         line = (
-            f"{pin_mark}{name} | {','.join(domains) or '未分类'} | {imp} "
+            f"{pin_mark}{anchor_mark}{name} | {','.join(domains) or '未分类'} | {imp} "
             f"| {_footprint(b, meta)}"
         )
         btype = meta.get("type")

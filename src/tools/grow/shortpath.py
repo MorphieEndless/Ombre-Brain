@@ -46,6 +46,12 @@ async def grow_shortpath(content: str, test_data: bool = False) -> str:
             "请检查 OMBRE_COMPRESS_API_KEY。"
         ) from e
     importance = analysis.get("importance", 5) if isinstance(analysis.get("importance"), int) else 5
+    raw_why_remembered = analysis.get("why_remembered")
+    why_remembered = (
+        raw_why_remembered.strip()
+        if isinstance(raw_why_remembered, str)
+        else ""
+    )
     # iter 2.0：短路径也是一次 grow 调用 → 仍生成 batch_id，便于 dashboard 聚合，
     # 即使 batch 里只有一条记录也保留字段，schema 一致。
     batch_id = f"g_{uuid.uuid4().hex[:12]}"
@@ -58,7 +64,8 @@ async def grow_shortpath(content: str, test_data: bool = False) -> str:
         arousal=analysis.get("arousal", 0.3),
         name=analysis.get("suggested_name", ""),
         raw_merge=True,
-        merge_why_remembered=analysis.get("why_remembered") or "",
+        why_remembered=why_remembered,
+        merge_why_remembered=why_remembered,
         source_tool="grow",
         grow_batch_id=batch_id,
         test_data=test_data,

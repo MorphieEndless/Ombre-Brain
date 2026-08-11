@@ -2,6 +2,27 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.17.2
+
+### 修复 / Fixed
+
+- 完整落实 Issue #85：`grow(content=...)` 的长文 digest 与短内容快速路径会在
+  首次新建时保存合法的逐条 `why_remembered`；后续合并仍只补旧空值，绝不覆盖
+  人工或历史理由，空值和非法模型输出也不会阻断正文入库。
+- 按 Issue #89 的冷参考定位，为 `pulse()` 与 `breath_advanced(catalog=True)`
+  中的 anchor 桶增加独立 `⚓ [anchor]` 显示标记；不新增读取工具，不改变默认
+  `breath` / `dream` 的排除规则，也不改变显式检索、衰减或存储行为。
+- 补充 Issue #84 的历史格式回归：直接验证 `letters/history/` 中的 v2.4.12
+  Letter 在通用扫描、无参数 `letter_read()` 与 Dashboard Letter API 三个入口
+  一致可见，并覆盖活跃缓存预热后的外部文件变更检测。
+- 加固热更新清单生成：`VERSION`、`src/` 或 `frontend/` 仍有未暂存改动时
+  直接拒绝生成，并让清单版本与文件哈希统一读取同一 Git index/HEAD 快照，
+  防止再次产生 `src/VERSION` SHA-256 与源码归档不一致的发布包。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.17.2`。
+
 ## 2.17.1
 
 ### 修复 / Fixed

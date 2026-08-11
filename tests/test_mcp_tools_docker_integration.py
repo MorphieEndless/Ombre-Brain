@@ -92,7 +92,7 @@ EXPECTED_TOOL_PROPERTIES = {
         "media",
         "test_data",
     },
-    "grow": {"content", "items"},
+    "grow": {"content", "items", "test_data"},
     "source_read": {"bucket_id", "expected_title", "scope", "cursor", "max_tokens"},
     "trace": {
         "bucket_id",
@@ -784,9 +784,8 @@ def test_letter_time_lock_write_read_and_owner_unlock_in_real_container(mcp_clie
             "lock_type": "permanent",
         },
     )
-    receipt = json.loads(written)
-    assert receipt["stored"] is True
-    assert receipt["lock_type"] == "permanent"
+    letter_id = _bucket_id(written)
+    assert "🔒permanent" in written
     assert marker not in written and title not in written
 
     owner_read = mcp_client.call(
@@ -794,12 +793,13 @@ def test_letter_time_lock_write_read_and_owner_unlock_in_real_container(mcp_clie
     )
     assert marker in owner_read and title in owner_read
 
-    updated = json.loads(mcp_client.call(
+    updated = mcp_client.call(
         "letter_lock_update",
-        {"letter_id": receipt["letter_id"], "lock_type": "none"},
-    ))
-    assert updated["updated"] is True
-    assert updated["lock_type"] == "none"
+        {"letter_id": letter_id, "lock_type": "none"},
+    )
+    assert updated.startswith("🔓")
+    assert letter_id in updated
+    assert "默认可读" in updated
 
 
 def test_I_writes_and_reads_pending_self_description(mcp_client):

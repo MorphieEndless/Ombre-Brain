@@ -414,15 +414,10 @@ async def letter_write(
     # 注意：bucket_mgr.create() 已在 content 落盘后投递 embedding outbox
     # 向量，这里不需要也不应该重复调用 generate_and_store。
     if normalized_lock != "none":
-        created_bucket = await rt.bucket_mgr.get(bucket_id)
-        created_at = ((created_bucket or {}).get("metadata") or {}).get("created", "")
-        return json.dumps({
-            "letter_id": bucket_id,
-            "created_at": created_at,
-            "lock_type": normalized_lock,
-            "unlock_date": normalized_unlock,
-            "stored": True,
-        }, ensure_ascii=False, separators=(",", ":"))
+        lock_suffix = f" 🔒{normalized_lock}"
+        if normalized_unlock:
+            lock_suffix += f" 解锁:{normalized_unlock}"
+        return f"💌letter→{bucket_id} [{a}]{lock_suffix}"
     return f"💌letter→{bucket_id} [{a}]"
 
 
@@ -435,7 +430,7 @@ async def letter_lock_update(
 ) -> str:
     """Change only lock metadata; caller identity is supplied by trusted entrypoints."""
     if not letter_id or not letter_id.strip():
-        return "letter_id is required"
+        return "letter_id 不能为空"
     try:
         normalized_lock = normalize_lock_type(lock_type)
         normalized_unlock = normalize_unlock_date(normalized_lock, unlock_date)
@@ -443,7 +438,7 @@ async def letter_lock_update(
         return f"无法修改 Letter 锁：{exc}"
     bucket = await rt.bucket_mgr.get(letter_id.strip())
     if not bucket or not is_letter_bucket(bucket):
-        return "Letter not found"
+        return "未找到该 Letter"
     state = letter_lock_state(bucket, caller_side)
     if not state["locked_by"]:
         return "历史无锁 Letter 没有锁所有者，不能通过锁管理入口补设锁。请新写一封带锁 Letter。"
@@ -480,12 +475,11 @@ async def letter_lock_update(
         if latest and letter_lock_revision(latest) != expected_lock_state:
             return "Letter 锁状态已被并发修改，请重新读取后再试"
         return "Letter 锁状态修改失败"
-    return json.dumps({
-        "letter_id": bucket["id"],
-        "lock_type": normalized_lock,
-        "unlock_date": normalized_unlock,
-        "updated": True,
-    }, ensure_ascii=False, separators=(",", ":"))
+    if normalized_lock == "none":
+        return f"🔓 已解锁 {bucket['id']}，恢复默认可读。"
+    if normalized_lock == "permanent":
+        return f"🔒 已将 {bucket['id']} 设为永久锁。"
+    return f"🔒 已将 {bucket['id']} 设为定时锁，解锁日期：{normalized_unlock}。"
 
 
 async def letter_read(

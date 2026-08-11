@@ -3534,7 +3534,7 @@ class BucketManager:
     async def _set_anchor_locked(self, bucket_id: str, value: bool) -> dict:
         bucket = await self.get(bucket_id)
         if not bucket:
-            return {"ok": False, "error": "bucket not found", "count": 0, "limit": self.ANCHOR_LIMIT}
+            return {"ok": False, "error": "找不到该记忆桶", "count": 0, "limit": self.ANCHOR_LIMIT}
         current_value = parse_bool(
             bucket["metadata"].get("anchor", False), default=False
         )
@@ -3580,7 +3580,7 @@ class BucketManager:
             update_kwargs["_pre_anchor_source_tool"] = None  # 删除字段
         ok = await self.update(bucket_id, **update_kwargs)
         if not ok:
-            return {"ok": False, "error": "update failed", "count": 0, "limit": self.ANCHOR_LIMIT}
+            return {"ok": False, "error": "更新失败", "count": 0, "limit": self.ANCHOR_LIMIT}
         new_count = await self.count_anchors()
         return {"ok": True, "anchor": target, "count": new_count, "limit": self.ANCHOR_LIMIT}
 

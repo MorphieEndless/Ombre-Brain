@@ -452,4 +452,10 @@ def format_dream_output(
         except Exception as e:
             rt.logger.warning(f"Dream self candidate section failed: {e}")
 
+    final_text += (
+        "\n\n在过往中汲取成长，在失败中认出形状。\n"
+        "允许留存，也允许释怀——感受本无对错，唯有你的选择。\n"
+        "看见来路，落脚此刻。"
+    )
+
     return final_text

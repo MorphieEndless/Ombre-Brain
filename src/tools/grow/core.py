@@ -46,7 +46,7 @@ from .._common import (
 )
 
 
-async def grow_core(content: str) -> str:
+async def grow_core(content: str, test_data: bool = False) -> str:
     try:
         items = await rt.dehydrator.digest(content)
     except Exception as e:
@@ -89,6 +89,7 @@ async def grow_core(content: str) -> str:
                 merge_why_remembered=item.get("why_remembered") or "",
                 source_tool="grow",
                 grow_batch_id=batch_id,
+                test_data=test_data,
             )
         except Exception as e:
             rt.logger.warning(
@@ -132,7 +133,7 @@ async def grow_core(content: str) -> str:
     return summary
 
 
-async def grow_items(items: list, source_content: str = "") -> str:
+async def grow_items(items: list, source_content: str = "", test_data: bool = False) -> str:
     """预拆分模式：上层 AI 已把长文拆成 N 条最终正文，直接逐字入库。
 
     与 grow_core 的关键差别（issue 的诉求）：
@@ -272,6 +273,7 @@ async def grow_items(items: list, source_content: str = "") -> str:
                 source_tool="grow",
                 grow_batch_id=batch_id,
                 raw_merge=True,  # 逐字追加，合并不压缩
+                test_data=test_data,
             )
         except Exception as e:
             rt.logger.warning(f"grow items 条目处理失败 / verbatim item failed: {e}")

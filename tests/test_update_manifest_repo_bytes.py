@@ -62,7 +62,7 @@ def _entry(manifest: dict, path: str) -> dict:
 
 
 def test_manifest_records_lf_bytes_when_worktree_is_crlf(repo: Path):
-    """Windows 检出的常态：仓库 LF、磁盘 CRLF。清单必须记仓库那一份。"""
+    """仅 clean/autocrlf 转换不算未暂存改动，清单仍必须记 index 的 LF。"""
     module = _load_module()
     target = repo / "src" / "app.py"
 
@@ -71,7 +71,9 @@ def test_manifest_records_lf_bytes_when_worktree_is_crlf(repo: Path):
     target.write_bytes(b"line one\nline two\nline three\n")
     _git(repo, "add", "src/app.py")
     _git(repo, "commit", "-q", "-m", "lf")
-    # 模拟 autocrlf 检出：磁盘变 CRLF，index 仍是 LF
+    # 模拟 autocrlf 检出：磁盘变 CRLF，index 仍是 LF。某些平台的
+    # diff-files 会把它列为候选，门禁必须用 hash-object --path 再按 clean
+    # 过滤器核对，不能把这种纯检出转换误判为真实未暂存内容。
     target.write_bytes(b"line one\r\nline two\r\nline three\r\n")
 
     manifest = module.build_manifest(str(repo))

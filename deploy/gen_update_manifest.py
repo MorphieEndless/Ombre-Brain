@@ -49,7 +49,7 @@ class ManifestSourceError(RuntimeError):
 
 
 def _reject_unstaged_inputs(repo_root: str) -> None:
-    """拒绝会让工作区与待发布 index 分叉的未暂存改动。"""
+    """拒绝会让工作区与待发布 index 分叉的真实未暂存内容。"""
 
     proc = subprocess.run(
         [
@@ -58,6 +58,7 @@ def _reject_unstaged_inputs(repo_root: str) -> None:
             repo_root,
             "diff-files",
             "--name-only",
+            "-z",
             "--",
             "VERSION",
             *_TRACKED_DIRS,
@@ -68,7 +69,39 @@ def _reject_unstaged_inputs(repo_root: str) -> None:
         detail = proc.stderr.decode("utf-8", errors="replace").strip()
         raise ManifestSourceError(f"无法检查 Git 工作区状态：{detail or 'git diff-files 失败'}")
 
-    changed = proc.stdout.decode("utf-8", errors="replace").splitlines()
+    candidates = [os.fsdecode(path) for path in proc.stdout.split(b"\0") if path]
+    changed = []
+    for rel in candidates:
+        worktree_path = os.path.join(repo_root, *rel.split("/"))
+        if not os.path.isfile(worktree_path):
+            changed.append(rel)
+            continue
+
+        index_proc = subprocess.run(
+            ["git", "-C", repo_root, "rev-parse", "--verify", f":{rel}"],
+            capture_output=True,
+        )
+        worktree_proc = subprocess.run(
+            [
+                "git",
+                "-C",
+                repo_root,
+                "hash-object",
+                f"--path={rel}",
+                "--",
+                rel,
+            ],
+            capture_output=True,
+        )
+        if index_proc.returncode != 0 or worktree_proc.returncode != 0:
+            changed.append(rel)
+            continue
+
+        index_oid = index_proc.stdout.strip().lower()
+        prospective_oid = worktree_proc.stdout.strip().lower()
+        if not index_oid or index_oid != prospective_oid:
+            changed.append(rel)
+
     if changed:
         preview = "、".join(changed[:5])
         if len(changed) > 5:

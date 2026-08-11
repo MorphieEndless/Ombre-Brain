@@ -2,6 +2,24 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.17.1
+
+### 修复 / Fixed
+
+- `letter_lock_update` 成功路径原样返回 JSON，与其余 15 个 MCP 工具的中文短句风格不一致；
+  `letter_write` 创建带锁 letter 时同样返回 JSON。两处改为统一的标签式中文文案，
+  失败路径的 "Letter not found" 也一并中文化。
+- `bucket_manager.set_anchor()` 的 `"bucket not found"`/`"update failed"` 是仅有的两处
+  英文字面量，被原样拼进 `anchor`/`release` 的中文提示句里，改为中文。
+- `grow` 一直没有 `test_data` 参数（`hold` 有），导致 `grow` 创建的桶无法被
+  `trace(hard_delete=True)` 清理，无法用于可回收的自动化测试数据。补齐参数并透传到
+  `merge_or_create`。
+- `dream` 输出结尾追加固定收束语。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.17.1`。
+
 ## 2.16.9
 
 ### 修复 / Fixed

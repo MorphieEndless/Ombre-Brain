@@ -8,7 +8,7 @@ breath_search(query=...) 精准拉取需要的记忆——代替把全部记忆�
 
 关键行为：
 - 只读元数据（bucket_mgr.list_all），0 次 LLM/embedding 调用
-- 每桶一行：名称 | 域 | 重要度，按重要度降序
+- 每桶一行：名称 | 域 | 重要度 | Footprint，按重要度降序
 - 按类型分区（固化/动态/feel/plan/letter），区头带数量
 - 可选 domain 过滤（OR）、tags 过滤（AND）和条数上限
 - protected 桶保留在显式目录中，统一标记为「🛡️ [受保护记忆]」
@@ -38,7 +38,7 @@ async def surface_catalog(
     tag_filter: list[str] | None = None,
     max_results: int = 20,
 ) -> str:
-    """返回全部记忆桶的紧凑目录。每桶一行：名称 | 域 | 重要度。"""
+    """返回全部记忆桶的紧凑目录。每桶一行：名称 | 域 | 重要度 | Footprint。"""
     try:
         buckets = await rt.bucket_mgr.list_all(include_archive=False)
     except Exception as e:
@@ -46,6 +46,17 @@ async def surface_catalog(
 
     if not buckets:
         return "记忆库为空。"
+
+    try:
+        footprint_snapshot = rt.bucket_mgr.footprint_snapshot()
+    except Exception as exc:
+        rt.logger.warning(f"Footprint snapshot unavailable / 足迹读取失败: {exc}")
+        footprint_snapshot = None
+
+    def _footprint(bucket: dict, meta: dict) -> str:
+        if footprint_snapshot is None:
+            return "👣 Footprint：暂时无法读取"
+        return footprint_snapshot.summary(str(bucket.get("id") or ""), meta)
 
     grouped: dict[str, list[tuple[int, str]]] = {key: [] for key, _ in _SECTIONS}
     for b in buckets:
@@ -78,7 +89,10 @@ async def surface_catalog(
                 pin_mark = "🛡️ [受保护记忆] "
             elif parse_bool(meta.get("pinned"), default=False):
                 pin_mark = "📌"
-        line = f"{pin_mark}{name} | {','.join(domains) or '未分类'} | {imp}"
+        line = (
+            f"{pin_mark}{name} | {','.join(domains) or '未分类'} | {imp} "
+            f"| {_footprint(b, meta)}"
+        )
         btype = meta.get("type")
         key = "letter" if logical_letter else btype if btype in grouped else "dynamic"
         grouped[key].append((imp, line))

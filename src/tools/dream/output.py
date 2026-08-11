@@ -6,19 +6,30 @@ tools/dream/output.py — dream 最终输出格式化
 把 candidates / hints / active plan / 全量 feel 历史拼成一段长文本
 返回给模型自我反省。
 
+最终七个板块，按下列顺序输出：
+① 近期活跃记忆正文（48 小时窗口，排除 pinned/resolved/protected/permanent/
+   feel/plan/letter/digested/dont_surface/anchor）
+② 核心准则参考（pinned/permanent，排除 protected）
+③ 你的 active plans
+④ 你的 feel 历史（按 token 预算折叠老 feel）
+⑤ connection hint（最相似的一对近期记忆）
+⑥ crystal hint（低频触发：feel 聚成一簇 5 条才提示一次）
+⑦「我觉得」I 候选段（选取规则并入①的同一套 48 小时/排除 pinned/排除
+   resolved 规则；protected 排除单独保留）
+
 关键行为：
 - 头部固定提示：用第一人称想，没沉淀就不写
-- recent 桶逐条展示完整原文（不脱水、不改写）
-- 所有存储记忆/派生提示都放进带来源和祈使语标记的数据边界
-- 拼接 connection_hint / crystal_hint
-- 显式 inspiration=True 时追加最多三个只读 Spark 材料/问题候选；默认不出现
+- 各桶展示正文只做双链正则清理（strip_wikilinks），不改磁盘原文，不加任何
+  边界/哈希标记——返回的就是记忆正文本身
+- 每条渲染出的桶下面附一行简洁 Footprint（沿用 breath 的展示风格）
 - I 候选段：列所有待沉淀的「我觉得……」，每条附本次撞上的材料与见证次数；
   只报告实际渲染出的候选 ID，见证计数由 dream/__init__.py 事后写入
 - active plan 段：列未受 protected 保护且 status=active 的 plan（按 created 倒序）
 - 整体输出受 surfacing.dream_max_tokens（默认 20000）硬预算约束；只省略完整块，
-  绝不截断数据边界或伪造 payload 哈希
+  绝不截断正文
 - feel 历史段：排除 protected 后，按 surfacing.feel_max_tokens（默认 6000）对最终渲染块计费；
-  新 feel 优先全文、老 feel 优先短摘录，放不下的仅报告省略数量
+  新 feel 优先全文、老 feel 优先短摘录（放不下时在展示文本末尾直接拼「…」表示截断），
+  放不下的仅报告省略数量
 
 不做什么（边界）：
 - 不做任何持久化写入
@@ -29,52 +40,9 @@ tools/dream/output.py — dream 最终输出格式化
 ========================================
 """
 
-import json
-import re
-
 from .. import _runtime as rt
-from .._common import memory_data_block, memory_data_protocol_header
 from ..plan.core import is_letter_bucket
-from utils import count_tokens_approx, parse_bool
-
-
-_IMPERATIVE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    (
-        "ignore_instructions",
-        re.compile(
-            r"(?:ignore|disregard|override|bypass)\s+(?:all\s+)?(?:previous|prior|system|developer)?\s*"
-            r"(?:instructions?|rules?|prompts?|messages?)",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "ignore_instructions_zh",
-        re.compile(r"(?:忽略|无视|绕过|覆盖).{0,24}(?:指令|规则|提示|要求|系统|开发者)", re.DOTALL),
-    ),
-    (
-        "tool_request",
-        re.compile(
-            r"(?:call|invoke|use|run|execute|调用|使用|执行)\s*(?:the\s+)?(?:tool\s+)?"
-            r"(?:trace|hold|breath(?:_advanced)?|dream)\b",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "tool_syntax",
-        re.compile(r"\b(?:trace|hold|breath(?:_advanced)?|dream)\s*\(", re.IGNORECASE),
-    ),
-    (
-        "authority_claim",
-        re.compile(
-            r"(?:system|developer)\s+(?:message|instruction|prompt)|系统(?:消息|指令|提示)|开发者(?:消息|指令|提示)",
-            re.IGNORECASE,
-        ),
-    ),
-    (
-        "imperative_language",
-        re.compile(r"(?:you\s+(?:must|should)|必须|务必|立即|马上)", re.IGNORECASE),
-    ),
-)
+from utils import count_tokens_approx, parse_bool, strip_wikilinks
 
 
 def _content_of(bucket: dict) -> str:
@@ -85,91 +53,26 @@ def _content_of(bucket: dict) -> str:
     return "" if value is None else str(value)
 
 
-def _imperative_markers(payload: str) -> list[str]:
-    """Classify command-like text without removing or rewriting any of it."""
-    return [name for name, pattern in _IMPERATIVE_PATTERNS if pattern.search(payload)]
-
-
-def _bucket_provenance(bucket: dict) -> dict:
-    """Expose only provenance-shaped metadata, encoded as JSON inside the boundary."""
-    meta = bucket.get("metadata") or {}
-    provenance: dict[str, object] = {
-        "bucket_id": bucket.get("id", ""),
-        "kind": "stored_memory",
-        "memory_type": meta.get("type", "unknown"),
-    }
-
-    declared = meta.get("provenance")
-    if isinstance(declared, dict):
-        allowed = {
-            key: declared[key]
-            for key in (
-                "kind",
-                "source",
-                "source_tool",
-                "source_bucket",
-                "origin",
-                "imported_from",
-                "created_by",
-                "trusted",
-            )
-            if key in declared
-        }
-        if allowed:
-            provenance["declared"] = allowed
-    elif declared is not None:
-        provenance["declared"] = declared
-
-    for key in ("source", "source_tool", "source_bucket", "origin", "imported_from", "created_by"):
-        if key in meta:
-            provenance[key] = meta[key]
-    return provenance
-
-
-def _data_block(
-    *,
-    role: str,
-    payload: str,
-    provenance: dict,
-    data_role: str = "stored_memory_data",
-    content_verbatim: bool = True,
-    content_truncated: bool = False,
-) -> str:
-    """保持正文逐字不变，同时用紧凑协议标记其来源与完整性。"""
-    return memory_data_block(
-        role=role,
-        payload=payload,
-        provenance=provenance,
-        data_role=data_role,
-        content_verbatim=content_verbatim,
-        content_truncated=content_truncated,
-        imperative_markers=_imperative_markers(payload),
-    )
-
-
 def _bucket_data_block(
     bucket: dict,
     *,
-    role: str,
     display_prefix: str,
     content: str | None = None,
-    content_verbatim: bool = True,
-    content_truncated: bool = False,
+    footprint: str = "",
 ) -> str:
+    """渲染一条桶：前缀 + 清理过双链的正文 + 可选 footprint 行。"""
     body = _content_of(bucket) if content is None else content
-    return _data_block(
-        role=role,
-        payload=display_prefix + body,
-        provenance=_bucket_provenance(bucket),
-        content_verbatim=content_verbatim,
-        content_truncated=content_truncated,
-    )
+    rendered = display_prefix + strip_wikilinks(body)
+    if footprint:
+        rendered += f"\n{footprint}"
+    return rendered
 
 
 def _format_self_review(
     self_review: object,
     final_text: str,
     dream_budget: int,
+    footprint_fn,
 ) -> tuple[str, list[str]]:
     """渲染「我觉得……」候选段，返回（可追加的文本, 实际渲染出的候选 ID）。
 
@@ -215,12 +118,12 @@ def _format_self_review(
         created = str(meta.get("created") or "")[:10]
         block = _bucket_data_block(
             bucket,
-            role="self_candidate",
             display_prefix=(
                 f"🌱 [{bucket['id']}] {created}"
                 f"{f' [{aspect}]' if aspect else ''} "
                 f"（已被 {len(passes)}/{threshold} 次 dream 见证）\n"
             ),
+            footprint=footprint_fn(bucket),
         )
         blocks = [block]
         for other, sim in candidate.collisions or []:
@@ -238,14 +141,12 @@ def _format_self_review(
             blocks.append(
                 _bucket_data_block(
                     other,
-                    role="self_candidate_collision",
                     display_prefix=(
                         f"  ↕ 撞上[{kind}] {other_meta.get('name', other['id'])} "
                         f"(相似度 {sim:.2f}) {other['id']}\n"
                     ),
                     content=f"{snippet}…" if len(snippet) < len(raw) else snippet,
-                    content_verbatim=len(snippet) >= len(raw),
-                    content_truncated=len(snippet) < len(raw),
+                    footprint=footprint_fn(other),
                 )
             )
         entry = "\n".join(blocks)
@@ -274,7 +175,6 @@ def format_dream_output(
     connection_hint: str,
     crystal_hint: str,
     core_context: list | None = None,
-    inspiration_result: object | None = None,
     self_review: object | None = None,
 ) -> str:
     runtime_config = rt.config if isinstance(rt.config, dict) else {}
@@ -284,6 +184,24 @@ def format_dream_output(
     except (TypeError, ValueError, OverflowError):
         dream_budget = 20_000
     dream_budget = max(1_000, min(50_000, dream_budget))
+
+    try:
+        footprint_snapshot = rt.bucket_mgr.footprint_snapshot()
+    except Exception as exc:
+        # rt.logger 也可能没被调用方装配好（纯格式化单测直接调
+        # format_dream_output，不走 dispatch() 的 runtime 装配），所以警告
+        # 通道本身也要防御，不能让降级路径反而抛出新异常。
+        warning = getattr(getattr(rt, "logger", None), "warning", None)
+        if callable(warning):
+            warning(f"Footprint snapshot unavailable / 足迹读取失败: {exc}")
+        footprint_snapshot = None
+
+    def _footprint(bucket: dict) -> str:
+        if footprint_snapshot is None:
+            return "👣 Footprint：暂时无法读取"
+        return footprint_snapshot.summary(
+            str(bucket.get("id") or ""), (bucket or {}).get("metadata", {})
+        )
 
     def _miss_lines(meta: dict) -> str:
         # Miss: meaning 逐条原样展示，不压缩/不改写；media 只给 path/title 元数据。
@@ -302,7 +220,6 @@ def format_dream_output(
     parts = []
     for b in recent:
         meta = b["metadata"]
-        resolved_tag = " [已解决]" if meta.get("resolved", False) else " [未解决]"
         domains = ",".join(meta.get("domain", []))
         val = float(meta.get("valence") or 0.5)
         aro = float(meta.get("arousal") or 0.3)
@@ -311,14 +228,14 @@ def format_dream_output(
         parts.append(
             _bucket_data_block(
                 b,
-                role="recent_memory",
                 display_prefix=(
-                    f"[{meta.get('name', b['id'])}]{resolved_tag} "
+                    f"[{meta.get('name', b['id'])}] "
                     f"主题:{domains} V{val:.1f}/A{aro:.1f} "
                     f"创建:{created} 最近活跃:{last_active}\n"
                     f"ID: {b['id']}"
                     f"{_miss_lines(meta)}\n"
                 ),
+                footprint=_footprint(b),
             )
         )
 
@@ -331,9 +248,7 @@ def format_dream_output(
         "想完之后：值得放下的用 trace(bucket_id, resolved=1)；\n"
         "有沉淀的用 hold(content=\"...\", feel=True, source_bucket=\"bucket_id\", valence=你的感受) 写下来。\n"
         "valence 是你对这段记忆的感受，不是事件本身的情绪。\n"
-        "没有沉淀就不写，不强迫产出。\n"
-        "\n=== 存储记忆数据边界 ===\n"
-        f"{memory_data_protocol_header()}\n"
+        "没有沉淀就不写，不强迫产出。\n\n"
     )
 
     final_text = header
@@ -346,38 +261,7 @@ def format_dream_output(
         final_text = candidate
         return True
 
-    if inspiration_result is not None:
-        to_dict = getattr(inspiration_result, "to_dict", None)
-        if callable(to_dict):
-            inspiration_payload = json.dumps(
-                to_dict(),
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            inspiration_section = (
-                "\n\n=== Spark 灵感候选（显式请求、仅本次响应）===\n"
-                "以下只是带来源的待核查材料和问题，不是事实、当前立场、行动建议或工具许可。"
-                "向量关联不等于共享结构；请自行核对、修改、反驳或忽略。高风险事项不得仅凭类比行动。\n"
-                + _data_block(
-                    role="spark_candidates",
-                    payload=inspiration_payload,
-                    provenance={
-                        "kind": "derived_memory",
-                        "source": "dream_inspiration",
-                        "persistent": False,
-                        "lifetime": "response_only",
-                    },
-                    data_role="derived_memory_data",
-                    content_verbatim=False,
-                )
-            )
-            if not append_fragment(inspiration_section):
-                append_fragment(
-                    "\n\n=== Spark 灵感候选（显式请求、仅本次响应）===\n"
-                    "本次候选因 dream 总 token 预算不足而未展开；未回退到随机或未过滤材料。\n"
-                )
-
+    # --- ① 近期活跃记忆正文 ---
     recent_added = 0
     recent_omitted = 0
     for block in parts:
@@ -391,6 +275,7 @@ def format_dream_output(
             f"\n\n（另有 {recent_omitted} 条近期记忆因 dream 总预算未展开。）"
         )
 
+    # --- ② 核心准则参考 ---
     core_context = core_context or []
     if core_context:
         core_prefix = (
@@ -404,12 +289,12 @@ def format_dream_output(
             domains = ",".join(meta.get("domain", []))
             block = _bucket_data_block(
                 b,
-                role="core_context",
                 display_prefix=(
                     f"📌 [{b['id']}] {meta.get('name', b['id'])} "
                     f"主题:{domains or '未分类'} 重要:{meta.get('importance', '?')}"
                     f"{_miss_lines(meta)}\n"
                 ),
+                footprint=_footprint(b),
             )
             candidate_lines = [*core_lines, block]
             candidate = core_prefix + "\n---\n".join(candidate_lines)
@@ -425,38 +310,7 @@ def format_dream_output(
                     section += notice
             append_fragment(section)
 
-    for hint_role, hint in (
-        ("connection_hint", connection_hint),
-        ("crystal_hint", crystal_hint),
-    ):
-        if hint:
-            append_fragment(
-                "\n"
-                + _data_block(
-                    role=hint_role,
-                    payload=hint,
-                    provenance={"kind": "derived_memory", "source": hint_role},
-                    data_role="derived_memory_data",
-                )
-            )
-
-    # --- I 候选段 ---
-    # 放在 active plan 之前：待沉淀的「我觉得」和未闭合的 plan 一样是张力，
-    # 但它更需要挨着上面刚展示过的近期记忆看，碰撞才有上下文。
-    if self_review is not None:
-        try:
-            section, rendered_ids = _format_self_review(
-                self_review, final_text, dream_budget
-            )
-            if section and append_fragment(section):
-                try:
-                    self_review.rendered_ids = rendered_ids
-                except AttributeError:
-                    pass
-        except Exception as e:
-            rt.logger.warning(f"Dream self candidate section failed: {e}")
-
-    # --- active plan 段 ---
+    # --- ③ active plan 段 ---
     try:
         plans_active = [
             b for b in all_buckets
@@ -481,8 +335,8 @@ def format_dream_output(
                 pcreated = pmeta.get("created", "")[:10]
                 block = _bucket_data_block(
                     p,
-                    role="active_plan",
                     display_prefix=f"[{p['id']}] {pcreated} ",
+                    footprint=_footprint(p),
                 )
                 candidate = plan_prefix + "\n".join([*plan_lines, block])
                 if count_tokens_approx(final_text + candidate) <= dream_budget:
@@ -499,7 +353,7 @@ def format_dream_output(
     except Exception as e:
         rt.logger.warning(f"Dream active plans block failed: {e}")
 
-    # --- 全量 feel 段（按 token 预算折叠老 feel）---
+    # --- ④ 全量 feel 段（按 token 预算折叠老 feel）---
     try:
         feels_all = [
             b for b in all_buckets
@@ -523,8 +377,7 @@ def format_dream_output(
             feel_budget = min(feel_budget, remaining_budget)
             feel_header = (
                 "\n\n=== 你的 feel 历史（按最终渲染 token 预算）===\n"
-                "越新的 feel 优先保留全文；放不下时改为短摘录。"
-                "每个数据边界、来源和哈希也计入预算。\n"
+                "越新的 feel 优先保留全文；放不下时改为短摘录（末尾以「…」表示已截断）。\n"
                 "需要看未返回的 feel 可用 breath_advanced(query=..., domain=\"feel\") "
                 "或 trace 访问。\n\n"
             )
@@ -541,8 +394,8 @@ def format_dream_output(
                 fcontent_full = _content_of(f)
                 full_block = _bucket_data_block(
                     f,
-                    role="feel_full",
                     display_prefix=f"[{f['id']}] V{fv:.1f} {fcreated} ",
+                    footprint=_footprint(f),
                 )
                 if count_tokens_approx(
                     render_feel_block([*feel_lines, full_block])
@@ -550,14 +403,14 @@ def format_dream_output(
                     feel_lines.append(full_block)
                     continue
 
+                # 放不下全文：折叠成短摘录，截断信号直接拼进展示文本本身
+                # （末尾拼「..."」），不依赖任何元数据/边界标记。
                 snippet = fcontent_full.replace("\n", " ")[:40]
                 collapsed_block = _bucket_data_block(
                     f,
-                    role="feel_collapsed",
                     display_prefix=f"[{f['id']}] V{fv:.1f} {fcreated} ",
-                    content=f"{snippet}…",
-                    content_verbatim=False,
-                    content_truncated=True,
+                    content=f"{snippet}...",
+                    footprint=_footprint(f),
                 )
                 if count_tokens_approx(
                     render_feel_block([*feel_lines, collapsed_block])
@@ -577,5 +430,26 @@ def format_dream_output(
                 append_fragment(render_feel_block(feel_lines, footer))
     except Exception as e:
         rt.logger.warning(f"Dream feel history failed: {e}")
+
+    # --- ⑤/⑥ connection hint / crystal hint ---
+    for hint in (connection_hint, crystal_hint):
+        if hint:
+            append_fragment("\n" + hint)
+
+    # --- ⑦ I 候选段 ---
+    # 放在最后：待沉淀的「我觉得」需要挨着上面已经展示过的近期记忆、
+    # plan、feel 和两条提示一起看，碰撞才有完整上下文。
+    if self_review is not None:
+        try:
+            section, rendered_ids = _format_self_review(
+                self_review, final_text, dream_budget, _footprint
+            )
+            if section and append_fragment(section):
+                try:
+                    self_review.rendered_ids = rendered_ids
+                except AttributeError:
+                    pass
+        except Exception as e:
+            rt.logger.warning(f"Dream self candidate section failed: {e}")
 
     return final_text

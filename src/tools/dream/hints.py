@@ -7,15 +7,17 @@ tools/dream/hints.py — dream 的连接提示、结晶提示与 I 候选碰撞�
 
 - 连接提示：在 recent 桶里找余弦相似度最高的一对（>0.5）→ 提示
   「这两个似乎有关联，不替你下结论，你自己想」
-- 结晶提示：扫所有 feel，发现某条 feel 与 ≥2 条其它 feel 相似度
-  >0.7 → 提示「你已经写过 N 条相似的 feel，可以考虑 hold(pinned=True)
-  升级它」
+- 结晶提示：低频触发——扫所有 feel，只有凑够 5 条互相相似（>0.7）的
+  feel 聚成一簇才提示「你已经写过 N 条相似的 feel，可以考虑
+  hold(pinned=True) 升级它」，避免每次 dream 都刷同一条提示
 - I 候选碰撞材料：把每条待沉淀的「我觉得……」和语义上最挨着的几条记忆
   摆在一起——支持它的、反驳它的、跟它撞车的其它候选，都只是材料
 
 关键行为：
 - 都依赖 embedding_engine.enabled；未启用时返回空串 / 空材料并明说
 - protected 只防衰减：连接、结晶、I 候选及碰撞材料一律不读取其正文
+- I 候选的选取并入 candidates.py 近期活跃段的同一套规则：48 小时窗口、
+  排除 pinned、排除 resolved（protected 排除单独保留）
 - 任意异常都吞掉，只 warning，不影响 dream 主流程
 - 只读已落盘向量，不发新的 embedding 请求
 
@@ -25,7 +27,7 @@ tools/dream/hints.py — dream 的连接提示、结晶提示与 I 候选碰撞�
 - 不替模型决定，只给「不替你下结论」的提示
 
 对外暴露：build_connection_hint(recent) / build_crystal_hint(all_buckets)
-         / collect_self_candidates(all_buckets)
+         / collect_self_candidates(all_buckets, window_hours)
 ========================================
 """
 
@@ -33,8 +35,13 @@ from dataclasses import dataclass, field
 
 from ..i import I_PROMOTE_THRESHOLD, is_pending_candidate
 from .. import _runtime as rt
+from .candidates import is_within_window, recent_window_cutoff
 from ..plan.core import is_letter_bucket
 from utils import parse_bool, strip_wikilinks
+
+# 结晶提示低频触发：不是随便 2 条相似就提示，要凑够一簇 5 条（自己 + 4 条
+# 相似 feel）才值得打断一次；避免同一批 feel 每场梦都刷同样的提示。
+_CRYSTAL_CLUSTER_MIN = 5
 
 # 对照池上限：正式 I 条目和其它候选永远全量参与碰撞，普通记忆只取最近这么多条。
 # get_embedding 每条一次 sqlite 查询，全库几千条会让 dream 明显变慢，而更老的
@@ -92,7 +99,7 @@ async def build_crystal_hint(all_buckets: list) -> str:
                 (b.get("metadata") or {}).get("protected"), default=False
             )
         ]
-        if len(feels) < 3:
+        if len(feels) < _CRYSTAL_CLUSTER_MIN:
             return ""
         feel_embeddings: dict = {}
         for f in feels:
@@ -106,7 +113,7 @@ async def build_crystal_hint(all_buckets: list) -> str:
                     sim = rt.embedding_engine._cosine_similarity(femb, oemb)
                     if sim > 0.7:
                         similar_feels.append(oid)
-            if len(similar_feels) >= 2:
+            if len(similar_feels) >= _CRYSTAL_CLUSTER_MIN - 1:
                 feel_bucket = next((f for f in feels if f["id"] == fid), None)
                 if feel_bucket and not feel_bucket["metadata"].get("pinned"):
                     content_preview = strip_wikilinks(feel_bucket["content"][:80])
@@ -150,17 +157,23 @@ def _timestamp_key(bucket: dict) -> str:
     return str(meta.get("last_active") or meta.get("created") or "")
 
 
-async def collect_self_candidates(all_buckets: list) -> SelfReview:
+async def collect_self_candidates(all_buckets: list, window_hours: int) -> SelfReview:
     """收集待沉淀的 I 候选，并为每条取几条语义上最挨着的对照材料。
 
+    选取规则并入近期活跃段（candidates.py）的同一套 48 小时窗口、
+    排除 pinned、排除 resolved；protected 排除单独保留。
     材料只是材料：支持、反驳、撞车都可能，这里不做任何判定。
     """
+    cutoff = recent_window_cutoff(window_hours)
     pending = [
         b for b in all_buckets
         if is_pending_candidate(b) and not is_letter_bucket(b)
         and not parse_bool(
             (b.get("metadata") or {}).get("protected"), default=False
         )
+        and not (b.get("metadata") or {}).get("pinned", False)
+        and not (b.get("metadata") or {}).get("resolved", False)
+        and is_within_window(b.get("metadata") or {}, cutoff)
     ]
     if not pending:
         return SelfReview()

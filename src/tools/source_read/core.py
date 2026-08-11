@@ -10,7 +10,6 @@ from ombrebrain.storage.source_store import normalize_source_refs
 from utils import count_tokens_approx, normalize_memory_title
 
 from .. import _runtime as rt
-from .._common import stored_data_marker
 from ..plan.core import is_letter_bucket, letter_lock_state
 
 
@@ -112,12 +111,7 @@ def _render_page(
         f"next_cursor={next_cursor}\n"
         f"total_chars={total_chars}\n"
     )
-    return (
-        header
-        + stored_data_marker(body, provenance=f"source:{bucket_id}")
-        + "\n"
-        + body
-    )
+    return header + "\n" + body
 
 
 async def dispatch(

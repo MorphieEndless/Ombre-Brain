@@ -302,9 +302,12 @@ async def test_concurrent_trace_why_wins_over_stale_grow_merge(
     paused_once = False
 
     async def gated_get(target_id):
+        # grow 内部改用 asyncio.gather 并发处理各 item 后，单条 item 的
+        # merge_or_create 跑在 gather 派生的子任务里，不再是外层 grow_task
+        # 本身；用目标桶 id 匹配同样能只在 grow 触碰这个桶时暂停一次。
         nonlocal paused_once
         bucket = await original_get(target_id)
-        if asyncio.current_task() is grow_task and not paused_once:
+        if target_id == bucket_id and not paused_once:
             paused_once = True
             snapshot_ready.set()
             await trace_finished.wait()

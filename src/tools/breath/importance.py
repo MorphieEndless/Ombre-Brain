@@ -128,6 +128,20 @@ async def surface_by_importance(importance_min: int, max_tokens: int, tag_filter
     filtered = _select_importance_buckets(filtered, importance_min, limit=20)
     if not filtered:
         return f"没有重要度 >= {importance_min} 的记忆。"
+
+    try:
+        footprint_snapshot = rt.bucket_mgr.footprint_snapshot()
+    except Exception as exc:
+        rt.logger.warning(f"Footprint snapshot unavailable / 足迹读取失败: {exc}")
+        footprint_snapshot = None
+
+    def _footprint(bucket: dict) -> str:
+        if footprint_snapshot is None:
+            return "👣 Footprint：暂时无法读取"
+        return footprint_snapshot.summary(
+            str(bucket.get("id") or ""), bucket.get("metadata", {})
+        )
+
     results = []
     token_used = 0
     budget_blocked = False
@@ -137,6 +151,7 @@ async def surface_by_importance(importance_min: int, max_tokens: int, tag_filter
             rendered, entry_tokens = render_stored_bucket(
                 b,
                 f"[importance:{imp}] [bucket_id:{b['id']}]",
+                _footprint(b),
             )
             if token_used + entry_tokens > max_tokens:
                 budget_blocked = True

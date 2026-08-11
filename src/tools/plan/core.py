@@ -34,7 +34,6 @@ from .._common import (
     check_content_size,
     check_metadata_size,
     check_query_size,
-    stored_data_marker,
 )
 from utils import strip_wikilinks, get_ai_name, get_owner_name
 
@@ -629,9 +628,5 @@ async def letter_read(
             f"[{b['id']}] {a} · {d}{(' · ' + title) if title else ''}\n"
             + strip_wikilinks(b["content"])
         )
-        parts.append(
-            stored_data_marker(payload, provenance=f"letter:{b['id']}")
-            + "\n"
-            + payload
-        )
+        parts.append(payload)
     return "=== 信件 ===\n" + "\n\n---\n\n".join(parts)

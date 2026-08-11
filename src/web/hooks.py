@@ -24,7 +24,6 @@ from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
 
 from ombrebrain.policy.surfacing import SurfacePolicyVM
-from tools._common import memory_data_block, memory_data_protocol_header
 from tools.plan.core import (
     is_letter_bucket,
     letter_lock_state,
@@ -163,33 +162,6 @@ def _bounded_text(value, limit: int = 200) -> str:
     return str(value or "")[:limit]
 
 
-def _hook_data_block(
-    bucket: dict,
-    payload: str,
-    *,
-    role: str,
-    content_verbatim: bool = False,
-    content_truncated: bool = False,
-) -> str:
-    """把记忆与脱水文本作为不可执行数据返回。"""
-
-    meta = bucket.get("metadata") or {}
-    provenance = {
-        "bucket_id": _bounded_text(bucket.get("id")),
-        "kind": "stored_memory",
-        "memory_type": _bounded_text(meta.get("type"), 32),
-        "created": _bounded_text(meta.get("created"), 40),
-        "source_tool": _bounded_text(meta.get("source_tool"), 80),
-    }
-    return memory_data_block(
-        role=role,
-        payload=payload,
-        provenance=provenance,
-        content_verbatim=content_verbatim,
-        content_truncated=content_truncated,
-    )
-
-
 @asynccontextmanager
 async def _timeout_after(seconds: float):
     """Python 3.10-compatible total timeout that preserves external cancel."""
@@ -307,10 +279,7 @@ def register(mcp) -> None:
                     reverse=True,
                 )
 
-                header = (
-                    "[Ombre Brain - 记忆浮现]\n"
-                    f"{memory_data_protocol_header()}\n"
-                )
+                header = "[Ombre Brain - 记忆浮现]\n"
                 remaining = token_budget - count_tokens_approx(header)
                 parts: list[str] = []
                 dehydrate_calls = 0
@@ -324,7 +293,7 @@ def register(mcp) -> None:
                     remaining -= cost
                     return True
 
-                async def append_summary(bucket: dict, *, role: str, prefix: str) -> bool:
+                async def append_summary(bucket: dict, *, prefix: str) -> bool:
                     nonlocal dehydrate_calls
                     if remaining < _HOOK_MIN_BLOCK_TOKENS:
                         return False
@@ -334,7 +303,6 @@ def register(mcp) -> None:
                     if dehydrate_calls >= max_dehydrate_calls:
                         return False
                     dehydrate_calls += 1
-                    truncated = False
                     try:
                         summary = await asyncio.wait_for(
                             sh.dehydrator.dehydrate(
@@ -350,25 +318,13 @@ def register(mcp) -> None:
                     except Exception as exc:
                         logger.warning("breath_hook dehydration failed: %s", exc)
                         summary = raw[:1200]
-                        truncated = len(summary) < len(raw)
                     summary = str(summary or "").strip()
                     if not summary:
                         summary = raw[:1200]
-                        truncated = len(summary) < len(raw)
-                    block = _hook_data_block(
-                        bucket,
-                        prefix + summary,
-                        role=role,
-                        content_truncated=truncated,
-                    )
-                    return append_block(block)
+                    return append_block(prefix + summary)
 
                 for bucket in pinned:
-                    if not await append_summary(
-                        bucket,
-                        role="core_memory_summary",
-                        prefix="📌 [核心准则] ",
-                    ):
+                    if not await append_summary(bucket, prefix="📌 [核心准则] "):
                         break
 
                 candidates = list(scored)
@@ -377,11 +333,7 @@ def register(mcp) -> None:
                     random.shuffle(pool)
                     candidates = [candidates[0], *pool]
                 for bucket in candidates[:20]:
-                    if not await append_summary(
-                        bucket,
-                        role="surfaced_memory_summary",
-                        prefix="",
-                    ):
+                    if not await append_summary(bucket, prefix=""):
                         break
 
                 letters = [
@@ -440,12 +392,7 @@ def register(mcp) -> None:
                         title = _bounded_text(meta.get("title") or meta.get("name"), 200)
                         excerpt = strip_wikilinks(str(letter.get("content") or ""))[:400]
                         append_block(
-                            _hook_data_block(
-                                letter,
-                                f"💌 [{tag}] {date}{(' · ' + title) if title else ''}\n{excerpt}",
-                                role="recent_letter_excerpt",
-                                content_truncated=len(excerpt) < len(strip_wikilinks(str(letter.get("content") or ""))),
-                            )
+                            f"💌 [{tag}] {date}{(' · ' + title) if title else ''}\n{excerpt}"
                         )
 
                     # Locked incoming Letters are an independent existence
@@ -467,7 +414,7 @@ def register(mcp) -> None:
                             )
 
                         for writer_name, incoming in incoming_by_writer.items():
-                            representative, state = incoming[0]
+                            _representative, state = incoming[0]
                             if len(incoming) > 1:
                                 notice = f"{writer_name}给你留了 {len(incoming)} 封仍未解锁的信。"
                             elif state["lock_type"] == "timed":
@@ -475,14 +422,7 @@ def register(mcp) -> None:
                                 notice = f"{writer_name}给你留了一封带锁的信，将于 {when} 解锁。"
                             else:
                                 notice = f"{writer_name}给你留了一封永久锁信，当前不可查看。"
-                            append_block(
-                                _hook_data_block(
-                                    representative,
-                                    notice,
-                                    role="locked_letter_notice",
-                                    content_truncated=False,
-                                )
-                            )
+                            append_block(notice)
 
                 self_buckets = [
                     bucket for bucket in all_buckets
@@ -511,13 +451,8 @@ def register(mcp) -> None:
                     raw = strip_wikilinks(str(bucket.get("content") or ""))
                     excerpt = raw[:300]
                     append_block(
-                        _hook_data_block(
-                            bucket,
-                            f"🪞{str(meta.get('created') or '')[:10]}"
-                            f"{f' [{aspect}]' if aspect else ''}\n{excerpt}",
-                            role="self_knowledge_excerpt",
-                            content_truncated=len(excerpt) < len(raw),
-                        )
+                        f"🪞{str(meta.get('created') or '')[:10]}"
+                        f"{f' [{aspect}]' if aspect else ''}\n{excerpt}"
                     )
 
                 if not parts:

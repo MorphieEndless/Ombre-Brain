@@ -293,7 +293,7 @@ feel 桶自身：
 
 `FootprintSnapshot` 从兼容路径 `_ledger/events.jsonl` 读取 append-only 事件镜像并压缩展示；Markdown 正文仍是当前运行时的内容真源，Footprint 不复制正文，也不把 Ledger 提升为新的真源。旧存储名 `LedgerMirror` 保留用于兼容，面向模型的产品概念统一称为 Footprint。
 
-恢复是对归档状态的显式逆操作：`trace(bucket_id="...", restore=True)` 必须单独调用。`BucketManager.restore_archived()` 根据创建足迹恢复原 bucket type，清除 tombstone/deleted_at 等归档标记，把 Markdown 移回对应活跃目录，重建正文与 meaning 派生索引，并追加 `TraceRestored`。归档期间会保留历史 pinned 标记，但恢复提交会原子清除它，避免记忆静默重新占用 pinned 配额；若最终进入普通 importance≥9 池，同一配额事务会执行既有降级规则。历史档案若异常同时带有 protected 与 anchor，普通恢复会拒绝；调用 `trace(bucket_id="...", restore=True, protected=0, importance=1..10)` 可在同一事务中保留 anchor、解除保护并恢复。普通查询、无参 breath 和 Footprint 展示均没有恢复权限。
+恢复是对归档状态的显式逆操作：`trace(bucket_id="...", restore=True)` 必须单独调用。`BucketManager.restore_archived()` 根据创建足迹恢复原 bucket type，清除 tombstone/deleted_at 等归档标记，把 Markdown 移回对应活跃目录，重建正文与 meaning 派生索引，并追加 `TraceRestored`。归档期间会保留历史 pinned 标记，但恢复提交会原子清除它，避免记忆静默重新占用 pinned 配额；importance 本身不设硬配额，恢复后原样保留。历史档案若异常同时带有 protected 与 anchor，普通恢复会拒绝；调用 `trace(bucket_id="...", restore=True, protected=0, importance=1..10)` 可在同一事务中保留 anchor、解除保护并恢复。普通查询、无参 breath 和 Footprint 展示均没有恢复权限。
 
 ### 3.2 `hold` — 存储单条记忆
 
@@ -368,30 +368,29 @@ feel 桶自身：
 
 ### 3.6 `dream` — 做梦自省
 
-签名：`dream(window_hours=48, inspiration=False)`（默认 48h 窗口；clamp 到 1~336h）
+签名：`dream(window_hours=48)`（默认 48h 窗口；clamp 到 1~336h）
 
-- 默认取过去 48 小时内 `created` 或 `last_active` 任一在窗口内的桶（排除 permanent/feel/pinned/protected/plan/letter，以及 digested/dont_surface/anchor）。pinned/permanent 可作为只读 core 背景；protected 不进入 recent/core、I 候选及碰撞、active plan、feel 历史、连接/结晶提示或显式灵感候选，避免任何 dream 旁路被动注入。
-- 排序：先按 `last_active` 倒序；候选超过 **40 个**时改按 `decay_engine.calculate_score()` 降序截断到前 40，避免一次涌进来太多撑爆上下文
-- 拼接桶摘要（完整正文，不截断）+ 自省引导 header
-- embedding 启用时附加：连接提示（最相似对，`>0.5`）+ feel 结晶提示（一条 feel 与 ≥2 条其它 feel 相似度 `>0.7` → 建议升级为 pinned）
-- 仅当调用方显式传 `inspiration=True` 时，在正文前部追加最多三个响应态 Spark 材料/问题候选：
-  - policy-first 只允许活动、未解决、普通 `dynamic` 桶；排除归档/删除/墓碑、`dont_surface`、
-    `digested`、anchor、pinned/protected/permanent 和私有类型
-  - 只读本地 `embeddings.db` 已有向量，不调用 embedding provider；选择语义近邻、跨域桥接及
-    条件反转核查材料，不包含随机通道
-  - 每条带两个来源 ID、完整正文 SHA-256、精确片段跨度、待核查共享结构、不对应处和假设；
-    向量相似度仅为选择证据，不合成灵感分、真值分或行动分
-  - 候选 `persistent=false`、`lifetime=response_only`、`retrievable=false`，不调用
-    `touch/touch_many`、不写桶、不记账、不进入 webhook payload；当前模型保留判断权
-  - embedding 关闭、向量不足或无合格非随机配对时失败关闭为空说明，不回退到普通 search、
-    随机材料或未过滤池
-- 末尾追加 `=== 你的 active plans ===` 全量列表
-- 末尾追加 `=== 你的 feel 历史（全量，旧 feel 按 token 预算折叠）===`：按 `surfacing.feel_max_tokens`（默认 6000）做预算，超出的老 feel 折叠为 60 字符单行摘要
+最终输出按固定顺序拼七段：
 
-(实现细节：用户可手动传更大的 `window_hours`，但软上限 40 仍生效。`inspiration=False`
-保持原 dream 输出；参数只接受布尔值且不会自动翻转。Spark 候选和其边界也计入
-`surfacing.dream_max_tokens`，预算不足时整段省略而不破坏边界。plan 历史不参与 token
-预算全量返回；feel 历史走 token 预算折叠。)
+1. **近期活跃记忆正文**：过去 window_hours 内 `created` 或 `last_active` 任一在窗口内的桶
+   （排除 permanent/feel/pinned/resolved/protected/plan/letter，以及 digested/dont_surface/anchor）。
+   排序先按 `last_active` 倒序；候选超过 **40 个**时改按 `decay_engine.calculate_score()`
+   降序截断到前 40，避免一次涌进来太多撑爆上下文。
+2. **核心准则参考**：pinned/permanent 桶，作为只读背景；protected 不进入。
+3. **你的 active plans**：未受 protected 保护、`status=active` 的 plan，按 created 倒序全量列出。
+4. **你的 feel 历史**：排除 protected 后按 `surfacing.feel_max_tokens`（默认 6000）对最终渲染块
+   计费；新 feel 优先全文，放不下的折叠为 40 字符单行摘录，截断信号直接拼进展示文本末尾
+   （「…」），不依赖任何元数据字段。
+5. **connection hint**：embedding 启用时，在近期桶里找余弦相似度最高的一对（`>0.5`）给出提示。
+6. **crystal hint**：低频触发——要凑够一簇 **5** 条互相相似（`>0.7`）的 feel 才提示一次
+   「可以考虑 `hold(pinned=True)` 升级」，避免同一批 feel 每场梦都刷同样的提示。
+7. **「我觉得」I 候选段**：列出待沉淀的候选，选取规则并入第 1 段的同一套 48 小时窗口/排除
+   pinned/排除 resolved 规则（protected 排除单独保留）；每条附本次撞上的材料与见证次数。
+
+整体输出受 `surfacing.dream_max_tokens`（默认 20000）硬预算约束，超预算只整段省略、绝不
+截断正文；用户可手动传更大的 `window_hours`，但软上限 40 仍生效；plan 历史不参与 token
+预算全量返回，feel 历史走 token 预算折叠。展示正文只做双链正则清理（不改磁盘原文），
+每条渲染出的桶下面附一行简洁 Footprint。
 
 ### 3.7 `plan` — 登记待办
 
@@ -1399,7 +1398,7 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 
 `protected` 使用独立 `limits.max_protected`（默认 20）。计数只看活跃、非终态且 `metadata.protected=True` 的逻辑桶，按 bucket ID 去重；显式 permanent 和 pinned 不会自动占用 protected 配额。False→True 的检查与落盘必须在同一 `protected` quota turn 内完成，满额必须硬拒绝。
 
-**importance≥9 配额口径**：只统计能被 `breath_advanced(importance_min=9)` 审计的普通记忆，再排除走独立配额的 `pinned/protected`。因此 `dont_surface`、`feel/plan/letter`、archived/deleted/tombstone 不占该池；显式且未 pinned/protected 的 `permanent` 仍属于普通高重要度候选。历史恢复或手工文件可能产生同 ID 的物理副本，配额始终按逻辑 bucket ID 只计一次。取消钉选或保护、恢复浮现、特殊类型转回 dynamic/permanent、历史对话在线导入，以及其他在线新建/合并导致 importance 升到 9+ 时，资格检查和写盘必须在同一个 `high_importance` quota turn 内完成；历史对话导入本身只做精确内容去重，不再语义合并旧桶。备份迁移、`write_memory.py` 和手工 Markdown 属于受信任的保真/维护入口，允许原样恢复或直接修订数据，不适用在线写入配额。
+**importance 不设硬配额**：rule.md §2 的稀缺性哲学由 `pinned`（20）/`anchor`（24）两个结构承担；`importance` 只是普通评分字段，`importance>=9` 没有硬上限、软警告或自动降级，`is_importance_audit_candidate()` 只用来定义 `breath_advanced(importance_min=...)` 的可审计范围，不再是配额口径。
 
 (实现注意：`pinned` 是需要主动重见的核心准则；`protected` 只防衰减、不主动浮现。两者互斥，单桶不能同时为 True；均可由 trace 显式修改，但使用独立配额，不得再把 protected 当作 pinned 注入。)
 

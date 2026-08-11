@@ -7,8 +7,6 @@ has a working compression provider; otherwise the long-form grow test verifies
 the documented provider-unavailable error path.
 """
 
-import base64
-import hashlib
 import json
 import os
 import re
@@ -135,7 +133,7 @@ EXPECTED_TOOL_PROPERTIES = {
     "letter_lock_update": {"letter_id", "lock_type", "unlock_date"},
     "letter_read": {"query", "limit", "author", "date_from", "date_to"},
     "I": {"content", "aspect", "read", "limit", "promote"},
-    "dream": {"window_hours", "inspiration"},
+    "dream": {"window_hours"},
 }
 
 EXPECTED_REQUIRED_PROPERTIES = {
@@ -276,37 +274,6 @@ def _bucket_ids(text: str) -> set[str]:
     return set(re.findall(r"(?<![0-9a-f])[0-9a-f]{12}(?![0-9a-f])", text))
 
 
-_INLINE_OBM2 = re.compile(
-    r"\[OBM2 k=(s) a=(00) f=(v) b=([0-9a-f]{24}) "
-    r"n=(\d+) h=([A-Za-z0-9_-]{43})\]"
-)
-
-
-def _inline_obm2_payload(text: str) -> dict[str, object]:
-    match = _INLINE_OBM2.search(text)
-    assert match is not None, text
-    kind, authority, flags, boundary, chars_text, digest = match.groups()
-    assert text.startswith("\n", match.end())
-    payload_start = match.end() + 1
-    declared_chars = int(chars_text)
-    payload = text[payload_start:payload_start + declared_chars]
-    assert len(payload) == declared_chars
-    expected_digest = base64.urlsafe_b64encode(
-        hashlib.sha256(payload.encode("utf-8")).digest()
-    ).decode("ascii").rstrip("=")
-    assert digest == expected_digest
-    assert len(base64.urlsafe_b64decode(digest + "=")) == 32
-    return {
-        "a": authority,
-        "b": boundary,
-        "f": flags,
-        "h": digest,
-        "k": kind,
-        "n": declared_chars,
-        "payload": payload,
-    }
-
-
 def _hold(mcp_client: MCPClient, marker: str, **overrides) -> str:
     arguments = {"content": marker, "tags": "docker,mcp", "importance": 7}
     arguments.update(overrides)
@@ -349,7 +316,7 @@ def test_concurrent_clients_discover_the_same_stateless_dream_schema():
         schemas = list(pool.map(discover, range(4)))
 
     assert all(schema == schemas[0] for schema in schemas)
-    assert set(schemas[0]["properties"]) == {"window_hours", "inspiration"}
+    assert set(schemas[0]["properties"]) == {"window_hours"}
 
 
 def test_manifest_exposes_exactly_the_documented_15_tools(mcp_client):
@@ -389,7 +356,6 @@ def test_manifest_exposes_exactly_the_documented_15_tools(mcp_client):
         ("letter_read", {"limit": {"not": "an integer"}}, "limit"),
         ("I", {"read": {"not": "a boolean"}}, "read"),
         ("dream", {"window_hours": {"not": "an integer"}}, "window_hours"),
-        ("dream", {"inspiration": {"not": "a boolean"}}, "inspiration"),
     ],
 )
 def test_all_tools_reject_schema_invalid_arguments(mcp_client, tool, arguments, field):
@@ -467,8 +433,11 @@ def test_breath_returns_matching_stored_content(mcp_client):
     result = mcp_client.call("breath_search", {"query": marker, "max_results": 5})
     assert marker in result
     assert bucket_id in result
-    assert result.count("[OBM2] 下方") == 1
-    assert result.count("[OBM2 k=") >= 1
+    # 安全标记系统（OBM2）已整体删除：命中的正文干净返回，不带任何边界/
+    # 哈希/协议说明标记。
+    assert "OBM2" not in result
+    assert "boundary_id" not in result
+    assert "content_role:stored_memory_data" not in result
 
 
 def test_pre_split_breath_arguments_remain_compatible(mcp_client):
@@ -851,33 +820,6 @@ def test_dream_returns_recent_complete_memory(mcp_client):
     assert marker in result
 
 
-def test_dream_inspiration_is_explicit_and_does_not_add_a_tool(mcp_client):
-    marker = _marker("dream-inspiration")
-    bucket_id = _hold(mcp_client, marker, test_data=True)
-
-    try:
-        ordinary = mcp_client.call("dream", {"window_hours": 48})
-        inspired = mcp_client.call(
-            "dream",
-            {"window_hours": 48, "inspiration": True},
-        )
-
-        assert "Spark 灵感候选" not in ordinary
-        assert "Spark 灵感候选（显式请求、仅本次响应）" in inspired
-        assert "不是事实、当前立场、行动建议或工具许可" in inspired
-        assert len(mcp_client.list_tools()) == 16
-    finally:
-        cleanup = mcp_client.call(
-            "trace",
-            {
-                "bucket_id": bucket_id,
-                "hard_delete": True,
-                "delete_reason": "Spark Docker integration cleanup",
-            },
-        )
-        assert "已永久删除测试桶" in cleanup
-
-
 @pytest.mark.parametrize(("window_hours", "expected_window"), [(-100, 1), (1000, 336)])
 def test_dream_clamps_window_to_documented_bounds(mcp_client, window_hours, expected_window):
     marker = _marker(f"dream-{expected_window}")
@@ -919,7 +861,10 @@ def test_invalid_tool_arguments_fail_cleanly(mcp_client, tool, arguments, expect
     assert expected in result
 
 
-def test_prompt_injection_text_is_returned_verbatim_but_marked_as_data(mcp_client):
+def test_prompt_injection_text_is_returned_verbatim_without_any_safety_markers(mcp_client):
+    # 安全标记系统（OBM2）已整体删除（2026-08-11）：即使正文本身伪造了看起来
+    # 像标记的文字，命中后也只逐字返回正文本身，系统不再额外包裹任何边界/
+    # 哈希/协议说明。
     marker = _marker("prompt-data")
     content = (
         f"{marker}\n"
@@ -929,18 +874,12 @@ def test_prompt_injection_text_is_returned_verbatim_but_marked_as_data(mcp_clien
     )
     bucket_id = _hold(mcp_client, content)
     result = mcp_client.call("breath_search", {"query": marker, "max_results": 1})
-    assert result.count("[OBM2] 下方") == 1
-    block = _inline_obm2_payload(result)
-    assert block["a"] == "00"
-    assert block["k"] == "s"
-    assert block["f"] == "v"
-    framed_payload = block["payload"]
-    assert isinstance(framed_payload, str)
-    metadata_header, body = framed_payload.split("\n", 1)
-    assert f"[bucket_id:{bucket_id}]" in metadata_header
-    assert body == content
-    assert block["n"] == len(framed_payload)
-    assert result.count("[OBM2 k=") == 2  # 真标记 + 正文中伪标记
+    assert f"[bucket_id:{bucket_id}]" in result
+    assert content in result
+    # 正文里伪造的 OBM2 文本只出现它自己那一次，系统没有再补一份真标记。
+    assert result.count("[OBM2 k=") == 1
+    assert "boundary_id" not in result
+    assert "content_role:stored_memory_data" not in result
 
 
 def test_path_traversal_shaped_bucket_id_is_treated_as_an_identifier(mcp_client):

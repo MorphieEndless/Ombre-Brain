@@ -8,7 +8,9 @@ tools/grow/core.py — grow 长内容主路径（digest + merge）
 
 关键行为：
 - digest 失败（API key 不可用）时直接 RuntimeError，不创建任何桶
-- 逐条调 merge_or_create（grow 路径用 LLM merge，会压缩老+新）
+- 各 item 之间互不依赖，用 asyncio.gather 并发处理（而不是逐条 await 串行）；
+  merge_or_create 内部按内容哈希的租约锁不受影响——同内容仍会正确串行，
+  只是不同内容的 item 之间不再互相等待
 - iter 2.0：每次 grow 调用生成一个 ``grow_batch_id``，同批次新建桶共享，
   source_tool 一律为 ``grow``；合并到的老桶不改 source_tool
 - 单条失败不影响其他；按字节上限校验单条尺寸
@@ -69,17 +71,12 @@ async def grow_core(content: str) -> str:
     # 用 12 位 hex 与 bucket_id 长度对齐，加 g_ 前缀方便人眼区分。
     batch_id = f"g_{uuid.uuid4().hex[:12]}"
 
-    results = []
-    created = 0
-    merged = 0
-    embed_warnings = []
-
-    for item in items:
+    async def _process_item(item: dict) -> dict:
+        """处理 digest 拆出的一条独立 item，返回结构化结果供 gather 后汇总。"""
+        size_err = check_content_size(item.get("content", ""))
+        if size_err:
+            return {"line": f"⚠️{item.get('name', '?')}（{size_err}）"}
         try:
-            size_err = check_content_size(item.get("content", ""))
-            if size_err:
-                results.append(f"⚠️{item.get('name', '?')}（{size_err}）")
-                continue
             result_name, is_merged, embed_warn = await merge_or_create(
                 content=item["content"],
                 tags=item.get("tags") or [],
@@ -93,22 +90,40 @@ async def grow_core(content: str) -> str:
                 source_tool="grow",
                 grow_batch_id=batch_id,
             )
-            if embed_warn and embed_warn not in embed_warnings:
-                embed_warnings.append(embed_warn)
-
-            if is_merged:
-                results.append(f"📎{result_name}")
-                merged += 1
-            else:
-                results.append(f"📝{item.get('name', result_name)}")
-                created += 1
-                asyncio.create_task(check_duplicate_for(result_name, item["content"]))
         except Exception as e:
             rt.logger.warning(
                 f"Failed to process diary item / 日记条目处理失败: "
                 f"{item.get('name', '?')}: {e}"
             )
-            results.append(f"⚠️{item.get('name', '?')}")
+            return {"line": f"⚠️{item.get('name', '?')}"}
+        return {
+            "line": (
+                f"📎{result_name}" if is_merged
+                else f"📝{item.get('name', result_name)}"
+            ),
+            "merged": is_merged,
+            "embed_warn": embed_warn,
+            "dup_check": None if is_merged else (result_name, item["content"]),
+        }
+
+    outcomes = await asyncio.gather(*(_process_item(item) for item in items))
+
+    results = []
+    created = 0
+    merged = 0
+    embed_warnings = []
+    for outcome in outcomes:
+        results.append(outcome["line"])
+        if outcome.get("merged") is True:
+            merged += 1
+        elif outcome.get("merged") is False:
+            created += 1
+        embed_warn = outcome.get("embed_warn")
+        if embed_warn and embed_warn not in embed_warnings:
+            embed_warnings.append(embed_warn)
+        dup_check = outcome.get("dup_check")
+        if dup_check:
+            asyncio.create_task(check_duplicate_for(*dup_check))
 
     asyncio.create_task(check_plan_resolution(content))
     summary = f"{len(items)}条|新{created}合{merged} batch:{batch_id}\n" + "\n".join(results)
@@ -169,19 +184,14 @@ async def grow_items(items: list, source_content: str = "") -> str:
             return f"原文证据保存失败，未创建任何桶：{exc}"
 
     batch_id = f"g_{uuid.uuid4().hex[:12]}"
-    results = []
-    created = 0
-    merged = 0
-    embed_warnings = []
 
-    metadata_fallback = False
-    for item in clean:
+    async def _process_item(item: dict) -> dict:
+        """处理一条预拆分 item：只打标不改写正文，独立于其它 item。"""
         content_str = item["content"]
+        size_err = check_content_size(content_str)
+        if size_err:
+            return {"line": f"⚠️（{size_err}）"}
         try:
-            size_err = check_content_size(content_str)
-            if size_err:
-                results.append(f"⚠️（{size_err}）")
-                continue
             # 只打标，不改写正文；打标失败（如 API key 未配置）不应丢正文——
             # 落回本地中性元数据，与 hold 的降级行为保持一致（见 tools/hold/core.py）。
             needs_analysis = (
@@ -200,11 +210,12 @@ async def grow_items(items: list, source_content: str = "") -> str:
                 "tags": [],
                 "suggested_name": "",
             }
+            item_metadata_fallback = False
             if needs_analysis:
                 try:
                     meta = await rt.dehydrator.analyze(content_str)
                 except Exception as e:
-                    metadata_fallback = True
+                    item_metadata_fallback = True
                     rt.logger.warning(
                         "grow items metadata analysis failed; preserving raw content with local defaults / "
                         "grow items 打标失败，使用本地默认元数据并原样保存正文: "
@@ -262,18 +273,38 @@ async def grow_items(items: list, source_content: str = "") -> str:
                 grow_batch_id=batch_id,
                 raw_merge=True,  # 逐字追加，合并不压缩
             )
-            if embed_warn and embed_warn not in embed_warnings:
-                embed_warnings.append(embed_warn)
-            if is_merged:
-                results.append(f"📎{result_name}")
-                merged += 1
-            else:
-                results.append(f"📝{result_name}")
-                created += 1
-                asyncio.create_task(check_duplicate_for(result_name, content_str))
         except Exception as e:
             rt.logger.warning(f"grow items 条目处理失败 / verbatim item failed: {e}")
-            results.append("⚠️")
+            return {"line": "⚠️"}
+        return {
+            "line": f"📎{result_name}" if is_merged else f"📝{result_name}",
+            "merged": is_merged,
+            "embed_warn": embed_warn,
+            "dup_check": None if is_merged else (result_name, content_str),
+            "metadata_fallback": item_metadata_fallback,
+        }
+
+    outcomes = await asyncio.gather(*(_process_item(item) for item in clean))
+
+    results = []
+    created = 0
+    merged = 0
+    embed_warnings = []
+    metadata_fallback = False
+    for outcome in outcomes:
+        results.append(outcome["line"])
+        if outcome.get("merged") is True:
+            merged += 1
+        elif outcome.get("merged") is False:
+            created += 1
+        embed_warn = outcome.get("embed_warn")
+        if embed_warn and embed_warn not in embed_warnings:
+            embed_warnings.append(embed_warn)
+        if outcome.get("metadata_fallback"):
+            metadata_fallback = True
+        dup_check = outcome.get("dup_check")
+        if dup_check:
+            asyncio.create_task(check_duplicate_for(*dup_check))
 
     asyncio.create_task(check_plan_resolution("\n".join(item["content"] for item in clean)))
     summary = f"{len(clean)}条(预拆分·逐字)|新{created}合{merged} batch:{batch_id}\n" + "\n".join(results)

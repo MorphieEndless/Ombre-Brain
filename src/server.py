@@ -920,23 +920,18 @@ except (AttributeError, RuntimeError, TypeError, ValueError) as _trace_schema_ex
 @mcp.tool()
 async def dream(
     window_hours: Optional[int] = 48,
-    inspiration: bool = False,
 ) -> str:
     """读取最近 window_hours（默认 48h）内有变动的所有记忆桶,用于回顾与消化。
     每个桶返回其在窗口内的最新内容（按 last_active 取）,完整正文不截断。
     可据此操作：放下的 → trace(resolved=1) 沉底；有沉淀的 → hold(feel=True, source_bucket=...) 记录；无沉淀则不操作。
-    候选桶超过 40 时按 decay_engine.calculate_score() 排序取前 40，避免一次返回过多。
-    inspiration=True 时额外返回最多三个只读、带来源、仅本次响应有效的灵感材料/问题候选；
-    默认 False，不会自动触发，不新增 MCP 工具，也不会 touch、写回或让候选取得事实/行动权。"""
+    候选桶超过 40 时按 decay_engine.calculate_score() 排序取前 40，避免一次返回过多。"""
     return await _with_notice(
         _t_dream.dispatch(
             window_hours=window_hours,
-            inspiration=inspiration,
         ),
         op="dream",
         args={
             "window_hours": window_hours,
-            "inspiration": inspiration,
         },
     )
 

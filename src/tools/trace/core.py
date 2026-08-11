@@ -38,14 +38,11 @@ from ombrebrain.domain.memory_messages import resolved_hint
 from utils import parse_bool
 from .. import _runtime as rt
 from .._common import (
-    _HIGH_IMP_THRESHOLD,
     _quota_turn,
     check_content_size,
     check_metadata_size,
     check_pinned_quota,
     check_protected_quota,
-    enforce_high_importance_quota,
-    occupies_high_importance_quota_slot,
 )
 from ..plan.core import is_letter_bucket, letter_lock_revision, letter_lock_state
 
@@ -308,20 +305,6 @@ async def trace_core(
             if restore_unprotect
             else (10 if final_restore_protected else restored_importance)
         )
-        restored_quota_meta = dict(restore_meta)
-        restored_quota_meta.update({
-            "type": restored_type,
-            "pinned": False,
-            "protected": final_restore_protected,
-            "importance": restored_target_importance,
-        })
-        for terminal_field in (
-            "deleted_at", "tombstone", "tombstoned_at", "erasure_mode",
-        ):
-            restored_quota_meta.pop(terminal_field, None)
-        restore_reserves_high = occupies_high_importance_quota_slot(
-            restored_quota_meta
-        )
         restore_snapshot = (
             restore_pinned,
             restore_protected,
@@ -339,10 +322,6 @@ async def trace_core(
             if final_restore_protected:
                 await restore_stack.enter_async_context(
                     _quota_turn("protected")
-                )
-            if restore_reserves_high:
-                await restore_stack.enter_async_context(
-                    _quota_turn("high_importance")
                 )
 
             locked_reader = getattr(
@@ -376,15 +355,6 @@ async def trace_core(
                 quota_err = await check_protected_quota()
                 if quota_err:
                     return quota_err
-            elif restore_reserves_high:
-                adjusted_importance = await enforce_high_importance_quota(
-                    restored_target_importance
-                )
-                if (
-                    restore_unprotect
-                    or adjusted_importance != restored_importance
-                ):
-                    importance_override = adjusted_importance
 
             result = await rt.bucket_mgr.restore_archived(
                 bucket_id,
@@ -522,20 +492,14 @@ async def trace_core(
             "调用传入 importance=1..10。"
         )
 
-    # 配额判定 + 落盘必须在同一把锁里：check_pinned_quota/enforce_high_importance_quota
+    # 配额判定 + 落盘必须在同一把锁里：check_pinned_quota/check_protected_quota
     # 到最终 bucket_mgr.update() 之间隔着别的字段处理和一次 await，两个并发 trace()
     # 都可能在对方提交前读到同一个「未满」快照。是否需要哪把锁在动 updates 之前就
     # 能从入参判断出来，所以先算好，再把整段检查+落盘包进对应的 quota turn。
     current_importance = int(meta.get("importance") or 0)
     current_type = str(meta.get("type") or "dynamic").strip().lower()
-    unpinning_now = current_pinned and not final_pinned
     protecting_now = final_protected and not current_protected
     pinning_now = final_pinned and not current_pinned
-    final_type = current_type
-    if final_pinned:
-        final_type = "permanent"
-    elif unpinning_now:
-        final_type = "dynamic"
     requested_importance = (
         int(importance) if 1 <= importance <= 10 else current_importance
     )
@@ -547,46 +511,6 @@ async def trace_core(
     current_dont_surface = parse_bool(
         meta.get("dont_surface"), default=False
     )
-    final_dont_surface = (
-        bool(dont_surface)
-        if dont_surface in (0, 1)
-        else current_dont_surface
-    )
-    before_quota_meta = dict(meta)
-    before_quota_meta.update({
-        "importance": current_importance,
-        "pinned": current_pinned,
-        "protected": current_protected,
-        "type": current_type,
-        "dont_surface": current_dont_surface,
-    })
-    after_quota_meta = dict(before_quota_meta)
-    after_quota_meta.update({
-        "importance": final_importance,
-        "pinned": final_pinned,
-        "protected": final_protected,
-        "type": final_type,
-        "dont_surface": final_dont_surface,
-    })
-    occupied_high_before = occupies_high_importance_quota_slot(
-        before_quota_meta
-    )
-    occupies_high_after = occupies_high_importance_quota_slot(after_quota_meta)
-    reserves_high_importance = occupies_high_after and not occupied_high_before
-    eligibility_field_changed = (
-        pin_state_changed
-        or protected_state_changed
-        or final_dont_surface != current_dont_surface
-    )
-    importance_changed = final_importance != current_importance
-    needs_high_importance_lock = (
-        eligibility_field_changed
-        or (
-            importance_changed
-            and max(current_importance, final_importance)
-            >= _HIGH_IMP_THRESHOLD
-        )
-    )
     need_pinned_lock = pin_state_changed
     need_protected_lock = protected_state_changed
 
@@ -595,10 +519,8 @@ async def trace_core(
             await quota_stack.enter_async_context(_quota_turn("pinned"))
         if need_protected_lock:
             await quota_stack.enter_async_context(_quota_turn("protected"))
-        if needs_high_importance_lock:
-            await quota_stack.enter_async_context(_quota_turn("high_importance"))
 
-        if need_pinned_lock or need_protected_lock or needs_high_importance_lock:
+        if need_pinned_lock or need_protected_lock:
             locked_bucket = await rt.bucket_mgr.get(bucket_id)
             if not locked_bucket:
                 return f"未找到记忆桶: {bucket_id}"
@@ -624,11 +546,6 @@ async def trace_core(
                     f"记忆桶 {bucket_id} 在本次修改期间已被其他请求更新，"
                     "为避免覆盖或配额误判，请重试。"
                 )
-
-        if reserves_high_importance:
-            final_importance = await enforce_high_importance_quota(
-                final_importance
-            )
 
         updates: dict = {}
         if name:
@@ -676,13 +593,6 @@ async def trace_core(
             updates["weight"] = float(weight)
         if dont_surface in (0, 1):
             updates["dont_surface"] = bool(dont_surface)
-        if (
-            reserves_high_importance
-            and final_importance != requested_importance
-        ):
-            # 解除保护或恢复浮现可能新占普通高重要度名额；配额降级必须
-            # 与本次桶更新在同一事务内持久化。
-            updates["importance"] = final_importance
         why_remembered = str(why_remembered).strip()
         if why_remembered == "\\clear":
             updates["why_remembered"] = ""

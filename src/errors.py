@@ -172,16 +172,6 @@ ERROR_CODES: dict[str, ErrorSpec] = {
         title_en="valence/arousal out of range, clamped",
         suggestion_zh="valence/arousal 必须在 [0.0, 1.0]；本次已被修正到边界值。",
     ),
-    "OB-W003": ErrorSpec(
-        code="OB-W003",
-        level="W",
-        title_zh="importance≥9 配额接近上限",
-        title_en="importance≥9 quota near cap",
-        suggestion_zh=(
-            "标为 importance≥9 的桶接近上限（22/24，硬上限 24）。"
-            "建议先用 trace(bucket_id, importance=…) 把不再核心的旧桶降级，再标新桶。"
-        ),
-    ),
     "OB-W004": ErrorSpec(
         code="OB-W004",
         level="W",
@@ -205,19 +195,6 @@ ERROR_CODES: dict[str, ErrorSpec] = {
     ),
 
     # ---- Info：自动降级 / 轻量提示 ----
-    "OB-I001": ErrorSpec(
-        code="OB-I001",
-        level="I",
-        title_zh="importance 已自动降级（importance≥9 配额超标）",
-        title_en="importance auto-downgraded (≥9 quota exceeded)",
-        suggestion_zh=(
-            "★ 这是 OB 自作主张帮你做的事 ★\n"
-            "importance≥9 的桶已达硬上限 24，本次新桶被自动降级为 importance=8。\n"
-            "建议：用 breath_advanced(importance_min=9) 重读全部「核心事项」，"
-            "重新评估每条 importance；不再核心的用 trace(bucket_id, importance=7) 降级。\n"
-            "（重新设定 importance 的责任在你，OB 不会替你判断哪条更重要。）"
-        ),
-    ),
     "OB-I002": ErrorSpec(
         code="OB-I002",
         level="I",

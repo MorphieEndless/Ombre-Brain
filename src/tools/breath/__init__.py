@@ -31,19 +31,14 @@ from typing import Optional
 
 from .. import _runtime as rt
 from .._common import (
-    attach_memory_data_protocol,
     check_metadata_size,
     check_query_size,
-    memory_data_protocol_header,
 )
 from .catalog import surface_catalog
 from .feel import surface_feels
 from .importance import surface_by_importance
 from .surface import surface_default
 from .search import surface_search
-from utils import count_tokens_approx
-
-_MEMORY_PROTOCOL_BUDGET_MARGIN = 1
 
 
 async def dispatch(
@@ -112,12 +107,7 @@ async def dispatch(
     max_results = min(max_results, 50)
     max_tokens = min(max_tokens, 20000)
     tag_filter = [t.strip() for t in tags.split(",") if t.strip()]
-    memory_max_tokens = max(
-        0,
-        max_tokens
-        - count_tokens_approx(f"{memory_data_protocol_header()}\n")
-        - _MEMORY_PROTOCOL_BUDGET_MARGIN,
-    )
+    memory_max_tokens = max_tokens
 
     # --- catalog 目录模式：最先短路，0 LLM、只读元数据、每桶一行 ---
     # 开新窗省 token 的推荐姿势：先 breath(catalog=True) 看目录，
@@ -137,29 +127,26 @@ async def dispatch(
 
     # --- Feel 通道优先：即使无 query 也直接拉 feel ---
     if domain.strip().lower() == "feel":
-        result = await surface_feels(max_tokens=memory_max_tokens)
-        return attach_memory_data_protocol(result)
+        return await surface_feels(max_tokens=memory_max_tokens)
 
     # --- importance_min 模式：跳过语义，按 importance 降序 ---
     if importance_min >= 1:
-        result = await surface_by_importance(
+        return await surface_by_importance(
             importance_min=importance_min,
             max_tokens=memory_max_tokens,
             tag_filter=tag_filter,
         )
-        return attach_memory_data_protocol(result)
 
     # --- 无 query：浮现模式 ---
     if not query or not query.strip():
-        result = await surface_default(
+        return await surface_default(
             max_results=max_results,
             max_tokens=memory_max_tokens,
             tag_filter=tag_filter,
         )
-        return attach_memory_data_protocol(result)
 
     # --- 有 query：检索模式 ---
-    result = await surface_search(
+    return await surface_search(
         query=query,
         max_results=max_results,
         max_tokens=memory_max_tokens,
@@ -170,4 +157,3 @@ async def dispatch(
         date_from=date_from,
         date_to=date_to,
     )
-    return attach_memory_data_protocol(result)

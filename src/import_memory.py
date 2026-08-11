@@ -34,11 +34,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from tools._common import (
-    _HIGH_IMP_THRESHOLD,
-    _quota_turn,
-    enforce_high_importance_quota,
-)
 from tools.plan.core import is_letter_bucket
 from utils import atomic_write_text, clean_llm_json, count_tokens_approx, now_iso, parse_bool
 
@@ -1247,47 +1242,22 @@ class ImportEngine:
             )
 
     async def _create_import_bucket(self, item: dict) -> str:
-        """在普通高重要度配额内创建一条导入记忆。"""
+        """创建一条导入记忆；importance 只是普通评分字段，不设硬配额。"""
         requested_importance = item.get(
             "importance", _DEFAULT_IMPORTANCE
         )
-
-        async def create(
-            final_importance: int,
-            *,
-            defer_derived_index: bool = False,
-        ) -> str:
-            return await self.bucket_mgr.create(
-                content=item["content"],
-                tags=item.get("tags", []),
-                importance=final_importance,
-                domain=item.get("domain", ["未分类"]),
-                valence=item.get("valence", _DEFAULT_VALENCE),
-                arousal=item.get("arousal", _DEFAULT_AROUSAL),
-                name=item.get("name") or None,
-                source_tool="import",
-                event_actor="human",
-                imported=True,
-                defer_derived_index=defer_derived_index,
-            )
-
-        if requested_importance >= _HIGH_IMP_THRESHOLD:
-            async with _quota_turn("high_importance"):
-                final_importance = await enforce_high_importance_quota(
-                    requested_importance,
-                    bucket_mgr=self.bucket_mgr,
-                )
-                bucket_id = await create(
-                    final_importance,
-                    defer_derived_index=True,
-                )
-            post_index = getattr(
-                self.bucket_mgr, "_index_after_update", None
-            )
-            if callable(post_index):
-                await post_index(bucket_id, content_changed=True)
-            return bucket_id
-        return await create(requested_importance)
+        return await self.bucket_mgr.create(
+            content=item["content"],
+            tags=item.get("tags", []),
+            importance=requested_importance,
+            domain=item.get("domain", ["未分类"]),
+            valence=item.get("valence", _DEFAULT_VALENCE),
+            arousal=item.get("arousal", _DEFAULT_AROUSAL),
+            name=item.get("name") or None,
+            source_tool="import",
+            event_actor="human",
+            imported=True,
+        )
 
     async def _process_single_chunk(self, chunk: dict, preserve_raw: bool) -> bool:
         """Extract memories from a single chunk and store them."""

@@ -35,6 +35,20 @@ async def surface_feels(max_tokens: int) -> str:
         feels.sort(key=lambda b: b.get("metadata", {}).get("created", ""), reverse=True)
         if not feels:
             return "没有留下过 feel。"
+
+        try:
+            footprint_snapshot = rt.bucket_mgr.footprint_snapshot()
+        except Exception as exc:
+            rt.logger.warning(f"Footprint snapshot unavailable / 足迹读取失败: {exc}")
+            footprint_snapshot = None
+
+        def _footprint(bucket: dict) -> str:
+            if footprint_snapshot is None:
+                return "👣 Footprint：暂时无法读取"
+            return footprint_snapshot.summary(
+                str(bucket.get("id") or ""), bucket.get("metadata", {})
+            )
+
         full_lines: list[str] = []
         used = 0
         omitted = 0
@@ -43,6 +57,7 @@ async def surface_feels(max_tokens: int) -> str:
             full_entry, cost = render_stored_bucket(
                 f,
                 f"[{created}] [bucket_id:{f['id']}]",
+                _footprint(f),
             )
             if used + cost <= max_tokens:
                 full_lines.append(full_entry)

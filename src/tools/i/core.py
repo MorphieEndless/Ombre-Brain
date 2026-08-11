@@ -37,7 +37,7 @@ from datetime import datetime
 from typing import Optional
 
 from .. import _runtime as rt
-from .._common import check_content_size, check_metadata_size, stored_data_marker
+from .._common import check_content_size, check_metadata_size
 from ..plan.core import is_letter_bucket
 
 _VALID_ASPECTS = {"nature", "values", "patterns", "limits", "becoming", "uncertainty", "stance"}
@@ -318,12 +318,7 @@ async def _read_i(limit: int) -> str:
             )
             text = (b.get("content") or "").strip()
             payload = f"{ts} {aspect_label}{b['id']} {origin}\n{text}"
-            lines.append(
-                "\n"
-                + stored_data_marker(payload, provenance=f"I:{b['id']}")
-                + "\n"
-                + payload
-            )
+            lines.append("\n" + payload)
 
     if pending:
         pending.sort(
@@ -344,11 +339,6 @@ async def _read_i(limit: int) -> str:
                 f"{created} {aspect_label}{b['id']} "
                 f"（{passes}/{I_PROMOTE_THRESHOLD} 次 dream）\n{text}"
             )
-            lines.append(
-                "\n"
-                + stored_data_marker(payload, provenance=f"I_candidate:{b['id']}")
-                + "\n"
-                + payload
-            )
+            lines.append("\n" + payload)
 
     return "\n".join(lines)

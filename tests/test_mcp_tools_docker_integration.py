@@ -274,6 +274,15 @@ def _bucket_ids(text: str) -> set[str]:
     return set(re.findall(r"(?<![0-9a-f])[0-9a-f]{12}(?![0-9a-f])", text))
 
 
+def _i_witness_progress(text: str, bucket_id: str) -> tuple[int, int]:
+    match = re.search(
+        rf"{re.escape(bucket_id)}\s+（(\d+)/(\d+) 次 dream）",
+        text,
+    )
+    assert match, text
+    return int(match.group(1)), int(match.group(2))
+
+
 def _hold(mcp_client: MCPClient, marker: str, **overrides) -> str:
     arguments = {"content": marker, "tags": "docker,mcp", "importance": 7}
     arguments.update(overrides)
@@ -811,6 +820,27 @@ def test_I_writes_and_reads_pending_self_description(mcp_client):
     read_back = mcp_client.call("I", {"read": True, "limit": 20})
     assert "=== 正在沉淀的「我觉得」" in read_back
     assert marker in read_back
+
+
+def test_I_candidate_visible_in_dream_advances_one_witness(mcp_client):
+    marker = _marker("i-dream-witness")
+    written = mcp_client.call(
+        "I",
+        {"content": marker, "aspect": "patterns"},
+    )
+    candidate_id = _bucket_id(written)
+
+    before = mcp_client.call("I", {"read": True, "limit": 100})
+    assert marker in before
+    assert _i_witness_progress(before, candidate_id) == (0, 3)
+
+    dreamed = mcp_client.call("dream", {"window_hours": 48})
+    assert marker in dreamed
+    assert candidate_id in dreamed
+
+    after = mcp_client.call("I", {"read": True, "limit": 100})
+    assert marker in after
+    assert _i_witness_progress(after, candidate_id) == (1, 3)
 
 
 def test_dream_returns_recent_complete_memory(mcp_client):

@@ -23,7 +23,8 @@ tools/dream/output.py — dream 最终输出格式化
   边界/哈希标记——返回的就是记忆正文本身
 - 每条渲染出的桶下面附一行简洁 Footprint（沿用 breath 的展示风格）
 - I 候选段：列所有待沉淀的「我觉得……」，每条附本次撞上的材料与见证次数；
-  只报告实际渲染出的候选 ID，见证计数由 dream/__init__.py 事后写入
+  统一报告最终输出中实际出现的候选 ID（近期正文、候选主块或碰撞材料），
+  见证计数由 dream/__init__.py 事后写入
 - active plan 段：列未受 protected 保护且 status=active 的 plan（按 created 倒序）
 - 整体输出受 surfacing.dream_max_tokens（默认 20000）硬预算约束；只省略完整块，
   绝不截断正文
@@ -41,6 +42,7 @@ tools/dream/output.py — dream 最终输出格式化
 """
 
 from .. import _runtime as rt
+from ..i import is_pending_candidate
 from ..plan.core import is_letter_bucket
 from utils import count_tokens_approx, parse_bool, strip_wikilinks
 
@@ -68,16 +70,24 @@ def _bucket_data_block(
     return rendered
 
 
+def _pending_candidate_id(bucket: dict) -> str:
+    """Return the ID only while ``bucket`` remains an I candidate."""
+    if not is_pending_candidate(bucket):
+        return ""
+    return str(bucket.get("id") or "").strip()
+
+
 def _format_self_review(
     self_review: object,
     final_text: str,
     dream_budget: int,
     footprint_fn,
 ) -> tuple[str, list[str]]:
-    """渲染「我觉得……」候选段，返回（可追加的文本, 实际渲染出的候选 ID）。
+    """渲染「我觉得……」候选段，返回（可追加文本, 其中出现的候选 ID）。
 
-    调用方只在这段真的进了最终输出之后，才把 ID 记成「被见证过一次」——
-    没被看见的不算经历过这场梦。放不下时返回空串。
+    ID 包括候选主块和碰撞材料里的其它待沉淀候选。调用方只在整段真的
+    进了最终输出后才使用这些 ID；没被看见的不算经历过这场梦。
+    放不下时返回空串。
     """
     candidates = list(getattr(self_review, "candidates", None) or [])
     if not candidates:
@@ -101,6 +111,7 @@ def _format_self_review(
 
     rendered: list[str] = []
     rendered_ids: list[str] = []
+    rendered_id_set: set[str] = set()
     omitted = 0
     for candidate in candidates:
         bucket = candidate.bucket
@@ -126,6 +137,7 @@ def _format_self_review(
             footprint=footprint_fn(bucket),
         )
         blocks = [block]
+        entry_candidate_ids = [_pending_candidate_id(bucket)]
         for other, sim in candidate.collisions or []:
             other_meta = other.get("metadata") or {}
             other_type = str(other_meta.get("type") or "dynamic")
@@ -149,11 +161,15 @@ def _format_self_review(
                     footprint=footprint_fn(other),
                 )
             )
+            entry_candidate_ids.append(_pending_candidate_id(other))
         entry = "\n".join(blocks)
         candidate_text = prefix + "\n---\n".join([*rendered, entry])
         if count_tokens_approx(final_text + candidate_text) <= dream_budget:
             rendered.append(entry)
-            rendered_ids.append(bucket["id"])
+            for candidate_id in entry_candidate_ids:
+                if candidate_id and candidate_id not in rendered_id_set:
+                    rendered_id_set.add(candidate_id)
+                    rendered_ids.append(candidate_id)
         else:
             omitted += 1
 
@@ -217,7 +233,7 @@ def format_dream_output(
             lines.append(f"🖼️ media: {m['path']}{label}")
         return ("\n" + "\n".join(lines)) if lines else ""
 
-    parts = []
+    parts: list[tuple[dict, str]] = []
     for b in recent:
         meta = b["metadata"]
         domains = ",".join(meta.get("domain", []))
@@ -226,16 +242,19 @@ def format_dream_output(
         created = meta.get("created", "")
         last_active = meta.get("last_active", "")
         parts.append(
-            _bucket_data_block(
+            (
                 b,
-                display_prefix=(
-                    f"[{meta.get('name', b['id'])}] "
-                    f"主题:{domains} V{val:.1f}/A{aro:.1f} "
-                    f"创建:{created} 最近活跃:{last_active}\n"
-                    f"ID: {b['id']}"
-                    f"{_miss_lines(meta)}\n"
+                _bucket_data_block(
+                    b,
+                    display_prefix=(
+                        f"[{meta.get('name', b['id'])}] "
+                        f"主题:{domains} V{val:.1f}/A{aro:.1f} "
+                        f"创建:{created} 最近活跃:{last_active}\n"
+                        f"ID: {b['id']}"
+                        f"{_miss_lines(meta)}\n"
+                    ),
+                    footprint=_footprint(b),
                 ),
-                footprint=_footprint(b),
             )
         )
 
@@ -252,6 +271,14 @@ def format_dream_output(
     )
 
     final_text = header
+    rendered_candidate_ids: list[str] = []
+    rendered_candidate_id_set: set[str] = set()
+
+    def mark_rendered_candidate(candidate_id: str) -> None:
+        candidate_id = str(candidate_id or "").strip()
+        if candidate_id and candidate_id not in rendered_candidate_id_set:
+            rendered_candidate_id_set.add(candidate_id)
+            rendered_candidate_ids.append(candidate_id)
 
     def append_fragment(fragment: str) -> bool:
         nonlocal final_text
@@ -264,10 +291,11 @@ def format_dream_output(
     # --- ① 近期活跃记忆正文 ---
     recent_added = 0
     recent_omitted = 0
-    for block in parts:
+    for bucket, block in parts:
         separator = "" if recent_added == 0 else "\n---\n"
         if append_fragment(separator + block):
             recent_added += 1
+            mark_rendered_candidate(_pending_candidate_id(bucket))
         else:
             recent_omitted += 1
     if recent_omitted:
@@ -442,15 +470,25 @@ def format_dream_output(
     if self_review is not None:
         try:
             section, rendered_ids = _format_self_review(
-                self_review, final_text, dream_budget, _footprint
+                self_review,
+                final_text,
+                dream_budget,
+                _footprint,
             )
             if section and append_fragment(section):
-                try:
-                    self_review.rendered_ids = rendered_ids
-                except AttributeError:
-                    pass
+                for candidate_id in rendered_ids:
+                    mark_rendered_candidate(candidate_id)
         except Exception as e:
             rt.logger.warning(f"Dream self candidate section failed: {e}")
+
+        # ``rendered_ids`` is the union of pending candidates whose structured
+        # memory block actually made it into the final output: the ordinary
+        # recent section, the dedicated I section, or a collision inside it.
+        # This keeps "visible" and "witnessed" on one definition.
+        try:
+            self_review.rendered_ids = rendered_candidate_ids
+        except AttributeError:
+            pass
 
     final_text += (
         "\n\n在过往中汲取成长，在失败中认出形状。\n"

@@ -443,9 +443,9 @@ Dashboard 的既有 `/api/letter/{letter_id}` PATCH 同时承载两类互斥请�
 
 dream 侧配合（`tools/dream/hints.py` + `output.py`）：
 
-- `collect_self_candidates(all_buckets)` 收集全部待沉淀候选，用**已落盘向量**（不发新请求）为每条取相似度 ≥ 0.35 的前 3 条对照材料；对照池 = 全部正式 I 条目 + 全部其它候选 + 最近 200 条普通桶（排除 `letter`）。向量不可用时只列候选并明说。
-- 输出段落排在 recent 段之后、active plan 段之前，受 `surfacing.dream_max_tokens` 预算约束。
-- 见证计数由 `dream/__init__.py` 在渲染成功后调 `tools.i.record_dream_pass()` 写入，按天去重；因预算未展开的候选不计次——没被看见的不算经历过。
+- `collect_self_candidates(all_buckets, window_hours)` 收集窗口内待沉淀候选，用**已落盘向量**（不发新请求）为每条取相似度 ≥ 0.35 的前 3 条对照材料；对照池 = 全部正式 I 条目 + 全部其它候选 + 最近 200 条普通桶（排除 `letter`）。向量不可用时只列候选并明说。
+- 专用候选段排在 dream 其它上下文之后，受 `surfacing.dream_max_tokens` 预算约束；候选本身也可能作为普通近期记忆，或作为另一条候选的碰撞材料出现。
+- 见证计数由 `dream/__init__.py` 在最终输出渲染完成后调 `tools.i.record_dream_pass()` 写入，按不同日期去重。只要待沉淀候选的结构化记忆块实际出现在本次输出（近期记忆、候选主块或碰撞材料），就算一次见证；所有位置都因预算未展开时才不计次。
 - 碰撞只摆材料，**不做矛盾/重复判定**（认知层边界，`rule.md` 第 5 条）。
 
 ---

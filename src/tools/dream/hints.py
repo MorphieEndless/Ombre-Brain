@@ -33,7 +33,7 @@ tools/dream/hints.py — dream 的连接提示、结晶提示与 I 候选碰撞�
 
 from dataclasses import dataclass, field
 
-from ..i import I_PROMOTE_THRESHOLD, is_pending_candidate
+from ..i import I_PROMOTE_THRESHOLD, dream_dates, is_pending_candidate
 from .. import _runtime as rt
 from .candidates import is_within_window, recent_window_cutoff
 from ..plan.core import is_letter_bucket
@@ -142,8 +142,8 @@ class SelfCandidate:
 class SelfReview:
     """dream 里的 I 候选段。
 
-    ``rendered_ids`` 由 output.py 在实际渲染出某条候选后回写，dream 的
-    dispatch 只给这些候选记「被见证过一次」——没被看见的不算经历过。
+    ``rendered_ids`` 由 output.py 回写真正出现在最终文本中的候选（近期正文、
+    候选主块或碰撞材料），dream 的 dispatch 只给它们记「被见证过一次」。
     """
 
     candidates: list[SelfCandidate] = field(default_factory=list)
@@ -183,11 +183,7 @@ async def collect_self_candidates(all_buckets: list, window_hours: int) -> SelfR
         candidates=[
             SelfCandidate(
                 bucket=b,
-                passes=[
-                    str(d)[:10]
-                    for d in ((b.get("metadata") or {}).get("i_dream_dates") or [])
-                    if str(d).strip()
-                ],
+                passes=dream_dates(b.get("metadata") or {}),
             )
             for b in pending
         ]

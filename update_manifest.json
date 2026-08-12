@@ -32,7 +32,7 @@
     },
     {
       "path": "src/VERSION",
-      "sha256": "472325bcfe39aaa130b8eaa31f9223d084a023904967dd4457babef1ea3c9f1a",
+      "sha256": "06930571e9c0be0c681d24b6a72f1ee0d2a6ebce662e58a2a3499553ec92010e",
       "size": 7
     },
     {
@@ -817,8 +817,8 @@
     },
     {
       "path": "src/tools/dream/__init__.py",
-      "sha256": "0bc03fe65e828038f2bd469668c46102bb67a4af5cd3aa31c4ba27ca7d7b109c",
-      "size": 3020
+      "sha256": "8aaaf823ab683eff5b65d02af114da5fa90f37d108e444a343afe91288232e60",
+      "size": 3072
     },
     {
       "path": "src/tools/dream/candidates.py",
@@ -827,13 +827,13 @@
     },
     {
       "path": "src/tools/dream/hints.py",
-      "sha256": "258119d867af8e88e855e70ac36eba0ee23aa5484fc11840b028720d9fafba93",
-      "size": 11093
+      "sha256": "38e24ab854039defca936f3732b6555937bf5016b92d0830e3d3e496bb142323",
+      "size": 10974
     },
     {
       "path": "src/tools/dream/output.py",
-      "sha256": "2cb062ddc8fe9b1d9783c7c31c3e205494f149b7f0f4348f399ce1c1c2c851db",
-      "size": 19601
+      "sha256": "afb5a78cf0f544b1c45d7bfe8d4b1eae7044b6b12669f0c9e74959285071527a",
+      "size": 21340
     },
     {
       "path": "src/tools/grow/__init__.py",
@@ -872,13 +872,13 @@
     },
     {
       "path": "src/tools/i/__init__.py",
-      "sha256": "b2a334ca93d330049cea5087ee3f1171a9dead531fe03d47979c5a6b87ca096e",
-      "size": 972
+      "sha256": "2b47e68ce3764443038c379688fe8ed6072f897e92384f8a026ee2c1c93b9064",
+      "size": 997
     },
     {
       "path": "src/tools/i/core.py",
-      "sha256": "4c173f650d6be2b769c0b65c53b3e8baeb0a34134fc2b6950749e6caaefad9ce",
-      "size": 13049
+      "sha256": "31353c9aecd6feb4ea10a308b1b611f72e93d5acbd8c942f3f2c04da1bf946e4",
+      "size": 13868
     },
     {
       "path": "src/tools/plan/__init__.py",
@@ -1027,5 +1027,5 @@
     }
   ],
   "rollout_strategy": "single-node",
-  "version": "2.17.4"
+  "version": "2.17.5"
 }

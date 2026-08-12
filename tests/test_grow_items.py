@@ -629,6 +629,8 @@ async def test_grow_digest_failure_hides_provider_detail(grow_rt):
     provider_secret = "sk-provider-secret https://provider.invalid/private"
 
     class FailingDehydrator:
+        api_available = True  # key 是好的，炸的是调用本身
+
         async def digest(self, _content):
             raise RuntimeError(provider_secret)
 
@@ -637,7 +639,12 @@ async def test_grow_digest_failure_hides_provider_detail(grow_rt):
     with pytest.raises(PublicToolError) as caught:
         await grow_core("这是一段需要调用摘要服务的长内容，长度足够进入 grow 的日记拆分主路径。")
 
-    assert "OMBRE_COMPRESS_API_KEY" in caught.value.public_message
+    # key 可用时不许甩锅给 key：这条路径上绝大多数失败（供应商 5xx、超时、模型
+    # 返回空）都与 key 无关，指向 OMBRE_COMPRESS_API_KEY 会把排查方向带偏。
+    assert "OMBRE_COMPRESS_API_KEY" not in caught.value.public_message
+    assert "日记拆分" in caught.value.public_message
+    assert "桶未创建" in caught.value.public_message
+    # 供应商正文一律不得进入公开文案或日志
     assert provider_secret not in caught.value.public_message
     assert provider_secret not in str(caught.value)
     rendered_logs = "\n".join(
@@ -645,3 +652,23 @@ async def test_grow_digest_failure_hides_provider_detail(grow_rt):
     )
     assert "RuntimeError" in rendered_logs
     assert provider_secret not in rendered_logs
+
+
+@pytest.mark.asyncio
+async def test_grow_digest_blames_key_only_when_api_unavailable(grow_rt):
+    """只有 API 真的没配好时，才允许把人指向 OMBRE_COMPRESS_API_KEY。"""
+    _bucket_mgr, _stub = grow_rt
+
+    class UnconfiguredDehydrator:
+        api_available = False
+
+        async def digest(self, _content):
+            raise RuntimeError("脱水 API 不可用，请检查 config.yaml 中的 dehydration 配置")
+
+    rt.dehydrator = UnconfiguredDehydrator()
+
+    with pytest.raises(PublicToolError) as caught:
+        await grow_core("这是一段需要调用摘要服务的长内容，长度足够进入 grow 的日记拆分主路径。")
+
+    assert "OMBRE_COMPRESS_API_KEY" in caught.value.public_message
+    assert "桶未创建" in caught.value.public_message

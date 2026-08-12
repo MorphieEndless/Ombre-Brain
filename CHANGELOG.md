@@ -2,6 +2,33 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.17.3
+
+### 修复 / Fixed
+
+- `grow` 的两条路径（长文 digest、短内容打标）此前把所有失败都报成
+  「API key 未配置或调用失败，请检查 OMBRE_COMPRESS_API_KEY」。实际上这条路上
+  绝大多数失败与 key 无关——供应商 5xx、超时，或 dehydrator 抛的「API 日记整理
+  返回空结果」（模型返回解析后 0 条有效条目）都会撞上同一句话，把排查方向带偏：
+  key 明明是好的，失败前一秒调用还是 200。现在按 `dehydrator.api_available`
+  分岔，只有 API 确实没配好才提 `OMBRE_COMPRESS_API_KEY`，其余情况说明是调用
+  失败或返回为空，并引导去看 `server.log` 里的 `err_type`。
+- 工具层 9 处 `except Exception` 后直接把裸异常正文拼进返回值的位置，改走统一的
+  `errors.safe_error_detail()`：正文照给（保留排查线索），但先抹掉
+  `Bearer <token>`、`sk-` 开头的 key、`api_key=` / `token:` 这类键值对，并限长
+  200 字符。涉及 `i`、`plan`、`breath`、`anchor`、`grow` 五组工具。捕获自家校验器
+  `ValueError` 的那几处（`plan` 的 Letter 锁参数、`_common` 的 grow items 校验）
+  维持原样，那些是精心写给调用方的提示，不该被脱敏改写。
+
+### 变更 / Changed
+
+- 导入侧的 `_safe_import_error_detail()` 实现上移到 `errors.safe_error_detail()`，
+  原函数保留为薄封装以兼容既有调用与回归测试；脱敏正则只维护一份，避免两处漂移。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.17.3`。
+
 ## 2.17.2
 
 ### 修复 / Fixed

@@ -39,6 +39,7 @@ from typing import Optional
 from .. import _runtime as rt
 from .._common import check_content_size, check_metadata_size
 from ..plan.core import is_letter_bucket
+from errors import safe_error_detail
 
 _VALID_ASPECTS = {"nature", "values", "patterns", "limits", "becoming", "uncertainty", "stance"}
 
@@ -142,7 +143,7 @@ async def _write_candidate(content: str, aspect: str) -> str:
             event_actor="llm",
         )
     except Exception as e:
-        return f"写入失败: {e}"
+        return f"写入失败: {safe_error_detail(e)}"
 
     try:
         await rt.bucket_mgr.update(bucket_id, i_stage="candidate", i_dream_dates=[])
@@ -166,7 +167,7 @@ async def _promote_candidate(bucket_id: str, content_override: str) -> str:
     try:
         bucket = await rt.bucket_mgr.get(bucket_id)
     except Exception as e:
-        return f"读取失败: {e}"
+        return f"读取失败: {safe_error_detail(e)}"
     if not bucket:
         return f"找不到候选 {bucket_id}（可能已经衰减归档——那本身就是一种答案）。"
 
@@ -216,7 +217,7 @@ async def _promote_candidate(bucket_id: str, content_override: str) -> str:
             event_actor="llm",
         )
     except Exception as e:
-        return f"沉淀失败: {e}"
+        return f"沉淀失败: {safe_error_detail(e)}"
 
     try:
         await rt.bucket_mgr.update(
@@ -280,7 +281,7 @@ async def _read_i(limit: int) -> str:
     try:
         all_buckets = await rt.bucket_mgr.list_all(include_archive=False)
     except Exception as e:
-        return f"读取失败: {e}"
+        return f"读取失败: {safe_error_detail(e)}"
 
     i_buckets = [
         b for b in all_buckets

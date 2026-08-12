@@ -36,6 +36,7 @@ from .._common import (
     check_query_size,
 )
 from utils import strip_wikilinks, get_ai_name, get_owner_name
+from errors import safe_error_detail
 
 
 LETTER_LOCK_TYPES = {"none", "timed", "permanent"}
@@ -516,7 +517,7 @@ async def letter_read(
     try:
         all_b = await rt.bucket_mgr.list_all(include_archive=False)
     except Exception as e:
-        return f"读取信件失败: {e}"
+        return f"读取信件失败: {safe_error_detail(e)}"
     normalized_letters = []
     states = {}
     for bucket in (b for b in all_b if is_letter_bucket(b)):

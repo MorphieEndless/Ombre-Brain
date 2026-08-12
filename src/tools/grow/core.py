@@ -33,9 +33,9 @@ import uuid
 from utils import normalize_memory_title
 
 try:
-    from errors import PublicToolError
+    from errors import llm_step_failed_error, safe_error_detail
 except ImportError:  # pragma: no cover - 包内导入兜底
-    from ...errors import PublicToolError  # type: ignore
+    from ...errors import llm_step_failed_error, safe_error_detail  # type: ignore
 
 from .. import _runtime as rt
 from .._common import (
@@ -55,9 +55,9 @@ async def grow_core(content: str, test_data: bool = False) -> str:
             "Diary digest failed / 日记整理失败: err_type=%s detail=hidden",
             type(e).__name__,
         )
-        raise PublicToolError(
-            "API key 未配置或调用失败，日记拆分无法完成，桶未创建。"
-            "请检查 OMBRE_COMPRESS_API_KEY。"
+        raise llm_step_failed_error(
+            "日记拆分",
+            api_available=getattr(rt.dehydrator, "api_available", True),
         ) from e
 
     if not isinstance(items, list) or not items:
@@ -185,7 +185,7 @@ async def grow_items(items: list, source_content: str = "", test_data: bool = Fa
                 item["_source_ranges"] = ranges
             source_ref = rt.source_store.put(source_content)
         except (OSError, ValueError) as exc:
-            return f"原文证据保存失败，未创建任何桶：{exc}"
+            return f"原文证据保存失败，未创建任何桶：{safe_error_detail(exc)}"
 
     batch_id = f"g_{uuid.uuid4().hex[:12]}"
 

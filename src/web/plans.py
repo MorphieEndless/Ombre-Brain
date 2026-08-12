@@ -57,8 +57,8 @@ def register(mcp) -> None:
                     "name": meta.get("name") or "",
                     "content": b.get("content", ""),
                     "status": st,
-                    "created_at": meta.get("created_at"),
-                    "updated_at": meta.get("updated_at"),
+                    "created_at": meta.get("created"),
+                    "updated_at": meta.get("last_active"),
                     "related_bucket": meta.get("related_bucket"),
                     "change_log": meta.get("change_log") or [],
                     "tags": meta.get("tags") or [],
@@ -149,7 +149,11 @@ def register(mcp) -> None:
                     updates["status"] = new_status
                     history = append_plan_change_log(
                         history, "status",
-                        **{"from": old_status, "to": new_status},
+                        **{
+                            "from": old_status,
+                            "to": new_status,
+                            "by": "dashboard",
+                        },
                     )
             elif action == "edit":
                 new_content = body.get("content", "")
@@ -160,7 +164,7 @@ def register(mcp) -> None:
                 if size_err:
                     return JSONResponse({"error": size_err}, status_code=400)
                 updates["content"] = new_content.strip()
-                history = append_plan_change_log(history, "edit")
+                history = append_plan_change_log(history, "edit", by="dashboard")
             else:
                 return JSONResponse({"error": f"unknown action: {action}"}, status_code=400)
 

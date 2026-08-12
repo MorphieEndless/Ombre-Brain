@@ -2135,13 +2135,20 @@ class BucketManager:
             updates = dict(kwargs)
             if append_plan_history and str(post.get("type") or "") == "plan":
                 history = list(post.get("change_log") or [])
-                if "status" in updates and updates["status"] != post.get("status"):
+                old_status = post.get("status") or "active"
+                if "status" in updates and updates["status"] != old_status:
                     history = append_plan_change_log(
                         history,
                         "status",
-                        **{"from": post.get("status"), "to": updates["status"]},
+                        **{
+                            "from": old_status,
+                            "to": updates["status"],
+                            "by": event_actor,
+                        },
                     )
-                updates["change_log"] = append_plan_change_log(history, "edit")
+                updates["change_log"] = append_plan_change_log(
+                    history, "edit", by=event_actor
+                )
             updates["content"] = updated_content
             try:
                 committed = await self._update_locked(

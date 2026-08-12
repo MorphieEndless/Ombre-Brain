@@ -400,7 +400,7 @@ feel 桶自身：
 
 **严格字符串去重**：登记前扫描所有 `status="active"` 的 plan 桶，若存在 `content` 与新内容**完全字符串相等**的桶，直接返回原 ID 不重复创建（避免重复 `plan("还没回邮件")` 刷屏）。
 
-**自动结案机制**：每次 `hold()` 或 `grow()` 末尾 `asyncio.create_task(_check_plan_resolution())` —— 向量预筛（>0.7）→ LLM 双判 (`resolved && confidence >= 0.7`) → 写 `status="resolved"` + `resolution_reason` + `resolved_by`。任何异常都吞掉，不影响主流程。无 embedding 时整个机制跳过（保守，宁漏报不误报）。
+**完成建议机制**：每次 `hold()` 或 `grow()` 末尾 `asyncio.create_task(_check_plan_resolution())`。系统只把关键词/BM25 或向量（>0.7）实际召回的 active plan 交给 LLM；当 `resolved && confidence >= 0.7` 时写入 `resolution_suggested`（理由、信心、来源与时间），status 仍保持 `active`。实际关闭只能由 `trace(status="resolved")` 或 Dashboard action 显式完成。任何异常都吞掉，不影响主流程；无 embedding 时仍使用关键词/BM25 召回。
 
 ### 3.8 `letter_write` / `letter_read` / `letter_lock_update` — 信件
 
@@ -1521,7 +1521,7 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 | `0.2` | `breath` 检索 | 情感重构系数 `(q_v - 0.5) × 0.2`，最大 ±0.1 |
 | `3` / `0.4` / `2.0` / `1~3` | `breath` 检索 | 随机漂浮触发条件 / 概率 / 池阈值 / 数量 |
 | `30` 字符 | `grow` | 短内容快速路径阈值 |
-| `0.7` | `_check_plan_resolution` | plan 自动结案向量预筛 |
+| `0.7` | `_check_plan_resolution` | plan 完成建议的向量预筛 |
 | `0.7` | dream | feel 结晶相似度阈值 |
 | `0.5` | dream | 连接提示相似度阈值 |
 | `10` | dream | 取最近 N 条 |
@@ -1563,7 +1563,7 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 | `trace` 无字段变更 | — | 返回「没有任何字段需要修改。」 |
 | `dehydrator.dehydrate` API 不可用 | `api_available=False` | 不影响 breath；正文返回阶段不再调用 dehydrator |
 | `embedding.search_similar` 未启用 | enabled=False | 返回 `[]`，调用方 fallback |
-| `_check_plan_resolution` 无 embedding | — | 整体跳过（保守，不误报） |
+| `_check_plan_resolution` 无 embedding | — | 退回关键词/BM25 召回；未命中就不交给 LLM |
 | `decay_cycle` list_all 失败 | 异常 | 返回 `{checked:0, error:str}`，不终止后台循环 |
 | `decay_cycle` 单桶评分失败 | 异常 | WARNING 日志，跳过该桶 |
 

@@ -622,13 +622,18 @@ async def trace_core(
             from .._common import append_plan_change_log
             old_meta = bucket.get("metadata", {})
             history = list(old_meta.get("change_log") or [])
-            if "status" in updates and updates["status"] != old_meta.get("status"):
+            old_status = old_meta.get("status") or "active"
+            if "status" in updates and updates["status"] != old_status:
                 history = append_plan_change_log(
                     history, "status",
-                    **{"from": old_meta.get("status"), "to": updates["status"]},
+                    **{
+                        "from": old_status,
+                        "to": updates["status"],
+                        "by": "trace",
+                    },
                 )
             if content_change_requested:
-                history = append_plan_change_log(history, "edit")
+                history = append_plan_change_log(history, "edit", by="trace")
             updates["change_log"] = history
 
         if patch_args_supplied:

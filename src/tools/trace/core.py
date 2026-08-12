@@ -636,6 +636,11 @@ async def trace_core(
                 history = append_plan_change_log(history, "edit", by="trace")
             updates["change_log"] = history
 
+        if is_plan and ("status" in updates or content_change_requested):
+            # 显式状态/正文变更会让旧完成建议失效；None 由 BucketManager
+            # 解释为删除 frontmatter 字段。失败的局部替换不会进入提交路径。
+            updates["resolution_suggested"] = None
+
         if patch_args_supplied:
             patch_result = await rt.bucket_mgr.update_content_fragment(
                 bucket_id,
@@ -699,7 +704,10 @@ async def trace_core(
 
     _display_updates = {
         k: v for k, v in updates.items()
-        if k not in ("content", "meaning_append", "meaning", "media_append", "media")
+        if k not in (
+            "content", "meaning_append", "meaning", "media_append", "media",
+            "resolution_suggested",
+        )
     }
     changed = ", ".join(f"{k}={v}" for k, v in _display_updates.items())
     if patch_args_supplied:

@@ -386,8 +386,12 @@ def format_dream_output(
                 )
                 suggestion = pmeta.get("resolution_suggested")
                 if isinstance(suggestion, dict):
-                    reason = str(suggestion.get("reason") or "未提供理由").strip()
-                    block += f"\n（系统认为可能已完成：{reason}）"
+                    reason = " ".join(
+                        str(suggestion.get("reason") or "未提供理由").split()
+                    )
+                    suggested_date = str(suggestion.get("ts") or "").strip()[:10]
+                    date_suffix = f"，{suggested_date}" if suggested_date else ""
+                    block += f"\n（系统认为可能已完成{date_suffix}：{reason}）"
                 candidate = plan_prefix + "\n".join([*plan_lines, block])
                 if count_tokens_approx(final_text + candidate) <= dream_budget:
                     plan_lines.append(block)

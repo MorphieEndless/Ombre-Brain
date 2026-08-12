@@ -181,7 +181,7 @@ def test_active_plan_resolution_suggestion_is_visible():
     )
 
     assert "仍由人决定是否关闭的计划" in result
-    assert "（系统认为可能已完成：相关事件看起来已经完成）" in result
+    assert "（系统认为可能已完成，2026-08-12：相关事件看起来已经完成）" in result
 
 
 def test_collapsed_feel_is_shown_with_ellipsis_truncation_and_stays_bounded(monkeypatch):

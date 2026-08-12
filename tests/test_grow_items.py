@@ -644,6 +644,9 @@ async def test_grow_digest_failure_hides_provider_detail(grow_rt):
     assert "OMBRE_COMPRESS_API_KEY" not in caught.value.public_message
     assert "日记拆分" in caught.value.public_message
     assert "桶未创建" in caught.value.public_message
+    # 也不许反过来打包票说 key 没问题：api_available 只知道「配没配」，
+    # key 填错/过期/欠费时它仍是 True，调用照样 401。
+    assert "key 配置正常" not in caught.value.public_message
     # 供应商正文一律不得进入公开文案或日志
     assert provider_secret not in caught.value.public_message
     assert provider_secret not in str(caught.value)

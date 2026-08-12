@@ -115,6 +115,11 @@ def llm_step_failed_error(step_zh: str, *, api_available: bool) -> PublicToolErr
     ``_require_api()`` 用来判断"配置到底配好没有"的同一个信号）。之所以不在这里
     自己去取，是为了不让 errors 这个底层模块反向依赖 tools._runtime。
 
+    注意 api_available 只回答"配没配"，不回答"配得对不对"：key 填错、过期、
+    余额耗尽时它仍然是 True，调用会以 401/402 失败。所以 True 分支的文案**不能**
+    反过来打包票说"key 没问题"——那只是把原来的误导换了个方向。这里给的是一组
+    并列的可能原因（供应商故障、模型返回为空、key 失效），把判断交回给日志。
+
     边界：真实异常正文一律不进公开文案——PublicToolError 的契约就是固定安全
     文本，供应商正文只写日志（err_type=…）。需要把正文给出去的场景请用
     safe_error_detail()。
@@ -126,8 +131,8 @@ def llm_step_failed_error(step_zh: str, *, api_available: bool) -> PublicToolErr
         )
     return PublicToolError(
         f"脱水 API 调用失败或返回无法解析的内容，{step_zh}无法完成，桶未创建。"
-        "key 配置正常，通常是供应商临时故障或模型返回为空，可稍后重试；"
-        "持续失败请查看 server.log 中的 err_type。"
+        "可稍后重试；持续失败请看 server.log 里的 err_type，"
+        "再逐一排除供应商故障、模型返回为空、key 失效或余额不足。"
     )
 
 

@@ -2,6 +2,20 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.17.4
+
+### 修复 / Fixed
+
+- 修正 2.17.3 引入的反向误导：`llm_step_failed_error()` 在 `api_available=True`
+  分支里写了「key 配置正常」。但 `api_available` 只回答「配没配」，不回答「配得
+  对不对」——key 填错、过期或余额耗尽时它仍是 True，调用会以 401/402 失败，这时
+  那句话等于把原来的误导换了个方向。真机用无效 key 跑 `grow` 复现后改成并列列出
+  可能原因（供应商故障、模型返回为空、key 失效或余额不足），把判断交回给日志。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.17.4`。
+
 ## 2.17.3
 
 ### 修复 / Fixed

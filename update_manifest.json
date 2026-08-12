@@ -32,7 +32,7 @@
     },
     {
       "path": "src/VERSION",
-      "sha256": "cd8d9ede022ed9f20881518234eca20a8676103cb25a413240f1e31fde42d163",
+      "sha256": "472325bcfe39aaa130b8eaa31f9223d084a023904967dd4457babef1ea3c9f1a",
       "size": 7
     },
     {
@@ -62,8 +62,8 @@
     },
     {
       "path": "src/errors.py",
-      "sha256": "305b815c554163e002bec4f94b5ec58a62ad46d581e82098fb3075c51e602de7",
-      "size": 23748
+      "sha256": "5ada820a0ae9d664013ca17f1a4ca52c37050e97f13e355f6f5c5c73730de043",
+      "size": 24191
     },
     {
       "path": "src/github_sync.py",
@@ -1027,5 +1027,5 @@
     }
   ],
   "rollout_strategy": "single-node",
-  "version": "2.17.3"
+  "version": "2.17.4"
 }

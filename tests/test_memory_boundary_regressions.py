@@ -128,9 +128,18 @@ async def test_hold_analysis_failure_preserves_exact_content(monkeypatch):
     )
 
     assert captured["content"] == original
+    assert captured["domain"] == ["未分类"]
     assert captured["raw_merge"] is True
     assert captured["source_tool"] == "hold"
     assert "正文已逐字保存，未做任何压缩" in result
+
+    captured.clear()
+    await hold_core.store_core(
+        original, extra_tags=[], importance=5,
+        valence=-1, arousal=-1, why_remembered="",
+        explicit_domain=["人工域"],
+    )
+    assert captured["domain"] == ["人工域"]
 
 
 @pytest.mark.asyncio

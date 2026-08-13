@@ -45,6 +45,7 @@ async def store_core(
     media: list | str | None = None,
     test_data: bool = False,
     explicit_domain: list[str] | None = None,
+    source_refs: list[dict] | None = None,
 ) -> str:
     metadata_fallback = False
     try:
@@ -87,6 +88,7 @@ async def store_core(
         arousal=final_arousal,
         name=suggested_name,
         title=final_title,
+        source_refs=source_refs,
         raw_merge=True,
         why_remembered=why_remembered,
         source_tool="hold",

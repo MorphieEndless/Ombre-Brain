@@ -192,6 +192,51 @@ async def test_catalog_still_returns_metadata_without_body(bucket_mgr):
 
 
 @pytest.mark.asyncio
+async def test_breath_marks_hidden_source_evidence_without_inlining_it(
+    bucket_mgr, monkeypatch
+):
+    source_ref = "src_" + "a" * 64
+    body = "只返回这条记忆正文，不自动展开背后的聊天原文。"
+    bucket_id = await bucket_mgr.create(
+        content=body,
+        title="京都计划",
+        domain=["旅行"],
+        importance=8,
+        source_refs=[{"ref": source_ref, "ranges": [[1, 3]]}],
+    )
+    _install_runtime(bucket_mgr)
+    monkeypatch.setattr("tools.breath.search.random.random", lambda: 1.0)
+
+    output = await dispatch(query=bucket_id, max_tokens=10000)
+
+    assert body in output
+    assert "[source_available:true | source_title:京都计划 | use:source_read]" in output
+    assert source_ref not in output
+
+
+@pytest.mark.asyncio
+async def test_catalog_marks_source_availability_without_returning_body(bucket_mgr):
+    source_ref = "src_" + "b" * 64
+    body = "目录里绝不能出现的原文或记忆正文。"
+    await bucket_mgr.create(
+        content=body,
+        name="京都旅行",
+        title="京都旅行",
+        domain=["旅行"],
+        importance=9,
+        source_refs=[{"ref": source_ref, "ranges": [[1, 1]]}],
+    )
+    _install_runtime(bucket_mgr)
+
+    output = await dispatch(catalog=True)
+
+    assert "京都旅行 | 旅行 | 9" in output
+    assert "[source_available:true | source_title:京都旅行 | use:source_read]" in output
+    assert body not in output
+    assert source_ref not in output
+
+
+@pytest.mark.asyncio
 async def test_token_budget_omits_whole_bucket_instead_of_truncating(monkeypatch):
     first = {
         "id": "first",

@@ -92,6 +92,8 @@ EXPECTED_TOOL_PROPERTIES = {
         "media",
         "test_data",
         "domain",
+        "source_content",
+        "source_ranges",
     },
     "grow": {"content", "items", "test_data"},
     "source_read": {"bucket_id", "expected_title", "scope", "cursor", "max_tokens"},

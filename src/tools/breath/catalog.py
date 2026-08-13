@@ -21,6 +21,7 @@ breath_search(query=...) 精准拉取需要的记忆——代替把全部记忆�
 
 from .. import _runtime as rt
 from ..plan.core import is_letter_bucket, letter_lock_state
+from ._verbatim import source_available_hint
 from utils import parse_bool
 from errors import safe_error_detail
 
@@ -99,6 +100,10 @@ async def surface_catalog(
             f"{pin_mark}{anchor_mark}{name} | {','.join(domains) or '未分类'} | {imp} "
             f"| {_footprint(b, meta)}"
         )
+        if not letter_locked:
+            source_hint = source_available_hint(b)
+            if source_hint:
+                line += f" | {source_hint}"
         btype = meta.get("type")
         key = "letter" if logical_letter else btype if btype in grouped else "dynamic"
         grouped[key].append((imp, line))

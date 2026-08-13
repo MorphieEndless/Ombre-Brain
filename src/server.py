@@ -44,6 +44,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mcp.server.fastmcp import FastMCP
 
 from bucket_manager import BucketManager
+from deletion_requests import DeletionRequestStore
 from dehydrator import Dehydrator
 from decay_engine import DecayEngine
 from embedding_engine import EmbeddingEngine
@@ -219,6 +220,9 @@ except RuntimeError as _emb_err:
     logger.error(f"[STARTUP FAILED] {_emb_err}")
     raise SystemExit(f"Ombre Brain 启动中止：{_emb_err}") from _emb_err
 bucket_mgr = BucketManager(config, embedding_engine=embedding_engine)  # Bucket manager / 记忆桶管理器
+deletion_requests = DeletionRequestStore(
+    config["buckets_dir"], bucket_mgr, embedding_engine
+)
 _source_max_bytes = int(
     (config.get("limits") or {}).get("max_grow_input_bytes", 2 * 1024 * 1024)
 )
@@ -409,6 +413,7 @@ _wsh.init_runtime(
     version=__version__,
     repo_root=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     bucket_mgr=bucket_mgr,
+    deletion_requests=deletion_requests,
     dehydrator=dehydrator,
     decay_engine=decay_engine,
     embedding_engine=embedding_engine,
@@ -611,6 +616,7 @@ async def _with_notice(coro: Awaitable[str], op: str = "", args: dict | None = N
 _tools_runtime.init(
     config=config,
     bucket_mgr=bucket_mgr,
+    deletion_requests=deletion_requests,
     dehydrator=dehydrator,
     decay_engine=decay_engine,
     embedding_engine=embedding_engine,
@@ -844,6 +850,9 @@ async def trace(
     restore: Optional[bool] = False,
     old_str: Optional[str] = "",
     new_str: Optional[str] = None,
+    deletion_request_id: Optional[str] = "",
+    deletion_decision: Optional[str] = "",
+    deletion_ai_reason: Optional[str] = "",
 ) -> str:
     """仅在明确需要修改某条已存在记忆时调用，不要猜测 bucket_id 或自行改写记忆。
 
@@ -865,6 +874,16 @@ async def trace(
     只能用 restore=True、protected=0、importance=1..10 原子解除冲突后恢复。
     检索命中不会自动恢复。只传需要修改的字段，-1 或空串表示不改。
     """
+    if deletion_request_id or deletion_decision:
+        result = await deletion_requests.decide(
+            deletion_request_id or "",
+            deletion_decision or "",
+            deletion_ai_reason or "",
+            expected_bucket_id=bucket_id,
+        )
+        if not result.get("ok"):
+            return "Deletion request decision failed: " + str(result.get("error") or "unknown error")
+        return f"Deletion request {deletion_request_id} {result['decision']}; bucket {result['bucket_id']}."
     return await _with_notice(
         _t_trace.dispatch(
             bucket_id=bucket_id, name=name, domain=domain,

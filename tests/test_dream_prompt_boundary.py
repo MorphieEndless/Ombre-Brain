@@ -83,7 +83,7 @@ def test_malicious_memory_is_returned_verbatim_without_any_safety_markers():
     assert "content_role:stored_memory_data" not in result
 
 
-def test_every_persisted_dream_surface_is_shown_verbatim_without_changing_legal_bodies(
+def test_dream_omits_pinned_bodies_but_keeps_other_surfaces_verbatim(
     monkeypatch,
 ):
     monkeypatch.setattr(dream_output.rt, "config", {"surfacing": {"feel_max_tokens": 10_000}})
@@ -103,17 +103,16 @@ def test_every_persisted_dream_surface_is_shown_verbatim_without_changing_legal_
         window_hours=24,
         connection_hint="\n💭 normal connection [[hint]]\n",
         crystal_hint="\n🔮 normal crystal hint\n",
-        core_context=[core],
     )
 
-    # 四类正文（近期/核心准则/plan/feel）都只做双链清理，逐字出现，
-    # 不附加任何边界/哈希/协议说明标记。
-    for body in (recent_body, core_body, plan_body, feel_body):
+    # dream 不再返回 pinned 正文；其余正文仍只做双链清理并逐字出现。
+    for body in (recent_body, plan_body, feel_body):
         assert dream_output.strip_wikilinks(body) in result
+    assert dream_output.strip_wikilinks(core_body) not in result
     _assert_no_markers(result)
 
     assert "=== Dreaming · 过去 24 小时全量记忆（1 个桶）===" in result
-    assert "=== 核心准则参考 ===" in result
+    assert "=== 核心准则参考 ===" not in result
     assert "=== 你的 active plans ===" in result
     assert "=== 你的 feel 历史（按最终渲染 token 预算）===" in result
     # connection_hint / crystal_hint 是 hints.py 已经拼好的整句提示，不经过
@@ -284,7 +283,6 @@ def test_dream_global_budget_omits_whole_blocks_without_truncating_bodies(
         window_hours=48,
         connection_hint="hint " + "h " * 4000,
         crystal_hint="crystal " + "c " * 4000,
-        core_context=core,
     )
 
     assert dream_output.count_tokens_approx(result) <= budget

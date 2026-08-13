@@ -6,15 +6,14 @@ tools/dream/output.py — dream 最终输出格式化
 把 candidates / hints / active plan / 全量 feel 历史拼成一段长文本
 返回给模型自我反省。
 
-最终七个板块，按下列顺序输出：
+最终六个板块，按下列顺序输出：
 ① 近期活跃记忆正文（48 小时窗口，排除 pinned/resolved/protected/permanent/
    feel/plan/letter/digested/dont_surface/anchor）
-② 核心准则参考（pinned/permanent，排除 protected）
-③ 你的 active plans
-④ 你的 feel 历史（按 token 预算折叠老 feel）
-⑤ connection hint（最相似的一对近期记忆）
-⑥ crystal hint（低频触发：feel 聚成一簇 5 条才提示一次）
-⑦「我觉得」I 候选段（选取规则并入①的同一套 48 小时/排除 pinned/排除
+② 你的 active plans（排除 pinned）
+③ 你的 feel 历史（按 token 预算折叠老 feel，排除 pinned）
+④ connection hint（最相似的一对近期记忆）
+⑤ crystal hint（低频触发：feel 聚成一簇 5 条才提示一次）
+⑥「我觉得」I 候选段（选取规则并入①的同一套 48 小时/排除 pinned/排除
    resolved 规则；protected 排除单独保留）
 
 关键行为：
@@ -190,7 +189,6 @@ def format_dream_output(
     window_hours: int,
     connection_hint: str,
     crystal_hint: str,
-    core_context: list | None = None,
     self_review: object | None = None,
 ) -> str:
     runtime_config = rt.config if isinstance(rt.config, dict) else {}
@@ -275,6 +273,7 @@ def format_dream_output(
             b for b in all_buckets
             if b["metadata"].get("type") == "plan"
             and not is_letter_bucket(b)
+            and not (b.get("metadata") or {}).get("pinned", False)
             and b["metadata"].get("status", "active") == "active"
             and not parse_bool(
                 (b.get("metadata") or {}).get("protected"), default=False
@@ -330,43 +329,10 @@ def format_dream_output(
             f"\n\n（另有 {recent_omitted} 条近期记忆因 dream 总预算未展开。）"
         )
 
-    # --- ② 核心准则参考 ---
-    core_context = core_context or []
-    if core_context:
-        core_prefix = (
-            "\n\n=== 核心准则参考 ===\n"
-            "这些是 pinned/permanent 桶，只作为梦里的边界与背景，不当作普通待消化事项。\n\n"
-        )
-        core_lines: list[str] = []
-        core_omitted = 0
-        for b in core_context:
-            meta = b["metadata"]
-            domains = ",".join(meta.get("domain", []))
-            block = _bucket_data_block(
-                b,
-                display_prefix=(
-                    f"📌 [{b['id']}] {meta.get('name', b['id'])} "
-                    f"主题:{domains or '未分类'} 重要:{meta.get('importance', '?')}"
-                    f"{_miss_lines(meta)}\n"
-                ),
-                footprint=_footprint(b),
-            )
-            candidate_lines = [*core_lines, block]
-            candidate = core_prefix + "\n---\n".join(candidate_lines)
-            if count_tokens_approx(final_text + candidate + reserved_suffix) <= dream_budget:
-                core_lines.append(block)
-            else:
-                core_omitted += 1
-        if core_lines:
-            section = core_prefix + "\n---\n".join(core_lines)
-            if core_omitted:
-                notice = f"\n\n（另有 {core_omitted} 条核心记忆因 dream 总预算未展开。）"
-                if count_tokens_approx(final_text + section + notice + reserved_suffix) <= dream_budget:
-                    section += notice
-            append_fragment(section)
-
-    # --- ③ active plan 段 ---
+    # --- ② active plan 段 ---
     try:
+        # 近期记忆填充预算时已为 active plan 预留位置；进入 plan 段后释放预留，
+        # 让计划本身使用这部分预算。Dream 仍不读取或渲染 pinned/permanent 正文。
         reserved_suffix = ""
         if plans_active:
             plan_prefix = (
@@ -417,12 +383,13 @@ def format_dream_output(
     except Exception as e:
         rt.logger.warning(f"Dream active plans block failed: {e}")
 
-    # --- ④ 全量 feel 段（按 token 预算折叠老 feel）---
+    # --- ③ 全量 feel 段（按 token 预算折叠老 feel）---
     try:
         feels_all = [
             b for b in all_buckets
             if b["metadata"].get("type") == "feel"
             and not is_letter_bucket(b)
+            and not (b.get("metadata") or {}).get("pinned", False)
             and not parse_bool(
                 (b.get("metadata") or {}).get("protected"), default=False
             )
@@ -495,12 +462,12 @@ def format_dream_output(
     except Exception as e:
         rt.logger.warning(f"Dream feel history failed: {e}")
 
-    # --- ⑤/⑥ connection hint / crystal hint ---
+    # --- ④/⑤ connection hint / crystal hint ---
     for hint in (connection_hint, crystal_hint):
         if hint:
             append_fragment("\n" + hint)
 
-    # --- ⑦ I 候选段 ---
+    # --- ⑥ I 候选段 ---
     # 放在最后：待沉淀的「我觉得」需要挨着上面已经展示过的近期记忆、
     # plan、feel 和两条提示一起看，碰撞才有完整上下文。
     if self_review is not None:

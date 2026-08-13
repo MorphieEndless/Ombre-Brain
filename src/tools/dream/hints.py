@@ -201,6 +201,7 @@ async def collect_self_candidates(all_buckets: list, window_hours: int) -> SelfR
             if b["id"] not in pending_ids
             and not is_letter_bucket(b)
             and (b.get("metadata") or {}).get("type") == "i"
+            and not (b.get("metadata") or {}).get("pinned", False)
             and not parse_bool(
                 (b.get("metadata") or {}).get("protected"), default=False
             )
@@ -210,6 +211,7 @@ async def collect_self_candidates(all_buckets: list, window_hours: int) -> SelfR
             if b["id"] not in pending_ids
             and not is_letter_bucket(b)
             and (b.get("metadata") or {}).get("type") not in ("i", "letter")
+            and not (b.get("metadata") or {}).get("pinned", False)
             and not parse_bool(
                 (b.get("metadata") or {}).get("protected"), default=False
             )

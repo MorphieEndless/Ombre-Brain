@@ -10,7 +10,7 @@ core（普通存入 + 自动合并）。
 关键行为：
 - null-safe 兜底；先做 content / 字节上限校验，再分支
 - feel=True / pinned=True 是互斥分支，否则走 core
-- core 写完后 fire-and-forget 触发 plan 自动闭环 + 疑似重复扫描
+- core 写完后 fire-and-forget 触发 plan 完成建议 + 疑似重复扫描
 
 不做什么（边界）：
 - 不在这里做 LLM 打标，分支模块负责

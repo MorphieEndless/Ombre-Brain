@@ -14,7 +14,7 @@ tools/hold/core.py — hold 普通存入分支（含自动合并）
 - 调 _common.merge_or_create 走合并/新建
 - iter 2.0：source_tool 写 ``hold``；合并到老桶时只更新 ``last_merged_by``
 - embedding 失败时桶正常创建，返回追加向量化降级警告
-- 写完 fire-and-forget：plan 自动闭环判断 + 新桶疑似重复扫描
+- 写完 fire-and-forget：plan 完成建议判断 + 新桶疑似重复扫描
 
 不做什么（边界）：
 - 不做 pinned 配额检查（那是 pinned 分支的事）

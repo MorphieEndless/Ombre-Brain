@@ -157,6 +157,32 @@ def test_protected_plan_and_feel_never_enter_dream_output():
     assert "=== 你的 feel 历史" not in result
 
 
+def test_active_plan_resolution_suggestion_is_visible():
+    plan = _bucket(
+        "plan-suggested",
+        "仍由人决定是否关闭的计划",
+        "plan",
+        status="active",
+        resolution_suggested={
+            "reason": "相关事件看起来已经完成",
+            "confidence": 0.91,
+            "suggested_by": "plan_resolution_judge",
+            "ts": "2026-08-12T12:00:00",
+        },
+    )
+
+    result = dream_output.format_dream_output(
+        recent=[],
+        all_buckets=[plan],
+        window_hours=48,
+        connection_hint="",
+        crystal_hint="",
+    )
+
+    assert "仍由人决定是否关闭的计划" in result
+    assert "（系统认为可能已完成，2026-08-12：相关事件看起来已经完成）" in result
+
+
 def test_collapsed_feel_is_shown_with_ellipsis_truncation_and_stays_bounded(monkeypatch):
     feel_budget = 1200
     monkeypatch.setattr(
@@ -262,3 +288,4 @@ def test_dream_global_budget_omits_whole_blocks_without_truncating_bodies(
     assert dream_output.count_tokens_approx(result) <= budget
     _assert_no_markers(result)
     assert "dream 总预算未展开" in result
+    assert "（active plan 4 条，因篇幅未列出。）" in result

@@ -2135,13 +2135,20 @@ class BucketManager:
             updates = dict(kwargs)
             if append_plan_history and str(post.get("type") or "") == "plan":
                 history = list(post.get("change_log") or [])
-                if "status" in updates and updates["status"] != post.get("status"):
+                old_status = post.get("status") or "active"
+                if "status" in updates and updates["status"] != old_status:
                     history = append_plan_change_log(
                         history,
                         "status",
-                        **{"from": post.get("status"), "to": updates["status"]},
+                        **{
+                            "from": old_status,
+                            "to": updates["status"],
+                            "by": event_actor,
+                        },
                     )
-                updates["change_log"] = append_plan_change_log(history, "edit")
+                updates["change_log"] = append_plan_change_log(
+                    history, "edit", by=event_actor
+                )
             updates["content"] = updated_content
             try:
                 committed = await self._update_locked(
@@ -2477,6 +2484,7 @@ class BucketManager:
         # iter 1.7 §G3 在这里加入了 "change_log"——plan 桶的状态/编辑历史 list[dict]，
         # 由 server.py 的 plan() / trace() / /api/plans/{id}/action 维护，bucket_manager 不参与生成。
         for k in ("status", "type", "resolution_reason", "resolved_by",
+                  "resolution_suggested",
                   "related_bucket", "author", "user_name", "letter_date",
                   "lock_type", "unlock_date", "locked_by", "lock_owner_source", "writer_name",
                   "change_log",

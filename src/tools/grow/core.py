@@ -15,7 +15,7 @@ tools/grow/core.py — grow 长内容主路径（digest + merge）
   source_tool 一律为 ``grow``；合并到的老桶不改 source_tool
 - 单条失败不影响其他；按字节上限校验单条尺寸
 - embedding 失败时桶正常创建，返回追加向量化降级警告
-- 末尾 fire-and-forget 触发 plan 自动闭环（用整段原文做匹配）
+- 末尾 fire-and-forget 触发 plan 完成建议（用整段原文做匹配）
 
 不做什么（边界）：
 - 不写 feel：grow 是事件归档，不是反思

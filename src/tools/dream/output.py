@@ -268,6 +268,34 @@ def format_dream_output(
         "没有沉淀就不写，不强迫产出。\n\n"
     )
 
+    try:
+        plans_active = [
+            b for b in all_buckets
+            if b["metadata"].get("type") == "plan"
+            and not is_letter_bucket(b)
+            and not (b.get("metadata") or {}).get("pinned", False)
+            and b["metadata"].get("status", "active") == "active"
+            and not parse_bool(
+                (b.get("metadata") or {}).get("protected"), default=False
+            )
+        ]
+        plans_active.sort(
+            key=lambda b: b["metadata"].get("created", ""), reverse=True
+        )
+    except Exception as e:
+        rt.logger.warning(f"Dream active plans collection failed: {e}")
+        plans_active = []
+
+    plan_fallback = (
+        "\n\n=== 你的 active plans ===\n"
+        f"（active plan {len(plans_active)} 条，因篇幅未列出。）"
+        if plans_active
+        else ""
+    )
+    # 在近期记忆与核心准则填充预算时，预留一行给不可衰退的开放计划。
+    # 即使完整 plan block 都放不下，也不能让 active plan 无声消失。
+    reserved_suffix = plan_fallback
+
     final_text = header
     rendered_candidate_ids: list[str] = []
     rendered_candidate_id_set: set[str] = set()
@@ -281,7 +309,7 @@ def format_dream_output(
     def append_fragment(fragment: str) -> bool:
         nonlocal final_text
         candidate = final_text + fragment
-        if count_tokens_approx(candidate) > dream_budget:
+        if count_tokens_approx(candidate + reserved_suffix) > dream_budget:
             return False
         final_text = candidate
         return True
@@ -303,17 +331,9 @@ def format_dream_output(
 
     # --- ② active plan 段 ---
     try:
-        plans_active = [
-            b for b in all_buckets
-            if b["metadata"].get("type") == "plan"
-            and not is_letter_bucket(b)
-            and not (b.get("metadata") or {}).get("pinned", False)
-            and b["metadata"].get("status", "active") == "active"
-            and not parse_bool(
-                (b.get("metadata") or {}).get("protected"), default=False
-            )
-        ]
-        plans_active.sort(key=lambda b: b["metadata"].get("created", ""), reverse=True)
+        # 近期记忆填充预算时已为 active plan 预留位置；进入 plan 段后释放预留，
+        # 让计划本身使用这部分预算。Dream 仍不读取或渲染 pinned/permanent 正文。
+        reserved_suffix = ""
         if plans_active:
             plan_prefix = (
                 "\n\n=== 你的 active plans ===\n"
@@ -330,18 +350,36 @@ def format_dream_output(
                     display_prefix=f"[{p['id']}] {pcreated} ",
                     footprint=_footprint(p),
                 )
+                suggestion = pmeta.get("resolution_suggested")
+                if isinstance(suggestion, dict):
+                    reason = " ".join(
+                        str(suggestion.get("reason") or "未提供理由").split()
+                    )
+                    suggested_date = str(suggestion.get("ts") or "").strip()[:10]
+                    date_suffix = f"，{suggested_date}" if suggested_date else ""
+                    block += f"\n（系统认为可能已完成{date_suffix}：{reason}）"
                 candidate = plan_prefix + "\n".join([*plan_lines, block])
                 if count_tokens_approx(final_text + candidate) <= dream_budget:
                     plan_lines.append(block)
                 else:
                     plan_omitted += 1
-            if plan_lines:
-                section = plan_prefix + "\n".join(plan_lines)
-                if plan_omitted:
-                    notice = f"\n\n（另有 {plan_omitted} 条 active plan 因 dream 总预算未展开。）"
-                    if count_tokens_approx(final_text + section + notice) <= dream_budget:
-                        section += notice
-                append_fragment(section)
+            if plan_omitted:
+                while plan_lines:
+                    notice = (
+                        f"\n\n（另有 {plan_omitted} 条 active plan "
+                        "因 dream 总预算未展开。）"
+                    )
+                    section = plan_prefix + "\n".join(plan_lines) + notice
+                    if count_tokens_approx(final_text + section) <= dream_budget:
+                        break
+                    plan_lines.pop()
+                    plan_omitted += 1
+                if plan_lines:
+                    append_fragment(section)
+                else:
+                    append_fragment(plan_fallback)
+            elif plan_lines:
+                append_fragment(plan_prefix + "\n".join(plan_lines))
     except Exception as e:
         rt.logger.warning(f"Dream active plans block failed: {e}")
 

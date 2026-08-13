@@ -294,7 +294,7 @@ async def plan_create(
         event_actor="llm",
     )
     from .._common import append_plan_change_log
-    initial_log = append_plan_change_log([], "created", to=status)
+    initial_log = append_plan_change_log([], "created", to=status, by="plan")
     update_kwargs = {"status": status, "change_log": initial_log}
     if related_bucket.strip():
         update_kwargs["related_bucket"] = related_bucket.strip()

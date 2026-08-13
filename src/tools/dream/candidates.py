@@ -68,6 +68,35 @@ def is_within_window(meta: dict, cutoff: datetime) -> bool:
     return False
 
 
+def collect_core_context(all_buckets: list) -> list:
+    """Compatibility selector for callers that still inspect dream core candidates.
+
+    Dream dispatch intentionally no longer consumes or renders this list.  Keep
+    the selector available for policy/regression callers without reintroducing
+    pinned/permanent content into dream output.
+    """
+    core = [
+        b for b in all_buckets
+        if (
+            b["metadata"].get("pinned", False)
+            or b["metadata"].get("type") == "permanent"
+        )
+        and not parse_bool(b["metadata"].get("protected"), default=False)
+        and _can_dream(b)
+        and not is_letter_bucket(b)
+        and b["metadata"].get("type") not in ("letter", "self", "i")
+    ]
+    core.sort(
+        key=lambda b: (
+            int(b["metadata"].get("importance") or 0),
+            _metadata_timestamp(b["metadata"]),
+            b.get("id", ""),
+        ),
+        reverse=True,
+    )
+    return core[:20]
+
+
 def collect_candidates(all_buckets: list, window_hours: int) -> list:
     candidates = [
         b for b in all_buckets

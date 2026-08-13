@@ -817,23 +817,23 @@
     },
     {
       "path": "src/tools/dream/__init__.py",
-      "sha256": "8aaaf823ab683eff5b65d02af114da5fa90f37d108e444a343afe91288232e60",
-      "size": 3072
+      "sha256": "7d729f32f1c29df75a7f20a9f00d614c2138be320c376fa695a817fd87aca3c2",
+      "size": 2928
     },
     {
       "path": "src/tools/dream/candidates.py",
-      "sha256": "198c9bfada3750b3b4ecd4521441fc0ae34eb68b44fcd2140fe252369afc6890",
-      "size": 4084
+      "sha256": "852162fe4713631fd3c46b60177f6b8b51591389eb5abe69287cb5daa77b8511",
+      "size": 4384
     },
     {
       "path": "src/tools/dream/hints.py",
-      "sha256": "38e24ab854039defca936f3732b6555937bf5016b92d0830e3d3e496bb142323",
-      "size": 10974
+      "sha256": "1fd8279e82fd112beec900b8a1ca37e94a7f12790f20074d12ed7e7b056fce4d",
+      "size": 11114
     },
     {
       "path": "src/tools/dream/output.py",
-      "sha256": "afb5a78cf0f544b1c45d7bfe8d4b1eae7044b6b12669f0c9e74959285071527a",
-      "size": 21340
+      "sha256": "c5e5968ad489d6674bb406e2f991206792eec7d69b4df4d4a2171dbe4984d3d6",
+      "size": 19883
     },
     {
       "path": "src/tools/grow/__init__.py",

@@ -88,6 +88,82 @@ async def test_source_read_requires_exact_bucket_and_title(
 
 
 @pytest.mark.asyncio
+async def test_source_read_lists_same_source_events_without_inlining_sibling_bodies(
+    bucket_mgr, monkeypatch
+):
+    store = SourceStore(bucket_mgr.base_dir)
+    ref = store.put("一\n二\n三\n四\n五\n六\n")
+    first_id = await bucket_mgr.create(
+        content="第一条事件正文",
+        title="第一条",
+        source_refs=[{"ref": ref, "ranges": [[1, 2]]}],
+    )
+    second_id = await bucket_mgr.create(
+        content="第二条事件正文绝不能自动展开",
+        title="第二条",
+        source_refs=[{"ref": ref, "ranges": [[3, 4]]}],
+    )
+    third_id = await bucket_mgr.create(
+        content="第三条事件正文也不能自动展开",
+        title="第三条",
+        source_refs=[{"ref": ref, "ranges": [[5, 6]]}],
+    )
+    unrelated_ref = store.put("另一份原文")
+    unrelated_id = await bucket_mgr.create(
+        content="无关桶正文",
+        title="无关桶",
+        source_refs=[{"ref": unrelated_ref, "ranges": [[1, 1]]}],
+    )
+    monkeypatch.setattr(rt, "bucket_mgr", bucket_mgr, raising=False)
+    monkeypatch.setattr(rt, "source_store", store, raising=False)
+    monkeypatch.setattr(rt, "logger", MagicMock(), raising=False)
+
+    result = await source_read(first_id, "第一条", scope="event")
+
+    assert "same_source_event_count=2" in result
+    second_line = (
+        f"same_source_event bucket_id={second_id} title=第二条 "
+        "source_slot=1:ranges=3-4"
+    )
+    third_line = (
+        f"same_source_event bucket_id={third_id} title=第三条 "
+        "source_slot=1:ranges=5-6"
+    )
+    assert second_line in result
+    assert third_line in result
+    assert result.index(second_line) < result.index(third_line)
+    assert second_id in result and third_id in result
+    assert unrelated_id not in result
+    assert "第二条事件正文绝不能自动展开" not in result
+    assert "第三条事件正文也不能自动展开" not in result
+    assert ref not in result
+
+
+@pytest.mark.asyncio
+async def test_source_reverse_lookup_reports_missing_sibling_title_without_guessing(
+    bucket_mgr, monkeypatch
+):
+    store = SourceStore(bucket_mgr.base_dir)
+    ref = store.put("甲\n乙\n")
+    first_id = await bucket_mgr.create(
+        content="第一条",
+        title="有标题",
+        source_refs=[{"ref": ref, "ranges": [[1, 1]]}],
+    )
+    sibling_id = await bucket_mgr.create(
+        content="历史无标题桶",
+        source_refs=[{"ref": ref, "ranges": [[2, 2]]}],
+    )
+    monkeypatch.setattr(rt, "bucket_mgr", bucket_mgr, raising=False)
+    monkeypatch.setattr(rt, "source_store", store, raising=False)
+    monkeypatch.setattr(rt, "logger", MagicMock(), raising=False)
+
+    result = await source_read(first_id, "有标题", scope="event")
+
+    assert f"same_source_event bucket_id={sibling_id} title=<missing>" in result
+
+
+@pytest.mark.asyncio
 async def test_source_read_pages_without_silent_truncation(bucket_mgr, monkeypatch):
     store = SourceStore(bucket_mgr.base_dir)
     original = "段落内容。" * 3000

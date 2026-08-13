@@ -19,6 +19,7 @@ _MAX_MAX_TOKENS = 20000
 # 个字符已足以选出能放入预算的最长前缀，同时把常驻分页缓冲限制在
 # 公开最大预算下约 400 KiB。
 _MAX_CHARS_PER_TOKEN = 20
+_MAX_SAME_SOURCE_EVENTS = 20
 
 
 def _normalized_title(value: object) -> str:
@@ -92,6 +93,87 @@ def _collect_evidence_window(
     return "".join(page_parts), total_chars
 
 
+def _format_ranges(ranges: list[list[int]]) -> str:
+    if not ranges:
+        return "unscoped"
+    return ",".join(
+        str(start) if start == end else f"{start}-{end}"
+        for start, end in ranges
+    )
+
+
+async def _collect_same_source_events(
+    *,
+    bucket_id: str,
+    source_refs: list[dict[str, Any]],
+) -> tuple[list[str], int]:
+    """反查与当前桶共享原文 ref 的其它桶，不做任何语义判断。
+
+    source_refs 是内容寻址的精确关系。这里仅把这个关系反过来展示成
+    “同一份原文还拆出了哪些事件”，不读取其它桶正文，也不暴露 ref 本身。
+    """
+
+    ref_slots = {
+        source_ref["ref"]: slot
+        for slot, source_ref in enumerate(source_refs, start=1)
+    }
+    if not ref_slots:
+        return [], 0
+
+    try:
+        buckets = await rt.bucket_mgr.list_all(include_archive=True)
+    except Exception as exc:
+        rt.logger.warning(f"source reverse lookup failed: {exc}")
+        return [], 0
+
+    matches: list[tuple[int, int, str]] = []
+    for sibling in buckets:
+        sibling_id = str(sibling.get("id") or "").strip()
+        if not sibling_id or sibling_id == bucket_id:
+            continue
+        if is_letter_bucket(sibling) and letter_lock_state(sibling, "ai")["locked"]:
+            continue
+
+        meta = sibling.get("metadata") or {}
+        try:
+            sibling_refs = normalize_source_refs(meta.get("source_refs") or [])
+        except ValueError:
+            continue
+
+        shared: list[tuple[int, list[list[int]]]] = []
+        for sibling_ref in sibling_refs:
+            slot = ref_slots.get(sibling_ref["ref"])
+            if slot is not None:
+                shared.append((slot, sibling_ref["ranges"]))
+        if not shared:
+            continue
+
+        shared.sort(key=lambda item: item[0])
+        first_slot = shared[0][0]
+        ranged_starts = [
+            ranges[0][0]
+            for _slot, ranges in shared
+            if ranges
+        ]
+        first_line = min(ranged_starts) if ranged_starts else 10**12
+        raw_title = meta.get("title") or ""
+        title = _single_line_header_value(raw_title) if raw_title else "<missing>"
+        source_parts = [
+            f"source_slot={slot}:ranges={_format_ranges(ranges)}"
+            for slot, ranges in shared
+        ]
+        line = (
+            f"same_source_event bucket_id={_single_line_header_value(sibling_id)} "
+            f"title={title} "
+            + " ".join(source_parts)
+        )
+        matches.append((first_slot, first_line, line))
+
+    matches.sort(key=lambda item: (item[0], item[1], item[2]))
+    total = len(matches)
+    return [line for _slot, _line, line in matches[:_MAX_SAME_SOURCE_EVENTS]], total
+
+
 def _render_page(
     *,
     bucket_id: str,
@@ -100,6 +182,8 @@ def _render_page(
     cursor: int,
     body: str,
     total_chars: int,
+    same_source_lines: list[str] | None = None,
+    same_source_total: int = 0,
 ) -> str:
     end = cursor + len(body)
     next_cursor = end if end < total_chars else 0
@@ -111,6 +195,13 @@ def _render_page(
         f"next_cursor={next_cursor}\n"
         f"total_chars={total_chars}\n"
     )
+    same_source_lines = same_source_lines or []
+    if same_source_total:
+        header += f"same_source_event_count={same_source_total}\n"
+        header += "\n".join(same_source_lines) + "\n"
+        omitted = same_source_total - len(same_source_lines)
+        if omitted > 0:
+            header += f"same_source_events_omitted={omitted}\n"
     return header + "\n" + body
 
 
@@ -159,6 +250,11 @@ async def dispatch(
             "如确需整份原文，请显式使用 scope=full_source。"
         )
 
+    same_source_lines, same_source_total = await _collect_same_source_events(
+        bucket_id=bucket_id,
+        source_refs=source_refs,
+    )
+
     try:
         evidence_window, total_chars = await asyncio.to_thread(
             _collect_evidence_window,
@@ -184,6 +280,8 @@ async def dispatch(
             cursor=cursor,
             body=evidence_window[:mid],
             total_chars=total_chars,
+            same_source_lines=same_source_lines,
+            same_source_total=same_source_total,
         )
         if count_tokens_approx(candidate) <= max_tokens:
             chosen = mid
@@ -200,4 +298,6 @@ async def dispatch(
         cursor=cursor,
         body=evidence_window[:chosen],
         total_chars=total_chars,
+        same_source_lines=same_source_lines,
+        same_source_total=same_source_total,
     )

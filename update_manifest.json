@@ -902,8 +902,8 @@
     },
     {
       "path": "src/tools/source_read/core.py",
-      "sha256": "504b2f79f1590eb617f860d32940a575376e2f53bf217dbda7e6d4e85b07969f",
-      "size": 6739
+      "sha256": "6c9fc8deb419d163b5b1ca21d8a1b92c8877a1ed971907a5886840f548928c9e",
+      "size": 10264
     },
     {
       "path": "src/tools/trace/__init__.py",

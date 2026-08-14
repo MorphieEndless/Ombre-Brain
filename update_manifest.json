@@ -32,7 +32,7 @@
     },
     {
       "path": "src/VERSION",
-      "sha256": "a4d4318b5d0c8616f787eb9589440914a80302e1f9051c12aa59fc920ae6b663",
+      "sha256": "8c6394e922da61d04428e8401c40c725cd4a2e3932104a8b533b037b3d2b785c",
       "size": 7
     },
     {
@@ -77,8 +77,8 @@
     },
     {
       "path": "src/import_memory.py",
-      "sha256": "82d89ba6a983f56df16c718ec15ea3bd79ffc0ac0c01c8580d70ccecd7530d91",
-      "size": 60459
+      "sha256": "9b37820cef77aa98a4668ed3f1bfc330a361792a007d2802b0e0181cc51c7a80",
+      "size": 60715
     },
     {
       "path": "src/migrate_engine.py",
@@ -1067,5 +1067,5 @@
     }
   ],
   "rollout_strategy": "single-node",
-  "version": "2.17.8"
+  "version": "2.17.9"
 }

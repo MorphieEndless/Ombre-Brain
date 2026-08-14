@@ -637,8 +637,8 @@
     },
     {
       "path": "src/ombrebrain/protocol/public_tools.py",
-      "sha256": "ee41ef1a69898a772448d7bef6184970ab27fc07bbed65c34242cddf744a25ab",
-      "size": 9098
+      "sha256": "f0980ae385ca11b53121f645dcc2da38411a91068108256114ab2722f8bfb14b",
+      "size": 8850
     },
     {
       "path": "src/ombrebrain/protocol/schemas.py",
@@ -727,8 +727,8 @@
     },
     {
       "path": "src/ombrebrain/storage/source_store.py",
-      "sha256": "af47d07a691a3a020d316f2ffb7431c0222a85d05b4bd9384599b8e4ba3be1ee",
-      "size": 13418
+      "sha256": "23e665fbcbb754d688df8f476c9b9742e163822f8dad888a9c28f440da238f83",
+      "size": 13185
     },
     {
       "path": "src/ombrebrain/storage/vault_health.py",
@@ -912,8 +912,8 @@
     },
     {
       "path": "src/tools/source_read/core.py",
-      "sha256": "61fe22b37ddf15d6096d02165aa32b81a46100f982a602b911bd64ad2ba522a8",
-      "size": 8363
+      "sha256": "66aa2eef85cb7f3205352ce6c9c1a0b87b8005fd3836a647106634068faeafad",
+      "size": 8170
     },
     {
       "path": "src/tools/trace/__init__.py",

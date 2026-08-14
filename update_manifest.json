@@ -832,8 +832,8 @@
     },
     {
       "path": "src/tools/dream/hints.py",
-      "sha256": "1fd8279e82fd112beec900b8a1ca37e94a7f12790f20074d12ed7e7b056fce4d",
-      "size": 11114
+      "sha256": "b4f4fdb37854cf13c62b2cfa674b8219009f55546c9a89059c2752e6c7a8af78",
+      "size": 11071
     },
     {
       "path": "src/tools/dream/output.py",

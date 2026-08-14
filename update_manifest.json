@@ -907,8 +907,8 @@
     },
     {
       "path": "src/tools/relation_bindings/core.py",
-      "sha256": "9687211886494673a849e71bd1a0134719633949f1a237370c7575e85922db7c",
-      "size": 5997
+      "sha256": "33ed83e2372e0266601cffff62c661e0d081bee14d100ee1b1b924536d9755e8",
+      "size": 6456
     },
     {
       "path": "src/tools/relation_read/__init__.py",
@@ -917,8 +917,8 @@
     },
     {
       "path": "src/tools/relation_read/core.py",
-      "sha256": "d14d3683d624bd9f1d4e91f799fb3afdd42e9f44cbf86e8a697d0fc82b0bb697",
-      "size": 1334
+      "sha256": "d618f089f0fee2842fe7425c3a1e933afb6fa7daac00974fa19d63b2c8548c15",
+      "size": 1420
     },
     {
       "path": "src/tools/source_bindings/__init__.py",

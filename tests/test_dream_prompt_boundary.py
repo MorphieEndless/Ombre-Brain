@@ -254,15 +254,6 @@ def test_dream_global_budget_omits_whole_blocks_without_truncating_bodies(
         _bucket(f"recent-{index}", f"recent {index} " + "x " * 4000)
         for index in range(8)
     ]
-    core = [
-        _bucket(
-            f"core-{index}",
-            f"core {index} " + "y " * 4000,
-            pinned=True,
-            importance=10,
-        )
-        for index in range(4)
-    ]
     plans = [
         _bucket(
             f"plan-{index}",

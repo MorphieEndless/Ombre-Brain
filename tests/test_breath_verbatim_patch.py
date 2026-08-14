@@ -73,6 +73,28 @@ def _install_runtime(bucket_mgr, dehydrator=None):
     return rt.dehydrator
 
 
+@pytest.mark.asyncio
+async def test_dispatch_keeps_default_breath_budget_and_allows_explicit_headroom(
+    monkeypatch,
+):
+    _install_runtime(OrderedBucketManager([]))
+    seen = []
+
+    async def capture_default(*, max_results, max_tokens, tag_filter):
+        seen.append(max_tokens)
+        return ""
+
+    monkeypatch.setattr("tools.breath.surface_default", capture_default)
+
+    await dispatch()
+    rt.config["surfacing"]["breath_max_tokens"] = 10_000
+    await dispatch()
+    await dispatch(max_tokens=35_000)
+    await dispatch(max_tokens=50_000)
+
+    assert seen == [10_000, 10_000, 35_000, 40_000]
+
+
 async def _search(query, **overrides):
     params = {
         "query": query,
@@ -372,6 +394,11 @@ async def test_default_surface_skips_ordinary_results_when_core_is_omitted(monke
         "📌 [核心准则] [bucket_id:first-core]",
         "👣 Footprint：暂时无法读取",
     )
+    _, oversized_core_cost = render_stored_bucket(
+        oversized_core,
+        "📌 [核心准则] [bucket_id:oversized-core]",
+        "👣 Footprint：暂时无法读取",
+    )
     _, ordinary_cost = render_stored_bucket(
         ordinary,
         "[权重:10.00] [bucket_id:ordinary]",
@@ -393,6 +420,37 @@ async def test_default_surface_skips_ordinary_results_when_core_is_omitted(monke
     assert "token 预算不足" in output
     assert "核心准则" in output
     assert "普通浮现已跳过" in output
+    assert f"required≈{first_core_cost + oversized_core_cost} tokens" in output
+    assert f"limit={first_core_cost + ordinary_cost} tokens" in output
+    assert "omitted=1" in output
+    assert "可由用户明确提高" in output
+
+
+@pytest.mark.asyncio
+async def test_default_surface_reports_hard_cap_when_pins_exceed_40000():
+    oversized_core = {
+        "id": "hard-cap-core",
+        "content": "Oversized core rule " * 10000,
+        "metadata": {
+            "type": "permanent",
+            "importance": 10,
+            "pinned": True,
+            "domain": [],
+        },
+    }
+    _install_runtime(OrderedBucketManager([oversized_core]))
+
+    output = await surface_default(
+        max_results=10,
+        max_tokens=40_000,
+        tag_filter=[],
+    )
+
+    assert "required≈" in output
+    assert "limit=40000 tokens" in output
+    assert "omitted=1" in output
+    assert "已达到当前版本 40000 token 安全上限" in output
+    assert "可由用户明确提高" not in output
 
 
 @pytest.mark.asyncio

@@ -287,7 +287,7 @@ feel 桶自身：
 3. **浮现模式**（无 `query`；`breath()` 固定走这里）：pinned/显式 permanent 桶展示为「核心准则」+ 未解决桶按衰减分排序，**冷启动**（`activation_count==0 && importance>=8`）的桶最多 2 个插到最前；后续排序**有两条互斥路径**：当 `surfacing.sampling.enabled=true` 时走加权无放回采样（`top_k` / `sample_k` / `temperature` 控制；详见 §7.1），否则走原 Top-1 固定 + Top-2~20 随机洗牌；按 `max_results` 硬截断。**排除 anchor 与 protected 桶**：anchor 是坐标系；protected 只防衰减，不进入核心准则、未解决、久未浮现或偶遇池。浮现**不调用** `touch()`。每条返回正文后附一行紧凑 `👣 Footprint`，只表达创建、补充、淡去、归档、恢复等有意义的变迁，不展示 touch/索引噪声。**末尾追加 `=== 久未浮现 ===` 段**：从久未激活的高重要度桶里随机抽 1～2 条，模拟「突然想起来」。
 4. **检索模式**（有 `query`；`breath_search()` 固定走这里）：每个 query 只生成一次查询向量，与 rapidfuzz/BM25 多维评分共同进入 `BucketManager.search()` → 过滤 `feel/plan/letter`，**pinned/permanent/protected 仍可被显式检索命中**：pinned/permanent 加 `📌 [核心准则]`，protected 加 `🛡️ [受保护记忆]` → 纯语义候选相似度 `>=0.65` 标 `[语义关联]`，且不能绕过 domain/tags/type 过滤 → 活跃桶命中时 `touch()`。查询也会检索 archive；归档命中返回保留的 Markdown 原文与 Footprint，明确邀请模型判断是否值得再次回忆，并显示 `trace(bucket_id="...", restore=True)`。查询只发现、不自动恢复，也不 touch 归档桶。结果不足时保留设计上的自由联想，但 protected 不进入这一非命中随机通道。embedding 不可用时明确提示后继续关键词/BM25；桶一旦命中，返回层直接使用当前存储的完整 `content`，不调用 dehydrate、不剥除 wikilink、不截断或改写。**不过滤 anchor**（设计：主动检索时希望能找到坐标系桶）。catalog 同样保留 protected 并使用相同的受保护标记。
 
-(实现注意：`tags="feel"` 在第一个分支被映射为 `domain="feel"` 后清出 tag_filter；其它 tag 走 AND 过滤；`max_tokens` 上限 20000，`max_results` 上限 50；`importance_min` 模式下硬上限 20 条不可调；浮现模式中钉选桶**不计入** `max_results` 上限。)
+(实现注意：`tags="feel"` 在第一个分支被映射为 `domain="feel"` 后清出 tag_filter；其它 tag 走 AND 过滤；breath `max_tokens` 上限 40000（默认仍由 `surfacing.breath_max_tokens` 的 10000 fallback 控制，40000 只是显式 opt-in 的安全上限），`max_results` 上限 50；`importance_min` 模式下硬上限 20 条不可调；浮现模式中钉选桶**不计入** `max_results` 上限。)
 
 ### 3.1.1 Footprint 与显式恢复
 
@@ -1512,7 +1512,7 @@ normalized = total / w_sum × 100   # 归一化到 0~100
 
 | 值 | 位置 | 用途 |
 |---|---|---|
-| `10000` / `20000` | `breath` | max_tokens 默认 / 上限 |
+| `10000` / `40000` | `breath` | max_tokens 默认 / 显式 opt-in 安全上限（非新默认） |
 | `20` / `50` | `breath` | max_results 默认 / 上限 |
 | `2` | `breath` 浮现 | 冷启动桶数上限 |
 | `8` | 冷启动 | importance >= 8 才进入冷启动 |

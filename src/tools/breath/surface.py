@@ -46,9 +46,10 @@ _BUDGET_NOTICE = (
     "已返回正文均保持完整，未截断或摘要。"
     "当前约使用 {used}/{limit} token，如需被省略的整桶请提高 max_tokens 后重试。"
 )
+_BREATH_SAFETY_CAP = 40_000
 _PIN_BUDGET_NOTICE = (
-    "token 预算不足：有 {omitted} 条核心准则因剩余预算不足被省略；"
-    "普通浮现已跳过。"
+    "token 预算不足：核心准则 required≈{required} tokens（完整渲染核心准则总计），"
+    "limit={limit} tokens，omitted={omitted} 条；普通浮现已跳过（ordinary surfacing skipped）。"
 )
 
 
@@ -65,6 +66,21 @@ def _can_surface(bucket: dict) -> bool:
 
 def _budget_notice(*, omitted: int, used: int, limit: int) -> str:
     return _BUDGET_NOTICE.format(omitted=omitted, used=used, limit=limit)
+
+
+def _pin_budget_notice(*, required: int, limit: int, omitted: int) -> str:
+    notice = _PIN_BUDGET_NOTICE.format(
+        required=required,
+        limit=limit,
+        omitted=omitted,
+    )
+    if limit < _BREATH_SAFETY_CAP:
+        return (
+            notice
+            + "如需返回更多核心准则，可由用户明确提高 max_tokens / "
+            "surfacing.breath_max_tokens；当前版本最高 40000。"
+        )
+    return notice + "已达到当前版本 40000 token 安全上限；请精简或取消部分核心准则后重试。"
 
 
 async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -> str:
@@ -109,6 +125,7 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
     pinned_results = []
     token_budget = max_tokens
     pinned_omitted = 0
+    pinned_required_tokens = 0
     for b in pinned_buckets:
         try:
             rendered, entry_tokens = render_stored_bucket(
@@ -116,6 +133,7 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
                 f"📌 [核心准则] [bucket_id:{b['id']}]",
                 _footprint(b),
             )
+            pinned_required_tokens += entry_tokens
             if entry_tokens > token_budget:
                 pinned_omitted += 1
                 continue
@@ -261,7 +279,11 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
 
     if not pinned_results and not dynamic_results:
         if pinned_omitted:
-            return _PIN_BUDGET_NOTICE.format(omitted=pinned_omitted)
+            return _pin_budget_notice(
+                required=pinned_required_tokens,
+                limit=max_tokens,
+                omitted=pinned_omitted,
+            )
         if dynamic_omitted:
             return _budget_notice(
                 omitted=dynamic_omitted,
@@ -377,7 +399,13 @@ async def surface_default(max_results: int, max_tokens: int, tag_filter: list) -
     if dream_results:
         parts.append("=== 偶然想起 ===\n" + "\n---\n".join(dream_results))
     if pinned_omitted:
-        parts.append(_PIN_BUDGET_NOTICE.format(omitted=pinned_omitted))
+        parts.append(
+            _pin_budget_notice(
+                required=pinned_required_tokens,
+                limit=max_tokens,
+                omitted=pinned_omitted,
+            )
+        )
     if dynamic_omitted:
         parts.append(
             _budget_notice(

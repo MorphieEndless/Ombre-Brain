@@ -2248,6 +2248,21 @@ class BucketManager:
                 _atomic_write_text(file_path, frontmatter.dumps(post))
             return result
 
+    async def mutate_relation_links(self, bucket_id: str, mutation: Any) -> Any:
+        """Atomically change Relation V1 ledger only; never touch derived state."""
+        async with self._bucket_turn(bucket_id):
+            file_path = self._find_bucket_file(bucket_id)
+            if not file_path:
+                return None
+            try:
+                post = frontmatter.load(file_path)
+            except Exception:
+                return None
+            changed, result = mutation(post)
+            if changed:
+                _atomic_write_text(file_path, frontmatter.dumps(post))
+            return result
+
     async def _update_locked(
         self,
         bucket_id: str,

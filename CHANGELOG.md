@@ -2,6 +2,27 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.17.8
+
+### 新增 / Added
+
+- 新增 Relation V1：普通记忆桶之间可建立一跳有向关系，使用稳定 1-based slot 的 `relation_links` ledger，并提供 `relation_attach`、`relation_read`、`relation_detach`、`relation_restore` 四个公开工具；detach/restore 可逆且不压缩 slot。
+- 内置六种机器关系 `caused_by` / `causes` / `continuation_of` / `continues` / `related_to` / `same_event`，默认显示为「原因 / 结果 / 前段 / 后续 / 相关 / 同一事件」；可选自定义 label 最多 20 字符，只改变展示语义，不新增 machine type。
+- breath 与 catalog 在已选中的普通桶后追加最多两条极简 Relation hint；dream 仅在近期普通记忆块展示 Relation。Relation 不读取目标标题或正文，也不参与候选生成、排序、embedding、activation、decay 或递归图遍历。
+
+### 兼容与安全 / Compatibility & Safety
+
+- Relation V1 仅连接普通记忆桶；归档普通桶仍保留并可管理关系，归档后的 plan / feel / I / letter 等特殊桶仍保持拒绝边界。
+- 备份导入的 keep_both 会重写包内 Relation 目标 ID；若包内目标未成功导入，则保留 stable slot 并原位 detached，避免误连到本地同 ID 旧桶。畸形 Relation metadata、非法 type、换行或超长 label 均 fail-closed。
+
+### 测试 / Tests
+
+- 扩展 Relation ledger、稳定 slot、方向性、自环、特殊桶、归档、active 上限、tiny manifest、breath/dream 渲染、公开 MCP schema 与 migration remap 回归；本地工程桥验证继续通过，Python/pytest 由 CI 执行权威验证。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.17.8`。
+
 ## 2.17.7
 
 ### 新增 / Added

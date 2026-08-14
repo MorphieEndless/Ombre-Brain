@@ -34,6 +34,10 @@ EXPECTED_TOOLS = {
     "source_attach",
     "source_detach",
     "source_restore",
+    "relation_read",
+    "relation_attach",
+    "relation_detach",
+    "relation_restore",
     "trace",
     "anchor",
     "release",
@@ -55,6 +59,10 @@ EXPECTED_TOOL_ORDER = (
     "source_attach",
     "source_detach",
     "source_restore",
+    "relation_read",
+    "relation_attach",
+    "relation_detach",
+    "relation_restore",
     "trace",
     "dream",
     "anchor",
@@ -106,6 +114,10 @@ EXPECTED_TOOL_PROPERTIES = {
     "source_attach": {"bucket_id", "expected_title", "source_content", "source_ranges"},
     "source_detach": {"bucket_id", "expected_title", "source_slot"},
     "source_restore": {"bucket_id", "expected_title", "source_slot"},
+    "relation_read": {"bucket_id", "expected_title"},
+    "relation_attach": {"bucket_id", "expected_title", "target_bucket_id", "relation_type", "label"},
+    "relation_detach": {"bucket_id", "expected_title", "relation_slot"},
+    "relation_restore": {"bucket_id", "expected_title", "relation_slot"},
     "trace": {
         "bucket_id",
         "name",
@@ -158,6 +170,10 @@ EXPECTED_REQUIRED_PROPERTIES = {
     "source_attach": {"bucket_id", "expected_title", "source_content"},
     "source_detach": {"bucket_id", "expected_title", "source_slot"},
     "source_restore": {"bucket_id", "expected_title", "source_slot"},
+    "relation_read": {"bucket_id", "expected_title"},
+    "relation_attach": {"bucket_id", "expected_title", "target_bucket_id", "relation_type"},
+    "relation_detach": {"bucket_id", "expected_title", "relation_slot"},
+    "relation_restore": {"bucket_id", "expected_title", "relation_slot"},
     "trace": {"bucket_id"},
     "anchor": {"bucket_id"},
     "release": {"bucket_id"},
@@ -346,7 +362,7 @@ def test_concurrent_clients_discover_the_same_stateless_dream_schema():
     assert set(schemas[0]["properties"]) == {"window_hours"}
 
 
-def test_manifest_exposes_exactly_the_documented_19_tools(mcp_client):
+def test_manifest_exposes_exactly_the_documented_23_tools(mcp_client):
     tools = mcp_client.list_tools()
     assert [tool["name"] for tool in tools] == list(EXPECTED_TOOL_ORDER)
     tools_by_name = {tool["name"]: tool for tool in tools}
@@ -377,6 +393,10 @@ def test_manifest_exposes_exactly_the_documented_19_tools(mcp_client):
         ("source_attach", {}, "bucket_id"),
         ("source_detach", {}, "bucket_id"),
         ("source_restore", {}, "bucket_id"),
+        ("relation_read", {}, "bucket_id"),
+        ("relation_attach", {}, "bucket_id"),
+        ("relation_detach", {}, "bucket_id"),
+        ("relation_restore", {}, "bucket_id"),
         ("trace", {}, "bucket_id"),
         ("anchor", {}, "bucket_id"),
         ("release", {}, "bucket_id"),
@@ -408,6 +428,10 @@ def test_all_tools_reject_schema_invalid_arguments(mcp_client, tool, arguments, 
         ("source_attach", {"bucket_id": "unknown", "expected_title": "unknown", "source_content": "probe"}),
         ("source_detach", {"bucket_id": "unknown", "expected_title": "unknown", "source_slot": 1}),
         ("source_restore", {"bucket_id": "unknown", "expected_title": "unknown", "source_slot": 1}),
+        ("relation_read", {"bucket_id": "unknown", "expected_title": "unknown"}),
+        ("relation_attach", {"bucket_id": "unknown", "expected_title": "unknown", "target_bucket_id": "target", "relation_type": "related_to"}),
+        ("relation_detach", {"bucket_id": "unknown", "expected_title": "unknown", "relation_slot": 1}),
+        ("relation_restore", {"bucket_id": "unknown", "expected_title": "unknown", "relation_slot": 1}),
         ("trace", {"bucket_id": "missing-unknown-field-probe"}),
         ("anchor", {"bucket_id": "missing-unknown-field-probe"}),
         ("release", {"bucket_id": "missing-unknown-field-probe"}),

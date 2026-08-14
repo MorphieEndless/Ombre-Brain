@@ -2,6 +2,22 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.17.9
+
+### 修复 / Fixed
+
+- 修复 Claude `conversations.json` 被裸结构化记忆 JSON 预检误判的问题；带有
+  `chat_messages`、`mapping` 或 `messages` 的会话信封现在交由既有对话格式识别，
+  合法裸结构化记忆列表的直接导入兼容行为保持不变。
+
+### 测试 / Tests
+
+- 新增 Claude 官方 `chat_messages` 结构的预检回归测试，并保留裸结构化记忆列表测试。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.17.9`。
+
 ## 2.17.8
 
 ### 新增 / Added

@@ -533,6 +533,7 @@ async def test_cancelled_apply_reaps_embedding_merge_before_workspace_cleanup(
             str(tmp_path / "published.md"),
         ),
     )
+    monkeypatch.setattr(engine, "_remap_imported_relation_targets", lambda *_args: None)
     entered = threading.Event()
     release = threading.Event()
 

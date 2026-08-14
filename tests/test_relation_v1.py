@@ -100,7 +100,9 @@ async def test_relation_rejects_self_and_special_buckets_but_allows_archived_ord
     monkeypatch.setattr(rt, "bucket_mgr", bucket_mgr, raising=False)
     assert "必须是字符串" in await attach(ordinary, "ordinary", [], "causes")
     assert "自环" in await attach(ordinary, "ordinary", ordinary, "causes")
-    assert "普通记忆" in await attach(ordinary, "ordinary", plan, "related_to")
+    result = await attach(ordinary, "ordinary", plan, "related_to")
+    assert "Relation V1" in result
+    assert "slot=" not in result and "status=" not in result
     assert await bucket_mgr.archive(ordinary)
     archived = await bucket_mgr.get_including_archive(ordinary)
     assert archived["metadata"].get("type") == "archived"

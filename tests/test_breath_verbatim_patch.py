@@ -310,6 +310,141 @@ async def test_default_surface_skips_oversized_core_and_keeps_later_core(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_default_surface_skips_ordinary_results_when_core_is_omitted(monkeypatch):
+    first_core = {
+        "id": "first-core",
+        "content": "First core rule fits completely.",
+        "metadata": {
+            "type": "permanent",
+            "importance": 10,
+            "pinned": True,
+            "domain": [],
+        },
+    }
+    oversized_core = {
+        "id": "oversized-core",
+        "content": "Oversized core rule " * 400,
+        "metadata": {
+            "type": "permanent",
+            "importance": 10,
+            "pinned": True,
+            "domain": [],
+        },
+    }
+    ordinary = {
+        "id": "ordinary",
+        "content": "Ordinary memory would fit the remaining budget.",
+        "metadata": {
+            "type": "dynamic",
+            "importance": 10,
+            "activation_count": 1,
+            "domain": [],
+        },
+    }
+    passive = {
+        "id": "passive",
+        "content": "Passive memory must also stay hidden.",
+        "metadata": {
+            "type": "dynamic",
+            "importance": 9,
+            "activation_count": 1,
+            "last_active": "2020-01-01T00:00:00",
+            "domain": [],
+        },
+    }
+    accidental = {
+        "id": "accidental",
+        "content": "Accidental memory must stay hidden too.",
+        "metadata": {
+            "type": "dynamic",
+            "importance": 5,
+            "resolved": True,
+            "domain": [],
+        },
+    }
+    manager = OrderedBucketManager(
+        [first_core, oversized_core, ordinary, passive, accidental]
+    )
+    _install_runtime(manager)
+    monkeypatch.setattr("tools.breath.surface.random.random", lambda: 0.0)
+    _, first_core_cost = render_stored_bucket(
+        first_core,
+        "📌 [核心准则] [bucket_id:first-core]",
+        "👣 Footprint：暂时无法读取",
+    )
+    _, ordinary_cost = render_stored_bucket(
+        ordinary,
+        "[权重:10.00] [bucket_id:ordinary]",
+        "👣 Footprint：暂时无法读取",
+    )
+
+    output = await surface_default(
+        max_results=1,
+        max_tokens=first_core_cost + ordinary_cost,
+        tag_filter=[],
+    )
+
+    assert "[bucket_id:first-core]" in output
+    assert first_core["content"] in output
+    assert "[bucket_id:oversized-core]" not in output
+    assert "[bucket_id:ordinary]" not in output
+    assert "[bucket_id:passive]" not in output
+    assert "[bucket_id:accidental]" not in output
+    assert "token 预算不足" in output
+    assert "核心准则" in output
+    assert "普通浮现已跳过" in output
+
+
+@pytest.mark.asyncio
+async def test_default_surface_keeps_ordinary_results_when_all_core_fits(monkeypatch):
+    core = {
+        "id": "fitting-core",
+        "content": "Fitting core rule remains complete.",
+        "metadata": {
+            "type": "permanent",
+            "importance": 10,
+            "pinned": True,
+            "domain": [],
+        },
+    }
+    ordinary = {
+        "id": "fitting-ordinary",
+        "content": "Ordinary memory remains available when pins fit.",
+        "metadata": {
+            "type": "dynamic",
+            "importance": 9,
+            "activation_count": 1,
+            "domain": [],
+        },
+    }
+    manager = OrderedBucketManager([core, ordinary])
+    _install_runtime(manager)
+    monkeypatch.setattr("tools.breath.surface.random.random", lambda: 1.0)
+    _, core_cost = render_stored_bucket(
+        core,
+        "📌 [核心准则] [bucket_id:fitting-core]",
+        "👣 Footprint：暂时无法读取",
+    )
+    _, ordinary_cost = render_stored_bucket(
+        ordinary,
+        "[权重:9.00] [bucket_id:fitting-ordinary]",
+        "👣 Footprint：暂时无法读取",
+    )
+
+    output = await surface_default(
+        max_results=10,
+        max_tokens=core_cost + ordinary_cost,
+        tag_filter=[],
+    )
+
+    assert "[bucket_id:fitting-core]" in output
+    assert core["content"] in output
+    assert "[bucket_id:fitting-ordinary]" in output
+    assert ordinary["content"] in output
+    assert "普通浮现已跳过" not in output
+
+
+@pytest.mark.asyncio
 async def test_default_surface_skips_random_oversized_candidate_and_keeps_later_fit(
     monkeypatch,
 ):

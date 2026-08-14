@@ -500,6 +500,9 @@ async def test_source_links_are_immutable_shared_and_source_mutations_skip_index
 
     first_id = await bucket_mgr.create("A", title="A")
     second_id = await bucket_mgr.create("B", title="B")
+    # Ignore the two expected create-time index updates; this assertion is only
+    # about source binding mutations, which must bypass derived indexing.
+    index_after_update.reset_mock()
     assert "slot=1" in await source_attach(first_id, "A", "shared\n")
     assert "slot=1" in await source_attach(second_id, "B", "shared\n")
     assert "slot=1" in await source_attach(first_id, "A", "shared\n")

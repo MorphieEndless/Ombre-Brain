@@ -2,6 +2,28 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+## 2.17.7
+
+### 新增 / Added
+
+- 新增可逆的 Source 证据绑定层：持久化有序 `source_links`，并继续维护既有 `source_refs` 作为 active 兼容投影；同一 Source blob 可安全复用到多个桶，detach/restore 只改变绑定状态，不复制或改写原始证据。
+- 新增 `source_attach`、`source_detach`、`source_restore` 三个公开工具；slot 采用稳定的 1-based 位置，detach 后不压缩、不重排，restore 回到原 slot。
+- `source_read` 支持 `source_slots` 与 `all_sources`。多 Source 默认只返回极简 manifest，显式选择后才读取正文，避免一次拉取把上下文预算读满。
+
+### 兼容与安全 / Compatibility & Safety
+
+- 旧桶仅有 `source_refs` 时继续可读，并可按原顺序解释为 active links；新建/追加时同步维护两套字段。active 绑定上限保持 32，总 ledger 上限 128，超限显式拒绝，不静默丢弃。
+- Source attach/detach/restore 不改变桶正文、标签、domain、importance、生命周期、recency 或 embedding；归档桶可管理证据绑定，但不会借 Source restore 复活桶生命周期。锁定 Letter 继续拒绝 AI 修改。
+- 备份/迁移闭包同时收集 active 与 detached Source 引用，且在 `source_refs` / `source_links` 并存时取并集，防止证据遗漏。
+
+### 测试 / Tests
+
+- 扩展 Source 层、公开工具 schema、MCP 集成与服务器工具列表回归，覆盖共享不可变 Source、legacy 投影、稳定 slot、detach/restore 幂等、容量预检、单 detached manifest、备份闭包与不触发派生索引等边界。
+
+### 版本 / Version
+
+- 根目录 `VERSION` 与 `src/VERSION` 同步更新为 `2.17.7`。
+
 ## 2.17.6
 
 ### 修复 / Fixed

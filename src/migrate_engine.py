@@ -60,7 +60,7 @@ from ombrebrain.storage.backup_archive import (
 from ombrebrain.storage.source_store import (
     SOURCE_REF_RE,
     SourceStore,
-    normalize_source_refs,
+    referenced_source_ids_from_metadata,
 )
 
 try:
@@ -833,9 +833,7 @@ class MigrateEngine:
                 )
                 post = frontmatter.loads(raw.decode("utf-8"))
                 meta = self._normalize_import_metadata(dict(post.metadata))
-                if meta.get("source_refs"):
-                    for source_ref in normalize_source_refs(meta["source_refs"]):
-                        referenced_sources.add(source_ref["ref"])
+                referenced_sources.update(referenced_source_ids_from_metadata(meta))
                 content_size = len((post.content or "").encode("utf-8"))
                 if content_size > content_limit:
                     raise BackupArchiveError(

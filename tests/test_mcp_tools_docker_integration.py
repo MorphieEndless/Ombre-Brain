@@ -31,6 +31,9 @@ EXPECTED_TOOLS = {
     "hold",
     "grow",
     "source_read",
+    "source_attach",
+    "source_detach",
+    "source_restore",
     "trace",
     "anchor",
     "release",
@@ -49,6 +52,9 @@ EXPECTED_TOOL_ORDER = (
     "hold",
     "grow",
     "source_read",
+    "source_attach",
+    "source_detach",
+    "source_restore",
     "trace",
     "dream",
     "anchor",
@@ -96,7 +102,10 @@ EXPECTED_TOOL_PROPERTIES = {
         "source_ranges",
     },
     "grow": {"content", "items", "test_data"},
-    "source_read": {"bucket_id", "expected_title", "scope", "cursor", "max_tokens"},
+    "source_read": {"bucket_id", "expected_title", "scope", "cursor", "max_tokens", "source_slots", "all_sources"},
+    "source_attach": {"bucket_id", "expected_title", "source_content", "source_ranges"},
+    "source_detach": {"bucket_id", "expected_title", "source_slot"},
+    "source_restore": {"bucket_id", "expected_title", "source_slot"},
     "trace": {
         "bucket_id",
         "name",
@@ -146,6 +155,9 @@ EXPECTED_REQUIRED_PROPERTIES = {
     "breath_search": {"query"},
     "hold": {"content"},
     "source_read": {"bucket_id", "expected_title"},
+    "source_attach": {"bucket_id", "expected_title", "source_content"},
+    "source_detach": {"bucket_id", "expected_title", "source_slot"},
+    "source_restore": {"bucket_id", "expected_title", "source_slot"},
     "trace": {"bucket_id"},
     "anchor": {"bucket_id"},
     "release": {"bucket_id"},
@@ -334,7 +346,7 @@ def test_concurrent_clients_discover_the_same_stateless_dream_schema():
     assert set(schemas[0]["properties"]) == {"window_hours"}
 
 
-def test_manifest_exposes_exactly_the_documented_15_tools(mcp_client):
+def test_manifest_exposes_exactly_the_documented_19_tools(mcp_client):
     tools = mcp_client.list_tools()
     assert [tool["name"] for tool in tools] == list(EXPECTED_TOOL_ORDER)
     tools_by_name = {tool["name"]: tool for tool in tools}
@@ -362,6 +374,9 @@ def test_manifest_exposes_exactly_the_documented_15_tools(mcp_client):
         ("hold", {}, "content"),
         ("grow", {"items": {"not": "a list"}}, "items"),
         ("source_read", {}, "bucket_id"),
+        ("source_attach", {}, "bucket_id"),
+        ("source_detach", {}, "bucket_id"),
+        ("source_restore", {}, "bucket_id"),
         ("trace", {}, "bucket_id"),
         ("anchor", {}, "bucket_id"),
         ("release", {}, "bucket_id"),
@@ -390,6 +405,9 @@ def test_all_tools_reject_schema_invalid_arguments(mcp_client, tool, arguments, 
         ("hold", {"content": "unknown-field-probe", "test_data": True}),
         ("grow", {"items": []}),
         ("source_read", {"bucket_id": "unknown", "expected_title": "unknown"}),
+        ("source_attach", {"bucket_id": "unknown", "expected_title": "unknown", "source_content": "probe"}),
+        ("source_detach", {"bucket_id": "unknown", "expected_title": "unknown", "source_slot": 1}),
+        ("source_restore", {"bucket_id": "unknown", "expected_title": "unknown", "source_slot": 1}),
         ("trace", {"bucket_id": "missing-unknown-field-probe"}),
         ("anchor", {"bucket_id": "missing-unknown-field-probe"}),
         ("release", {"bucket_id": "missing-unknown-field-probe"}),

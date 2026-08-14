@@ -8,8 +8,9 @@ DecayEngine / EmbeddingEngine / ImportEngine，把它们注入 tools._runtime �
 web._shared，然后以 @mcp.tool() 注册薄封装（真正的实现在 src/tools/<工具>/ 下面）。
 
 关键行为：
-- 启动后暴露 15 个 MCP 工具：breath/breath_search/breath_advanced/hold/grow/source_read/
-  trace/anchor/release/pulse/plan/letter_write/letter_read/dream/I；每个入口
+- 启动后暴露 19 个 MCP 工具：breath/breath_search/breath_advanced/hold/grow/source_read/
+  source_attach/source_detach/source_restore/trace/anchor/release/pulse/plan/letter_write/
+  letter_lock_update/letter_read/dream/I；每个入口
   ≤ 10 行，只负责转发。breath 拆成 breath()(0 参数)+breath_search(3 参数)+
   breath_advanced(9 参数) 三级，是因为 claude.ai 按需加载工具时会跳过参数
   复杂的工具，全塞一个 breath() 会导致它常年加载不上（见 issue #17）。
@@ -23,7 +24,7 @@ web._shared，然后以 @mcp.tool() 注册薄封装（真正的实现在 src/too
 - 不写 HTTP 路由处理（全在 web/* 下）；不写 LLM prompt（dehydrator 负责）
 - 不直接读写桶文件（bucket_manager 负责）
 
-对外暴露：mcp 单实例 + 15 个 @mcp.tool() 函数；HTTP 路由在 src/web/*
+对外暴露：mcp 单实例 + 19 个 @mcp.tool() 函数；HTTP 路由在 src/web/*
 ========================================
 """
 
@@ -64,6 +65,7 @@ from tools import breath as _t_breath
 from tools import hold as _t_hold
 from tools import grow as _t_grow
 from tools import source_read as _t_source_read
+from tools import source_bindings as _t_source_bindings
 from tools import trace as _t_trace
 from tools import anchor as _t_anchor
 from tools import plan as _t_plan
@@ -319,7 +321,7 @@ _gh_auto_interval: int = int(_gh_cfg.get("auto_interval_minutes") or 0)
 # host="0.0.0.0" so Docker container's HTTP endpoint is externally reachable
 # stdio mode ignores host (no network)
 #
-# iter 2.2 后对外只有单连接器 /mcp。当前 16 个工具全部直接注册到
+# iter 2.2 后对外只有单连接器 /mcp。当前 19 个工具全部直接注册到
 # 这一实例，不再依赖 FastMCP 私有注册表的启动期合并，导入式 ASGI 启动也能
 # 稳定暴露完整工具清单。
 #
@@ -468,7 +470,7 @@ _wsh.init_runtime(
 
 # =============================================================
 # 结构化操作日志 helpers（任务A，2026-05-03）
-# 给 15 个 MCP 工具入口统一打 entry/ok/err 三段日志，便于排查
+# 给 19 个 MCP 工具入口统一打 entry/ok/err 三段日志，便于排查
 # 客户端报 invalid_arguments / 静默错误等问题。
 # 输出格式：op=<name> phase=entry|ok|err key=value...
 # 所有可能含 PII 的字段（content / 信件正文等）只记 length，不记内容。
@@ -809,8 +811,10 @@ async def source_read(
     scope: str = "event",
     cursor: int = 0,
     max_tokens: int = 6000,
+    source_slots: Optional[list[int]] = None,
+    all_sources: bool = False,
 ) -> str:
-    """显式读取一个记忆桶对应的原文证据。必须同时给出精确 bucket_id 与该桶的显式 title；不做语义搜索、不扩散到相关桶、不调用模型。scope=event 只读该事件声明的行范围，scope=full_source 读取整份共享原文。内容过长时返回 next_cursor，继续以同一桶和标题分页读取。"""
+    """显式读取一个记忆桶对应的原文证据。必须给出精确 bucket_id 与 title；多 Source 默认只回 slot/ranges/status 清单，显式 source_slots 或 all_sources 才读活动原文。分页时保持同一桶、标题、scope 与 Source 选择。"""
     return await _with_notice(
         _t_source_read.dispatch(
             bucket_id=bucket_id,
@@ -818,6 +822,8 @@ async def source_read(
             scope=scope,
             cursor=cursor,
             max_tokens=max_tokens,
+            source_slots=source_slots,
+            all_sources=all_sources,
         ),
         op="source_read",
         args={
@@ -827,6 +833,24 @@ async def source_read(
             "max_tokens": max_tokens,
         },
     )
+
+
+@mcp.tool()
+async def source_attach(bucket_id: str, expected_title: str, source_content: str, source_ranges: Optional[list[list[int]]] = None) -> str:
+    """给精确 bucket_id + title 的已有桶后补一份独立不可变 Source；只改证据绑定，不改正文、活跃度或生命周期。"""
+    return await _with_notice(_t_source_bindings.attach(bucket_id, expected_title, source_content, source_ranges), op="source_attach", args={"bucket_id": bucket_id})
+
+
+@mcp.tool()
+async def source_detach(bucket_id: str, expected_title: str, source_slot: int) -> str:
+    """断开一个稳定 Source slot，只停用本桶绑定，不删除共享 Source blob，也不改变桶生命周期。"""
+    return await _with_notice(_t_source_bindings.detach(bucket_id, expected_title, source_slot), op="source_detach", args={"bucket_id": bucket_id, "source_slot": source_slot})
+
+
+@mcp.tool()
+async def source_restore(bucket_id: str, expected_title: str, source_slot: int) -> str:
+    """恢复一个 detached Source slot 的原绑定；只恢复证据引用，不恢复 archived 桶。桶生命周期恢复请用 trace(..., restore=True)。"""
+    return await _with_notice(_t_source_bindings.restore(bucket_id, expected_title, source_slot), op="source_restore", args={"bucket_id": bucket_id, "source_slot": source_slot})
 
 
 @mcp.tool()
@@ -1134,6 +1158,9 @@ for _strict_tool_name in (
     "hold",
     "grow",
     "source_read",
+    "source_attach",
+    "source_detach",
+    "source_restore",
     "dream",
     "anchor",
     "release",
@@ -1251,7 +1278,7 @@ if __name__ == "__main__":
             static_token_validator=_mcp_static_token_validator,
         )
         if transport == "streamable-http":
-            logger.info("MCP 单连接器 /mcp：16 个工具统一对外暴露")
+            logger.info("MCP 单连接器 /mcp：19 个工具统一对外暴露")
         logger.info("CORS middleware enabled for remote transport / 已启用 CORS 中间件")
         logger.info(
             "MCP request body limit: %s",
@@ -1290,7 +1317,7 @@ if __name__ == "__main__":
             logger.warning(
                 "=" * 60 + "\n"
                 "⚠️  MCP 认证已关闭 (mcp_require_auth: false)：/mcp 无需任何令牌即可直连，\n"
-                "    15 个记忆工具全部对外开放——任何能访问本端口的人都能读写你的全部记忆。\n"
+                "    19 个记忆工具全部对外开放——任何能访问本端口的人都能读写你的全部记忆。\n"
                 f"    本服务进程监听 {_BIND_HOST}，若端口暴露到局域网/公网，请务必用反代鉴权、防火墙\n"
                 "    或仅绑定 127.0.0.1 保护；免鉴权只建议用于已确认的本机回环连接。\n"
                 + "=" * 60
@@ -1337,7 +1364,7 @@ if __name__ == "__main__":
             proxy_headers=False,
         )
     elif transport == "stdio":
-        # stdio：16 个工具已直接注册在唯一 mcp 实例上；启动成功边界由
+        # stdio：19 个工具已直接注册在唯一 mcp 实例上；启动成功边界由
         # FastMCP public lifespan 触发。向量队列必须与 HTTP 一样纳入生命周期，
         # 否则正文落盘后会退回同步索引，让慢 provider 拖住工具回包。
         _stdio_runtime_lifecycle = RuntimeLifecycle(

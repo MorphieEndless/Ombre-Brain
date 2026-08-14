@@ -42,8 +42,8 @@
     },
     {
       "path": "src/bucket_manager.py",
-      "sha256": "e7fc29436235dc0fdb64bcb5c067d418c6be8fcff852e37ba795f95d62493b80",
-      "size": 183945
+      "sha256": "c8273d97f7a9f992758a29cfaa8502b11534945977c9e37b28f89d19c90eaad2",
+      "size": 185078
     },
     {
       "path": "src/decay_engine.py",
@@ -82,8 +82,8 @@
     },
     {
       "path": "src/migrate_engine.py",
-      "sha256": "3ee068333e2b9c73c299701f6f3e1d38cbdb94fc51b73a8cf5060aff04fbfcb0",
-      "size": 69229
+      "sha256": "546601a9ad07d425876eee945c5f014016f43e625f0e21520e48848d9528cc1e",
+      "size": 69136
     },
     {
       "path": "src/migration_engine.py",
@@ -637,8 +637,8 @@
     },
     {
       "path": "src/ombrebrain/protocol/public_tools.py",
-      "sha256": "05947bd6060a7cc8df2eba47ce39723721687fb723e6c675e19258b411e43064",
-      "size": 8798
+      "sha256": "ee41ef1a69898a772448d7bef6184970ab27fc07bbed65c34242cddf744a25ab",
+      "size": 9098
     },
     {
       "path": "src/ombrebrain/protocol/schemas.py",
@@ -727,8 +727,8 @@
     },
     {
       "path": "src/ombrebrain/storage/source_store.py",
-      "sha256": "4f8dd55deed562038ea5a4bb691da35838cd0a3a7e6d1a1bde64dcea4bfe7550",
-      "size": 9459
+      "sha256": "af47d07a691a3a020d316f2ffb7431c0222a85d05b4bd9384599b8e4ba3be1ee",
+      "size": 13418
     },
     {
       "path": "src/ombrebrain/storage/vault_health.py",
@@ -752,8 +752,8 @@
     },
     {
       "path": "src/server.py",
-      "sha256": "9c8ad1740d5f9a9181fe137d332fed023f2f1507733ca4ea35a0f48a6b92c57f",
-      "size": 65014
+      "sha256": "f5dd0d1c9126bb0203889cfb0e4d47e44faef29cbe176d658ce0bac60cc7cd9d",
+      "size": 66569
     },
     {
       "path": "src/server_app.py",
@@ -896,14 +896,24 @@
       "size": 23393
     },
     {
+      "path": "src/tools/source_bindings/__init__.py",
+      "sha256": "ac2837d47eccfcc92ad3110df1958798e20d3102b38f260f072da6c7d6ca97bf",
+      "size": 144
+    },
+    {
+      "path": "src/tools/source_bindings/core.py",
+      "sha256": "c7be3c7469eb5509734f4d0bbb026ad722477d74863b33caa9a92b940792e647",
+      "size": 7495
+    },
+    {
       "path": "src/tools/source_read/__init__.py",
       "sha256": "89f4aa4391e789725b5867d66b6ca61c683de0e090b7a9d7228e1580cd66fbc9",
       "size": 86
     },
     {
       "path": "src/tools/source_read/core.py",
-      "sha256": "504b2f79f1590eb617f860d32940a575376e2f53bf217dbda7e6d4e85b07969f",
-      "size": 6739
+      "sha256": "61fe22b37ddf15d6096d02165aa32b81a46100f982a602b911bd64ad2ba522a8",
+      "size": 8363
     },
     {
       "path": "src/tools/trace/__init__.py",

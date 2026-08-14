@@ -1538,7 +1538,10 @@ class BucketManager:
                     str(writer_name)
                 ).strip()[:120]
         if source_refs:
-            metadata["source_refs"] = source_refs
+            from ombrebrain.storage.source_store import source_links_from_metadata, active_source_refs_from_links
+
+            metadata["source_links"] = source_links_from_metadata({"source_refs": source_refs})
+            metadata["source_refs"] = active_source_refs_from_links(metadata["source_links"])
         if imported:
             metadata["imported"] = True
         if test_data:
@@ -2225,6 +2228,26 @@ class BucketManager:
             )
         return committed
 
+    async def mutate_source_links(self, bucket_id: str, mutation: Any) -> Any:
+        """Atomically change evidence bindings only, including archived buckets.
+
+        The callback receives the loaded frontmatter post and returns
+        ``(changed, result)``.  This deliberately bypasses normal update()
+        lifecycle/recency behaviour while retaining the per-bucket write turn.
+        """
+        async with self._bucket_turn(bucket_id):
+            file_path = self._find_bucket_file(bucket_id)
+            if not file_path:
+                return None
+            try:
+                post = frontmatter.load(file_path)
+            except Exception:
+                return None
+            changed, result = mutation(post)
+            if changed:
+                _atomic_write_text(file_path, frontmatter.dumps(post))
+            return result
+
     async def _update_locked(
         self,
         bucket_id: str,
@@ -2428,12 +2451,11 @@ class BucketManager:
         if "title" in kwargs and kwargs["title"]:
             post["title"] = kwargs["title"]
         if "source_refs_append" in kwargs and kwargs["source_refs_append"]:
-            from ombrebrain.storage.source_store import normalize_source_refs
+            from ombrebrain.storage.source_store import append_source_links, active_source_refs_from_links
 
-            existing_refs = post.get("source_refs") or []
-            post["source_refs"] = normalize_source_refs(
-                list(existing_refs) + list(kwargs["source_refs_append"])
-            )
+            links = append_source_links(post.metadata, kwargs["source_refs_append"])
+            post["source_links"] = links
+            post["source_refs"] = active_source_refs_from_links(links)
         if "resolved" in kwargs:
             post["resolved"] = kwargs["resolved"]
         if "pinned" in kwargs:

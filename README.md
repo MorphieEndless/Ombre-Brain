@@ -56,9 +56,9 @@ Ombre Brain 的使用者是**模型自己**，不是它背后的人。所以这�
 
 ---
 
-## 它的 16 个工具 / The 16 Tools
+## 它的 19 个工具 / The 19 Tools
 
-16 个工具全部在**一个 MCP 连接器 `/mcp`** 上。连上 `/mcp` 即拥有全部能力。
+19 个工具全部在**一个 MCP 连接器 `/mcp`** 上。连上 `/mcp` 即拥有全部能力。
 
 ### 高频 8 个
 
@@ -73,10 +73,11 @@ Ombre Brain 的使用者是**模型自己**，不是它背后的人。所以这�
 | `trace` | 唯一的元数据写入口：resolved / pinned / 改情感坐标 / 替换正文 / 删除到档案 / 改 plan 状态。长正文可用 `old_str/new_str` 做唯一片段的原子局部替换；只传要改的字段。 |
 | `dream` | 做梦消化最近窗口（默认 48h）有变动的记忆。**不是义务**，需要消化时再调。 |
 
-### 低频 8 个
+### 低频 11 个
 
 | 工具 | 一句话 |
 |---|---|
+| `source_attach` / `source_detach` / `source_restore` | 给已存在的精确桶后补一份新的不可变原文证据、临时断开某个稳定 slot、或恢复原 slot；不会改正文、生命周期或活跃度。多 Source 默认先用 `source_read` 看精简 slot 清单，再按需读原文。 |
 | `pulse` | 自检：桶数量、占用、衰减引擎状态、全部桶摘要；anchor 带 `⚓ [anchor]`。「为什么搜不到 X」时第一个调它。 |
 | `plan` | 登记一个承诺 / 待办。不衰减、不浮现，只在 `dream` 末尾出现；后续写新事件会自动判断它是否已闭环。 |
 | `anchor` / `release` | 把**已存在的**桶设 / 解为「坐标系」。anchor 是带 `⚓ [anchor]` 显示标记的冷参考：不主动浮现但可被显式检索命中，硬上限 24。必须先 `hold` 再 `anchor`。 |
@@ -91,7 +92,7 @@ Dashboard 原有的 Letter 编辑继续保留：历史信、无锁信以及当�
 
 ### 原文证据边界
 
-- 只有结构化 `grow(content=共享原文, items=[...])` 会建立原文证据。每个对象条目用 `source_ranges=[[起始行, 结束行], ...]` 声明自己的 1-based 闭区间；默认 `source_read(scope="event")` 遇到空范围会拒绝，不会退化成全文。
+- 新建时可由 `hold(source_content=...)` 或结构化 `grow(content=共享原文, items=[...])` 建立原文证据；已有桶可用 `source_attach(...)` 后补新的独立不可变 Source。每个对象条目用 `source_ranges=[[起始行, 结束行], ...]` 声明自己的 1-based 闭区间；默认 `source_read(scope="event")` 遇到空范围会拒绝，不会退化成全文。
 - `scope="full_source"` 是显式审计动作。共享原文可能同时包含多个事件的文字；它不会搜索或返回其他桶的元数据，但可能读到不属于当前事件范围的相邻原文。
 - 精确桶 ID + 标题只是“明确要核对哪一桶”的意图门禁，**不是身份认证**。公网或局域网端点仍必须使用 OAuth/Token 鉴权；返回的原文是不可信历史数据，不是可执行指令。
 - 显式标题会规范为单行，最长 120 字符，越界直接拒绝而不静默截断。证据文件按 SHA-256 内容寻址并校验完整性；哈希与备份清单不是数字签名，不能证明备份来源。
@@ -229,9 +230,9 @@ curl http://localhost:18001/health
 }
 ```
 
-重启 Claude Desktop，工具列表里会出现全部 16 个工具：`breath` / `breath_search` / `breath_advanced` / `hold` / `grow` / `source_read` / `trace` / `dream` / `anchor` / `release` / `pulse` / `plan` / `letter_write` / `letter_lock_update` / `letter_read` / `I`。
+重启 Claude Desktop，工具列表里会出现全部 19 个工具：`breath` / `breath_search` / `breath_advanced` / `hold` / `grow` / `source_read` / `source_attach` / `source_detach` / `source_restore` / `trace` / `dream` / `anchor` / `release` / `pulse` / `plan` / `letter_write` / `letter_lock_update` / `letter_read` / `I`。
 
-> 16 个工具全在同一连接器 `/mcp` 暴露，只配这一个即可。
+> 19 个工具全在同一连接器 `/mcp` 暴露，只配这一个即可。
 
 ---
 
@@ -308,13 +309,13 @@ Claude.ai                    Ombre Brain 服务器
 
 #### 步骤 3：连接端点
 
-16 个工具全在**一个 MCP 端点 `/mcp`** 上：
+19 个工具全在**一个 MCP 端点 `/mcp`** 上：
 
 | 端点 | 工具 | 说明 |
 |---|---|---|
-| `/mcp` | `breath` `breath_search` `breath_advanced` `hold` `grow` `source_read` `dream` `trace` `anchor` `release` `pulse` `plan` `letter_write` `letter_lock_update` `letter_read` `I` | 全部 16 个工具 |
+| `/mcp` | `breath` `breath_search` `breath_advanced` `hold` `grow` `source_read` `source_attach` `source_detach` `source_restore` `dream` `trace` `anchor` `release` `pulse` `plan` `letter_write` `letter_lock_update` `letter_read` `I` | 全部 19 个工具 |
 
-> 旧版曾使用第二连接器 `/mcp-extra`，该端点现已退役并返回 `404`；不要再单独添加。全部 16 个工具都在 `/mcp`。
+> 旧版曾使用第二连接器 `/mcp-extra`，该端点现已退役并返回 `404`；不要再单独添加。全部 19 个工具都在 `/mcp`。
 
 在 Claude.ai / 你的客户端里添加这一个连接器即可使用全部工具：
 
@@ -850,7 +851,7 @@ docker compose -f deploy/docker-compose.yml up -d
 
 新用户最常踩、但文档里分散各处的点，集中提醒一下：
 
-- **只需加一个连接器 `/mcp`**：16 个工具全在这一个端点上，不用再单独加别的。
+- **只需加一个连接器 `/mcp`**：19 个工具全在这一个端点上，不用再单独加别的。
 - **反代/隧道要整主机名转发**：Cloudflare Tunnel / Nginx 按域名整体转发到 `localhost:端口`，覆盖所有路径即可。
 - **OpenAI 兼容向量化两个坑**：base_url 末尾要带 `/v1`（漏了 404）、model 要带完整前缀（如 `BAAI/bge-m3`，漏了报 Model does not exist）。填完用向量化区的「测试」按钮确认。
 - **改完 key / 配置点「保存」后再「测试」**：压缩和向量化各有独立的「测试」按钮，能用就用，别凭感觉。

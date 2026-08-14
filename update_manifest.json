@@ -32,7 +32,7 @@
     },
     {
       "path": "src/VERSION",
-      "sha256": "06930571e9c0be0c681d24b6a72f1ee0d2a6ebce662e58a2a3499553ec92010e",
+      "sha256": "ecb75184b870a3f7041901f9cc6bc79f3ae31eeb92658a720434da264f15cb0f",
       "size": 7
     },
     {
@@ -1032,5 +1032,5 @@
     }
   ],
   "rollout_strategy": "single-node",
-  "version": "2.17.5"
+  "version": "2.17.6"
 }

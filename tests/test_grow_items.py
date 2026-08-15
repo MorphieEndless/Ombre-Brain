@@ -15,6 +15,7 @@ import pytest
 import tools._runtime as rt
 from tools.grow import dispatch
 from tools.grow.core import grow_core, grow_items
+from tools.grow.shortpath import grow_shortpath
 from tools.trace.core import trace_core
 from tools.source_read import dispatch as source_read
 from errors import PublicToolError
@@ -222,14 +223,17 @@ async def test_shortpath_reason_is_stored_on_first_create_and_preserved_on_merge
     dehydrator = ChangingWhyDehydrator()
     rt.dehydrator = dehydrator
 
-    first = await dispatch(content=content)
+    # This is a merge-policy unit test, so call the short path directly.
+    # Public dispatch deliberately treats an immediate identical call as a
+    # transport retry and reuses the first result.
+    first = await grow_shortpath(content)
     first_bucket = (await bucket_mgr.list_all(include_archive=False))[0]
     assert "新建" in first
     assert first_bucket["metadata"]["why_remembered"] == (
         "首次新建时的自动理由。"
     )
 
-    second = await dispatch(content=content)
+    second = await grow_shortpath(content)
     buckets = await bucket_mgr.list_all(include_archive=False)
     assert "合并" in second
     assert len(buckets) == 1

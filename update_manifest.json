@@ -32,8 +32,8 @@
     },
     {
       "path": "src/VERSION",
-      "sha256": "d19ebea47621c7f2b10e9d52ac2d1d253ffd453b2638e7f85068c3cdf51802b4",
-      "size": 7
+      "sha256": "519d21f0cb338ed695072e3417025aa4c15db6eadf1c9c40c4830341b27cabdf",
+      "size": 8
     },
     {
       "path": "src/bm25_index.py",
@@ -1072,5 +1072,5 @@
     }
   ],
   "rollout_strategy": "single-node",
-  "version": "2.18.0"
+  "version": "2.17.10"
 }

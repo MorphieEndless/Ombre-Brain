@@ -35,7 +35,7 @@ import logging
 import asyncio
 import time
 from contextlib import asynccontextmanager
-from typing import Optional, Awaitable
+from typing import Optional, Awaitable, Literal
 import httpx
 
 
@@ -856,6 +856,17 @@ async def source_restore(bucket_id: str, expected_title: str, source_slot: int) 
     return await _with_notice(_t_source_bindings.restore(bucket_id, expected_title, source_slot), op="source_restore", args={"bucket_id": bucket_id, "source_slot": source_slot})
 
 
+RelationType = Literal[
+    "caused_by",
+    "causes",
+    "continuation_of",
+    "continues",
+    "related_to",
+    "same_event",
+    "custom",
+]
+
+
 @mcp.tool()
 async def relation_read(
     bucket_id: str,
@@ -863,7 +874,7 @@ async def relation_read(
     include_titles: bool = False,
     include_detached: bool = False,
 ) -> str:
-    """按 bucket_id 读取极简 Relation ledger；标题校验、目标标题与 detached 历史均按需展开。"""
+    """读取一个普通记忆桶的一跳 Relation ledger。bucket_id 是唯一必填定位；expected_title 只是可选标题 guard。默认只返回 active 关系；include_detached=True 才展开停用历史。include_titles=True 时才动态读取目标桶当前标题，始终不读取目标正文。返回的 relation_slot 是本桶稳定的管理 handle，供 relation_detach/relation_restore 使用。"""
     return await _with_notice(
         _t_relation_read.dispatch(bucket_id, expected_title, include_titles, include_detached),
         op="relation_read",
@@ -875,12 +886,12 @@ async def relation_read(
 async def relation_attach(
     bucket_id: str,
     target_bucket_id: str,
-    relation_type: str,
+    relation_type: RelationType,
     expected_title: str = "",
     label: str = "",
     reverse_label: str = "",
 ) -> str:
-    """按两个 bucket_id 建立天然双向 Relation；固定六型自动反向，custom 才使用 label/reverse_label。"""
+    """在两个普通记忆桶之间建立一跳、天然双向的 Relation；bucket_id/target_bucket_id 直接按 ID 定位，expected_title 只是可选 guard。relation_type 始终从 bucket_id -> target_bucket_id 的视角选择：caused_by=目标是当前桶的原因；causes=目标是当前桶的结果；continuation_of=目标是当前桶的前段；continues=目标是当前桶的后续；related_to=相关；same_event=同一事件；custom=自定义。固定六型会自动在目标端生成反向语义且不能自定义 label；custom 必须提供 label，reverse_label 可选，留空时反向端复用 label。"""
     return await _with_notice(
         _t_relation_bindings.attach(
             bucket_id,
@@ -897,7 +908,7 @@ async def relation_attach(
 
 @mcp.tool()
 async def relation_detach(bucket_id: str, relation_slot: int, expected_title: str = "") -> str:
-    """停用一个稳定 Relation slot；新双向 Relation 会同步停用两端镜像。"""
+    """按本桶 relation_slot 原位停用 Relation，不删除关系历史；expected_title 只是可选 guard。带 relation_id 的新式双向 Relation 会同步停用另一端镜像，默认 relation_read 与自动 hint 隐藏 detached；旧版无 relation_id 的单向关系只修改本端。"""
     return await _with_notice(
         _t_relation_bindings.detach(bucket_id, relation_slot, expected_title),
         op="relation_detach",
@@ -907,7 +918,7 @@ async def relation_detach(bucket_id: str, relation_slot: int, expected_title: st
 
 @mcp.tool()
 async def relation_restore(bucket_id: str, relation_slot: int, expected_title: str = "") -> str:
-    """恢复一个 detached Relation slot；新双向 Relation 会同步恢复两端镜像。"""
+    """按本桶 relation_slot 恢复一个 detached Relation；expected_title 只是可选 guard。带 relation_id 的新式双向 Relation 会同步恢复另一端镜像，旧版无 relation_id 的单向关系只恢复本端；本工具只恢复关系状态，不恢复 archived 记忆桶的生命周期。"""
     return await _with_notice(
         _t_relation_bindings.restore(bucket_id, relation_slot, expected_title),
         op="relation_restore",

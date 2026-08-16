@@ -380,6 +380,34 @@ def test_manifest_exposes_exactly_the_documented_23_tools(mcp_client):
     # Runtime compatibility with the old 9-argument schema is tested separately.
     assert tools_by_name["breath"]["inputSchema"].get("properties") == {}
 
+    relation_types = [
+        "caused_by",
+        "causes",
+        "continuation_of",
+        "continues",
+        "related_to",
+        "same_event",
+        "custom",
+    ]
+    relation_attach = tools_by_name["relation_attach"]
+    assert relation_attach["inputSchema"]["properties"]["relation_type"]["enum"] == relation_types
+    assert "bucket_id -> target_bucket_id" in relation_attach["description"]
+    assert all(name in relation_attach["description"] for name in relation_types)
+    assert "reverse_label" in relation_attach["description"]
+
+    relation_read = tools_by_name["relation_read"]
+    assert "include_detached=True" in relation_read["description"]
+    assert "include_titles=True" in relation_read["description"]
+    assert "不读取目标正文" in relation_read["description"]
+
+    relation_detach = tools_by_name["relation_detach"]
+    assert "不删除关系历史" in relation_detach["description"]
+    assert "relation_id" in relation_detach["description"]
+
+    relation_restore = tools_by_name["relation_restore"]
+    assert "relation_id" in relation_restore["description"]
+    assert "archived" in relation_restore["description"]
+
 
 @pytest.mark.parametrize(
     ("tool", "arguments", "field"),

@@ -6,6 +6,9 @@
 
 - 修复 `grow` 在脱水拆分耗时超过 MCP/客户端等待时间时出现“前端报失败、服务端仍已写入”，随后重试又生成重复记忆的问题。首个任务不再随调用方断开而取消；同一请求在短时间内重试时会复用进行中的任务或已完成结果，不再重复写入。真实失败不会缓存，之后仍可正常重试。
 - Dashboard 普通桶详情合并「归档」与「删除到档案」的人类入口：现在只显示「归档」，要求填写理由并进入 AI 审批；批准后沿用删除到档案语义写入 `deleted_at`。AI/系统内部的普通 `archive()` 与自动衰减行为保持不变。
+- Relation 改为 ID-first 的天然双向关系：新建关系在两个普通桶各写一个共享 `relation_id` 的镜像视图，固定六型自动使用 `caused_by↔causes`、`continuation_of↔continues` 及两个对称类型的反向语义；新增 `custom` 类型，仅 custom 使用 `label/reverse_label`，未给 reverse 时默认沿用正向 label。
+- `expected_title` 从四个 Relation 工具的必填门槛降为可选校验；`relation_read` 默认只返回 active 的极简 ID ledger，可按需展开目标当前标题或 detached 历史。breath/dream/catalog 的 Relation hint 仍最多展示两条 active 关系，但现在会显式提示剩余条数。
+- 新双向 Relation 的 detach/restore 会在有序双桶锁内同步两端镜像；旧 V1 无 `relation_id` 的单向关系不批量迁移，继续保持可读、可原位 detach/restore 的兼容行为。
 
 ## 2.17.9
 

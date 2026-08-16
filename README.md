@@ -78,7 +78,7 @@ Ombre Brain 的使用者是**模型自己**，不是它背后的人。所以这�
 | 工具 | 一句话 |
 |---|---|
 | `source_attach` / `source_detach` / `source_restore` | 给已存在的精确桶后补一份新的不可变原文证据、临时断开某个稳定 slot、或恢复原 slot；不会改正文、生命周期或活跃度。多 Source 默认先用 `source_read` 看精简 slot 清单，再按需读原文。 |
-| `relation_attach` / `relation_read` / `relation_detach` / `relation_restore` | 仅普通记忆桶之间的一跳有向关系。ledger 只保存 target ID；读取只给稳定 slot 的极简清单，detach/restore 可逆且不影响检索、排序或活跃度。 |
+| `relation_attach` / `relation_read` / `relation_detach` / `relation_restore` | 仅普通记忆桶之间的一跳双向关系。只凭两个 bucket ID 即可建立；固定六型自动生成反向语义，`custom` 才使用 `label/reverse_label`。默认 hint/ledger 只给关系与 target ID，目标标题和 detached 历史按需展开；detach/restore 会同步两端且不影响检索、排序或活跃度。 |
 | `pulse` | 自检：桶数量、占用、衰减引擎状态、全部桶摘要；anchor 带 `⚓ [anchor]`。「为什么搜不到 X」时第一个调它。 |
 | `plan` | 登记一个承诺 / 待办。不衰减、不浮现，只在 `dream` 末尾出现；后续写新事件会自动判断它是否已闭环。 |
 | `anchor` / `release` | 把**已存在的**桶设 / 解为「坐标系」。anchor 是带 `⚓ [anchor]` 显示标记的冷参考：不主动浮现但可被显式检索命中，硬上限 24。必须先 `hold` 再 `anchor`。 |

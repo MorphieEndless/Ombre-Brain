@@ -857,27 +857,62 @@ async def source_restore(bucket_id: str, expected_title: str, source_slot: int) 
 
 
 @mcp.tool()
-async def relation_read(bucket_id: str, expected_title: str) -> str:
-    """读取本普通记忆桶的极简 Relation ledger；不读取目标标题或正文。"""
-    return await _with_notice(_t_relation_read.dispatch(bucket_id, expected_title), op="relation_read", args={"bucket_id": bucket_id})
+async def relation_read(
+    bucket_id: str,
+    expected_title: str = "",
+    include_titles: bool = False,
+    include_detached: bool = False,
+) -> str:
+    """按 bucket_id 读取极简 Relation ledger；标题校验、目标标题与 detached 历史均按需展开。"""
+    return await _with_notice(
+        _t_relation_read.dispatch(bucket_id, expected_title, include_titles, include_detached),
+        op="relation_read",
+        args={"bucket_id": bucket_id},
+    )
 
 
 @mcp.tool()
-async def relation_attach(bucket_id: str, expected_title: str, target_bucket_id: str, relation_type: str, label: str = "") -> str:
-    """为两个普通记忆桶建立一跳有向 Relation，不创建反向边。"""
-    return await _with_notice(_t_relation_bindings.attach(bucket_id, expected_title, target_bucket_id, relation_type, label), op="relation_attach", args={"bucket_id": bucket_id, "target_bucket_id": target_bucket_id})
+async def relation_attach(
+    bucket_id: str,
+    target_bucket_id: str,
+    relation_type: str,
+    expected_title: str = "",
+    label: str = "",
+    reverse_label: str = "",
+) -> str:
+    """按两个 bucket_id 建立天然双向 Relation；固定六型自动反向，custom 才使用 label/reverse_label。"""
+    return await _with_notice(
+        _t_relation_bindings.attach(
+            bucket_id,
+            target_bucket_id,
+            relation_type,
+            expected_title,
+            label,
+            reverse_label,
+        ),
+        op="relation_attach",
+        args={"bucket_id": bucket_id, "target_bucket_id": target_bucket_id},
+    )
 
 
 @mcp.tool()
-async def relation_detach(bucket_id: str, expected_title: str, relation_slot: int) -> str:
-    """原位停用一个稳定 Relation slot，不改记忆正文或活跃度。"""
-    return await _with_notice(_t_relation_bindings.detach(bucket_id, expected_title, relation_slot), op="relation_detach", args={"bucket_id": bucket_id, "relation_slot": relation_slot})
+async def relation_detach(bucket_id: str, relation_slot: int, expected_title: str = "") -> str:
+    """停用一个稳定 Relation slot；新双向 Relation 会同步停用两端镜像。"""
+    return await _with_notice(
+        _t_relation_bindings.detach(bucket_id, relation_slot, expected_title),
+        op="relation_detach",
+        args={"bucket_id": bucket_id, "relation_slot": relation_slot},
+    )
 
 
 @mcp.tool()
-async def relation_restore(bucket_id: str, expected_title: str, relation_slot: int) -> str:
-    """恢复一个 detached Relation slot，不恢复 archived 桶生命周期。"""
-    return await _with_notice(_t_relation_bindings.restore(bucket_id, expected_title, relation_slot), op="relation_restore", args={"bucket_id": bucket_id, "relation_slot": relation_slot})
+async def relation_restore(bucket_id: str, relation_slot: int, expected_title: str = "") -> str:
+    """恢复一个 detached Relation slot；新双向 Relation 会同步恢复两端镜像。"""
+    return await _with_notice(
+        _t_relation_bindings.restore(bucket_id, relation_slot, expected_title),
+        op="relation_restore",
+        args={"bucket_id": bucket_id, "relation_slot": relation_slot},
+    )
 
 
 @mcp.tool()

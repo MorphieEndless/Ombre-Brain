@@ -2249,7 +2249,7 @@ class BucketManager:
             return result
 
     async def mutate_relation_links(self, bucket_id: str, mutation: Any) -> Any:
-        """Atomically change Relation V1 ledger only; never touch derived state."""
+        """Atomically change one Relation ledger only; never touch derived state."""
         async with self._bucket_turn(bucket_id):
             file_path = self._find_bucket_file(bucket_id)
             if not file_path:
@@ -2262,6 +2262,61 @@ class BucketManager:
             if changed:
                 _atomic_write_text(file_path, frontmatter.dumps(post))
             return result
+
+    async def mutate_relation_pair(
+        self,
+        left_bucket_id: str,
+        right_bucket_id: str,
+        mutation: Any,
+    ) -> Any:
+        """Atomically change both mirrored Relation ledgers under ordered locks.
+
+        ``mutation(left_post, right_post)`` returns
+        ``(left_changed, right_changed, result)``.  Both bucket files are loaded
+        while holding the same two cross-process bucket turns.  If the second
+        write fails after the first was committed, the first file is restored
+        to its pre-mutation serialization before the error is re-raised.
+        """
+        left_bucket_id = str(left_bucket_id or "").strip()
+        right_bucket_id = str(right_bucket_id or "").strip()
+        if not left_bucket_id or not right_bucket_id or left_bucket_id == right_bucket_id:
+            return None
+
+        first_id, second_id = sorted((left_bucket_id, right_bucket_id))
+        async with self._bucket_turn(first_id):
+            async with self._bucket_turn(second_id):
+                left_path = self._find_bucket_file(left_bucket_id)
+                right_path = self._find_bucket_file(right_bucket_id)
+                if not left_path or not right_path:
+                    return None
+                try:
+                    left_post = frontmatter.load(left_path)
+                    right_post = frontmatter.load(right_path)
+                except Exception:
+                    return None
+
+                left_before = frontmatter.dumps(left_post)
+                right_before = frontmatter.dumps(right_post)
+                left_changed, right_changed, result = mutation(left_post, right_post)
+                if not left_changed and not right_changed:
+                    return result
+
+                left_written = False
+                right_written = False
+                try:
+                    if left_changed:
+                        _atomic_write_text(left_path, frontmatter.dumps(left_post))
+                        left_written = True
+                    if right_changed:
+                        _atomic_write_text(right_path, frontmatter.dumps(right_post))
+                        right_written = True
+                except Exception:
+                    if left_written:
+                        _atomic_write_text(left_path, left_before)
+                    if right_written:
+                        _atomic_write_text(right_path, right_before)
+                    raise
+                return result
 
     async def _update_locked(
         self,

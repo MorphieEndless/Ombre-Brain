@@ -316,6 +316,7 @@ feel 桶自身：
 - 正常路径：`dehydrator.digest()` 拆为 2~6 条 → 每条独立走 `_merge_or_create()`，单条失败 try/except 隔离，标 `⚠️条目名`。
 - `items=[...]` 模式表示调用方已经拆好最终正文。对象条目可显式给出 `title/content/tags/importance/domain/valence/arousal/why_remembered/source_ranges`，显式字段优先于自动打标。`why_remembered` 必须是不超过 500 字符的字符串，首次新建可直接保存。若同时传 `content`，它会作为整批共享的不可变原文证据保存一次；每个桶以 1-based 闭区间 `source_ranges` 指向自己的片段。
 - `content` 自动模式会为每条产生候选 `why_remembered`：长内容由 digest 逐条生成，短内容由仅该路径开启的 `analyze(include_why=True)` 生成。两者首次新建都会保存合法非空理由；后续 `grow` 命中同一具体事件并合并时，仅在旧桶该字段为空时原子补入。旧值永不被 grow 自动覆盖，空值或非法模型输出也不会阻断正文入库或清除旧值。
+- 公开 `grow` 入口以规范化参数计算不含明文的请求指纹，并提供进程内、单 event loop 的短时重试保护（当前为 30 分钟）：首次调用的后台任务使用 `asyncio.shield()` 与客户端等待生命周期解耦；相同请求仍在执行时立即返回“处理中”，完成后重试复用原结果。异常结果不进入缓存，可再次执行。该保护只用于消除 MCP/连接器超时造成的重复提交，不是跨进程持久任务队列；服务重启后或窗口过期后，相同内容仍按新请求处理。
 - 末尾异步触发 `_check_plan_resolution()`。
 
 返回示例：`3条|新2合1\n📝体检结果\n📌朋友聚餐\n📎近期焦虑情绪`。

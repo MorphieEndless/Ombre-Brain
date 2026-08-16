@@ -847,13 +847,18 @@
     },
     {
       "path": "src/tools/grow/__init__.py",
-      "sha256": "c0c8643baaec13229d0fdb63dd1cc09247009317fd5564a8b328fcb181de6fa2",
-      "size": 5422
+      "sha256": "e1fb2d1a4c06507e195e99a0732320a697efee6349557ed45764b6bec22ecf5b",
+      "size": 5910
     },
     {
       "path": "src/tools/grow/core.py",
       "sha256": "dfb3111bdfd155eed1d7e7255f2eefea9b502d391900ff36e0087080837c7e36",
       "size": 14531
+    },
+    {
+      "path": "src/tools/grow/retry_guard.py",
+      "sha256": "51c5e946aa83c3783259e1de33ba253ab9dc6eb847972f48e57af27dc3dd62ea",
+      "size": 4247
     },
     {
       "path": "src/tools/grow/shortpath.py",

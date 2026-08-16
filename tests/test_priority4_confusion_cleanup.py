@@ -331,7 +331,8 @@ def test_dashboard_single_bucket_delete_is_not_labeled_as_hard_delete():
     for rel in ("frontend/dashboard.html",):
         text = (ROOT / rel).read_text(encoding="utf-8")
 
-        assert "删除到档案" in text
+        assert "归档" in text
+        assert "bucketDelete(this.dataset.bucketId)" not in text
         assert "这将彻底删除此记忆桶" not in text
         assert "你真的要永久删除吗" not in text
         assert "彻底删除这封信" not in text

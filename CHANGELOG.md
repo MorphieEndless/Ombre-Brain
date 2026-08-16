@@ -2,6 +2,10 @@
 
 本项目版本号见根目录 `VERSION` 文件，Docker 镜像 tag 与之对应（`p0luz/ombre-brain:<VERSION>`）。
 
+### 未发布 / Unreleased
+
+- Dashboard 普通桶详情合并「归档」与「删除到档案」的人类入口：现在只显示「归档」，要求填写理由并进入 AI 审批；批准后沿用删除到档案语义写入 `deleted_at`。AI/系统内部的普通 `archive()` 与自动衰减行为保持不变。
+
 ## 2.17.9
 
 ### 修复 / Fixed
